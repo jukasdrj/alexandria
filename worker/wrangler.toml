@@ -1,6 +1,14 @@
 name = "alexandria"
 main = "index.js"
 compatibility_date = "2024-11-20"
+compatibility_flags = ["nodejs_compat"]
 
-# Route to your domain
-route = { pattern = "alexandria.ooheynerds.com", zone_name = "ooheynerds.com" }
+# Custom domain for Worker
+[[routes]]
+pattern = "alexandria.ooheynerds.com"
+custom_domain = true
+
+# Hyperdrive binding for PostgreSQL
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00ff424776f4415d95245c3c4c36e854"

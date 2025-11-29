@@ -1,14 +1,16 @@
-# Alexandria Project - Ready for Development! 🚀
+# Alexandria Project - Phase 2 COMPLETE! 🎉
 
-## ✅ What's Been Set Up
+## ✅ What's Live & Working
 
-Your `/Users/juju/dev_repos/alex` directory is now fully configured and ready for development with Claude Code or your own agents.
+Your Alexandria book API is now LIVE at https://alexandria.ooheynerds.com with full database connectivity!
 
-### Infrastructure (Live & Working)
+### Infrastructure (Production Ready)
 - ✅ Cloudflare Tunnel running on Unraid (4 connections active)
-- ✅ PostgreSQL with 54.8M book records
-- ✅ Worker deployed at https://alexandria.ooheynerds.com
-- ✅ DNS configured (alexandria-db.ooheynerds.com)
+- ✅ PostgreSQL with 54.8M book records (SSL enabled)
+- ✅ Worker deployed at https://alexandria.ooheynerds.com (custom domain)
+- ✅ Hyperdrive connection pooling configured
+- ✅ Cloudflare Access securing tunnel endpoint
+- ✅ DNS configured (worker + tunnel hostnames)
 - ✅ SSH passwordless access configured
 
 ### Documentation
@@ -101,10 +103,32 @@ Everything is documented, organized, and ready for:
 - ✅ Collaborative development
 
 ### Live Right Now
-Visit https://alexandria.ooheynerds.com to see your hello world page!
+**API is LIVE and serving requests from your home database!**
+
+Test it:
+```bash
+# Health check
+curl https://alexandria.ooheynerds.com/health
+
+# Harry Potter lookup
+curl "https://alexandria.ooheynerds.com/api/isbn?isbn=9780439064873"
+
+# Catcher in the Rye
+curl "https://alexandria.ooheynerds.com/api/isbn?isbn=9780316769174"
+```
+
+### Current API Endpoints
+- `/health` - Health check and connection status
+- `/api/isbn?isbn={ISBN}` - Look up books by ISBN-10 or ISBN-13
+- `/` - Homepage with API documentation
 
 ### Priority Development
-The next step is to add live database queries. See `TODO.md` Phase 2 for details.
+Phase 2 is COMPLETE! Next: Phase 3 features. See `TODO.md` for roadmap:
+- Title search functionality
+- Author search
+- Advanced filtering
+- Rate limiting
+- Search UI
 
 ---
 

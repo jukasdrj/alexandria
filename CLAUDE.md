@@ -6,13 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 1 complete (infrastructure). Phase 2 ready (database integration).
+**Current Status**: Phase 2 COMPLETE! Worker live with Hyperdrive + Tunnel database access.
 
 ## Architecture Flow
 
 ```
-Internet → Worker (alexandria.ooheynerds.com) → [Future: Hyperdrive]
-→ Tunnel (alexandria-db.ooheynerds.com) → Unraid (192.168.1.240) → PostgreSQL
+Internet → Worker (alexandria.ooheynerds.com) → Hyperdrive (connection pooling)
+→ Cloudflare Access (Service Token auth) → Tunnel (alexandria-db.ooheynerds.com)
+→ Unraid (192.168.1.240:5432, SSL enabled) → PostgreSQL (54M books)
 ```
 
 **IMPORTANT**: Tunnel is outbound-only from home network. No inbound firewall ports needed.
@@ -74,27 +75,49 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 4. Check logs: `npm run tail`
 5. Test live: https://alexandria.ooheynerds.com
 
-## Phase 2: Database Integration (NEXT)
+## Phase 2: Database Integration (COMPLETE ✅)
 
-### Option A: Direct Connection (Quick Start)
+### Hyperdrive Setup (Production)
+Hyperdrive provides connection pooling, query caching, and secure tunnel access.
+
+**Prerequisites**:
+1. PostgreSQL must have SSL enabled (self-signed cert is fine)
+2. Cloudflare Access Service Token created
+3. Cloudflare Access Application configured for tunnel hostname
+
+**Setup Steps**:
 ```bash
-cd worker && npm install postgres
-npx wrangler secret put DATABASE_PASSWORD  # Enter password from docs/CREDENTIALS.md
+# 1. Enable SSL on PostgreSQL (if not already enabled)
+ssh root@Tower.local "docker exec postgres bash -c 'cd /var/lib/postgresql/18/docker && openssl req -new -x509 -days 3650 -nodes -text -out server.crt -keyout server.key -subj \"/CN=postgres\" && chmod 600 server.key && chown postgres:postgres server.key server.crt'"
+ssh root@Tower.local "docker exec postgres bash -c 'echo \"ssl = on\" >> /var/lib/postgresql/18/docker/postgresql.conf'"
+ssh root@Tower.local "docker restart postgres"
+
+# 2. Create Hyperdrive config (requires Access Client ID/Secret from dashboard)
+npx wrangler hyperdrive create alexandria-db \
+  --host=alexandria-db.ooheynerds.com \
+  --user=openlibrary \
+  --password=<from CREDENTIALS.md> \
+  --database=openlibrary \
+  --access-client-id=<from Cloudflare Access> \
+  --access-client-secret=<from Cloudflare Access> \
+  --caching-disabled
 ```
 
-Add to `wrangler.toml`:
+**wrangler.toml configuration**:
 ```toml
-[vars]
-DATABASE_HOST = "alexandria-db.ooheynerds.com"
-DATABASE_PORT = "5432"
-DATABASE_NAME = "openlibrary"
-DATABASE_USER = "openlibrary"
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00ff424776f4415d95245c3c4c36e854"
 ```
 
-### Option B: Hyperdrive (Production)
-Better for scale - connection pooling + edge caching. See docs/ARCHITECTURE.md.
-
-**Recommendation**: Start with Option A, migrate to Hyperdrive later.
+**Worker code** (using Hyperdrive):
+```javascript
+const sql = postgres(env.HYPERDRIVE.connectionString, {
+  max: 5,
+  fetch_types: false,
+  prepare: false
+});
+```
 
 ## Sample Query (Test First!)
 

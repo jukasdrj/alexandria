@@ -8,10 +8,18 @@
     "dev": "wrangler dev",
     "tail": "wrangler tail"
   },
-  "keywords": ["cloudflare", "workers", "openlibrary", "database"],
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "openlibrary",
+    "database"
+  ],
   "author": "juju",
   "license": "MIT",
   "devDependencies": {
     "wrangler": "^4.51.0"
+  },
+  "dependencies": {
+    "postgres": "^3.4.7"
   }
 }
