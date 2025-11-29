@@ -1,8 +1,149 @@
 import postgres from 'postgres';
 
+// OpenAPI 3.0 Specification
+const openAPISpec = {
+  openapi: '3.0.0',
+  info: {
+    title: 'Alexandria Book API',
+    version: '1.0.0',
+    description: 'Search 54+ million books from OpenLibrary via ISBN, title, and author. Database hosted at home, accessible globally via Cloudflare edge network.',
+    contact: {
+      name: 'API Support',
+      url: 'https://github.com/jukasdrj/alexandria'
+    }
+  },
+  servers: [
+    {
+      url: 'https://alexandria.ooheynerds.com',
+      description: 'Production server'
+    }
+  ],
+  paths: {
+    '/health': {
+      get: {
+        summary: 'Health Check',
+        description: 'Returns the health status of the API and database connection',
+        tags: ['System'],
+        responses: {
+          '200': {
+            description: 'API is healthy',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string', example: 'ok' },
+                    database: { type: 'string', example: 'connected via tunnel' },
+                    tunnel: { type: 'string', example: 'alexandria-db.ooheynerds.com' },
+                    timestamp: { type: 'string', format: 'date-time' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/api/isbn': {
+      get: {
+        summary: 'Search by ISBN',
+        description: 'Look up book information by ISBN-10 or ISBN-13',
+        tags: ['Books'],
+        parameters: [
+          {
+            name: 'isbn',
+            in: 'query',
+            required: true,
+            description: 'ISBN-10 or ISBN-13 (hyphens optional)',
+            schema: {
+              type: 'string',
+              pattern: '^[0-9X]{10,13}$',
+              example: '9780439064873'
+            }
+          }
+        ],
+        responses: {
+          '200': {
+            description: 'Book(s) found',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    isbn: { type: 'string' },
+                    count: { type: 'integer' },
+                    results: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          title: { type: 'string', example: 'Harry Potter and the Chamber of Secrets' },
+                          author: { type: 'string', example: 'J. K. Rowling' },
+                          isbn: { type: 'string', example: '9780439064873' },
+                          publish_date: { type: 'string', example: '2000-09' },
+                          publishers: { type: 'array', items: { type: 'string' } },
+                          pages: { type: 'string', example: '341' },
+                          work_title: { type: 'string' },
+                          openlibrary_edition: { type: 'string', format: 'uri' },
+                          openlibrary_work: { type: 'string', format: 'uri' }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          '400': {
+            description: 'Invalid ISBN format',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'Invalid ISBN format' },
+                    message: { type: 'string' },
+                    provided: { type: 'string' }
+                  }
+                }
+              }
+            }
+          },
+          '404': {
+            description: 'ISBN not found',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'ISBN not found' },
+                    isbn: { type: 'string' },
+                    message: { type: 'string' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // OpenAPI spec endpoint
+    if (url.pathname === '/openapi.json') {
+      return new Response(JSON.stringify(openAPISpec, null, 2), {
+        headers: {
+          'content-type': 'application/json',
+          'access-control-allow-origin': '*',
+          'cache-control': 'public, max-age=3600'
+        }
+      });
+    }
 
     // Health check endpoint
     if (url.pathname === '/health') {
@@ -358,6 +499,48 @@ function getHomepage() {
       <p><strong>404 Not Found:</strong> ISBN not in database</p>
       <p><strong>500 Internal Server Error:</strong> Database query failed</p>
     </div>
+  </section>
+
+  <section>
+    <h2>Code Examples</h2>
+
+    <h3>cURL</h3>
+    <pre><code>curl "https://alexandria.ooheynerds.com/api/isbn?isbn=9780439064873"</code></pre>
+
+    <h3>JavaScript (fetch)</h3>
+    <pre><code>const response = await fetch(
+  'https://alexandria.ooheynerds.com/api/isbn?isbn=9780439064873'
+);
+const data = await response.json();
+console.log(data.results[0]);</code></pre>
+
+    <h3>Python (requests)</h3>
+    <pre><code>import requests
+
+response = requests.get(
+    'https://alexandria.ooheynerds.com/api/isbn',
+    params={'isbn': '9780439064873'}
+)
+book = response.json()['results'][0]
+print(f"{book['title']} by {book['author']}")</code></pre>
+
+    <h3>Node.js (axios)</h3>
+    <pre><code>const axios = require('axios');
+
+const { data } = await axios.get(
+  'https://alexandria.ooheynerds.com/api/isbn',
+  { params: { isbn: '9780439064873' } }
+);
+console.log(data.results[0]);</code></pre>
+  </section>
+
+  <section>
+    <h2>Interactive Documentation</h2>
+    <p>For full interactive API documentation with "Try it out" functionality:</p>
+    <a href="https://petstore.swagger.io/?url=https://alexandria.ooheynerds.com/openapi.json" class="example-link" target="_blank">
+      Open Swagger UI →
+    </a>
+    <p style="margin-top: 15px;"><strong>OpenAPI Spec:</strong> <a href="/openapi.json" style="color: #2563eb;">Download openapi.json</a></p>
   </section>
 
   <section>
