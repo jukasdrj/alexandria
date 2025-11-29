@@ -30,26 +30,47 @@ Current status and next steps for development.
 - ISBN lookup: `/api/isbn?isbn={ISBN}`
 - Homepage with docs: `/`
 
-## 🎯 Phase 3: Features & UI
+## 🔥 NEW: BooksTrack Integration (PRIORITY)
 
-- [ ] Build search interface
-  - [ ] ISBN search
-  - [ ] Title search
-  - [ ] Author search
-- [ ] Display book details
-  - [ ] Cover images (if available)
-  - [ ] Author information
-  - [ ] Edition details
-- [ ] Add pagination for results
-- [ ] Implement autocomplete
-- [ ] Add loading states
+**See**: `TODO-ALEXANDRIA-INTEGRATION.md` for full details.
+
+Alexandria will become the PRIMARY provider for BooksTrack's book data API, replacing expensive/rate-limited external APIs!
+
+### Immediate Tasks (This Week)
+- [ ] Add pg_trgm extension for text search
+- [ ] Create GIN index on works title: `CREATE INDEX idx_works_title_trgm ON works USING GIN ((data->>'title') gin_trgm_ops);`
+- [ ] Implement `/api/search?title={title}` endpoint
+- [ ] Implement `/api/search?author={author}` endpoint
+- [ ] Match response format to bendv3's NormalizedResponse structure
+- [ ] Test with Harry Potter ISBNs from bendv3
+
+### Integration Benefits
+- **Zero API costs** (vs Google Books, ISBNdb)
+- **No rate limits** (your infrastructure)
+- **Sub-100ms latency** (via Cloudflare edge)
+- **49.3M ISBNs** available locally
+
+---
+
+## 🎯 Phase 3: Title/Author Search (HIGH PRIORITY for bendv3)
+
+- [ ] Add pg_trgm PostgreSQL extension
+- [ ] Create text search indexes
+- [ ] Implement `/api/search` endpoint with:
+  - [x] ISBN search (DONE)
+  - [ ] Title search (via query param)
+  - [ ] Author search (via query param)
+  - [ ] Combined search
+- [ ] Add pagination support
+- [ ] Return bendv3-compatible response format
 
 ## 📊 Phase 4: API Endpoints
 
 Create RESTful API:
-- [ ] GET /api/search?isbn={isbn}
+- [x] GET /api/isbn?isbn={isbn} ✅ DONE
 - [ ] GET /api/search?title={title}
 - [ ] GET /api/search?author={author}
+- [ ] GET /api/search?q={query} (combined)
 - [ ] GET /api/book/{id}
 - [ ] GET /api/author/{id}
 - [ ] GET /api/stats (database statistics)
