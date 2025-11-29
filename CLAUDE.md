@@ -11,12 +11,18 @@ Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) th
 ## Architecture Flow
 
 ```
-Internet → Worker (alexandria.ooheynerds.com) → Hyperdrive (connection pooling)
-→ Cloudflare Access (Service Token auth) → Tunnel (alexandria-db.ooheynerds.com)
-→ Unraid (192.168.1.240:5432, SSL enabled) → PostgreSQL (54M books)
+Internet → Cloudflare Access (IP bypass: 47.187.18.143/32)
+→ Worker (alexandria.ooheynerds.com, Hono framework)
+→ Hyperdrive (connection pooling, ID: 00ff424776f4415d95245c3c4c36e854)
+→ Cloudflare Access (Service Token auth to tunnel)
+→ Tunnel (alexandria-db.ooheynerds.com)
+→ Unraid (192.168.1.240:5432, SSL enabled)
+→ PostgreSQL (54.8M editions)
 ```
 
-**IMPORTANT**: Tunnel is outbound-only from home network. No inbound firewall ports needed.
+**IMPORTANT**:
+- Tunnel is outbound-only from home network. No inbound firewall ports needed.
+- API secured with Cloudflare Access - only accessible from home IP (47.187.18.143/32)
 
 ## Database Schema (CRITICAL)
 
@@ -110,14 +116,35 @@ binding = "HYPERDRIVE"
 id = "00ff424776f4415d95245c3c4c36e854"
 ```
 
-**Worker code** (using Hyperdrive):
+**Worker code** (using Hono + Hyperdrive):
 ```javascript
-const sql = postgres(env.HYPERDRIVE.connectionString, {
-  max: 5,
-  fetch_types: false,
-  prepare: false
+import { Hono } from 'hono';
+import postgres from 'postgres';
+
+const app = new Hono();
+
+// Database middleware - creates request-scoped connection
+app.use('*', async (c, next) => {
+  const sql = postgres(c.env.HYPERDRIVE.connectionString, {
+    max: 1,  // Single connection per request, Hyperdrive handles pooling
+    fetch_types: false,
+    prepare: false
+  });
+  c.set('sql', sql);
+  await next();
 });
+
+// Route example
+app.get('/health', async (c) => {
+  const sql = c.get('sql');
+  await sql`SELECT 1`;
+  return c.json({ status: 'ok' });
+});
+
+export default app;
 ```
+
+**CRITICAL I/O Context Fix**: Connection must be request-scoped (`c.get('sql')`) not global. Global connections cause "Cannot perform I/O on behalf of a different request" errors.
 
 ## Sample Query (Test First!)
 
@@ -140,29 +167,49 @@ Run via: `./scripts/db-check.sh`
 
 ## Code Patterns
 
-### Adding API Endpoints
+### Adding API Endpoints (Hono Framework)
 ```javascript
 // In worker/index.js
-const url = new URL(request.url);
-if (url.pathname === '/api/search' && url.searchParams.has('isbn')) {
+app.get('/api/search', async (c) => {
   // IMPORTANT: Validate input first
-  const isbn = url.searchParams.get('isbn').replace(/[^0-9X]/gi, '').toUpperCase();
-  if (isbn.length !== 10 && isbn.length !== 13) {
-    return new Response(JSON.stringify({ error: 'Invalid ISBN' }), { status: 400 });
+  const isbn = c.req.query('isbn')?.replace(/[^0-9X]/gi, '').toUpperCase();
+
+  if (!isbn || (isbn.length !== 10 && isbn.length !== 13)) {
+    return c.json({ error: 'Invalid ISBN' }, 400);
   }
+
+  // Get request-scoped sql connection
+  const sql = c.get('sql');
 
   // YOU MUST wrap queries in try-catch
   try {
-    const result = await db.query(sql, [isbn]);
-    return new Response(JSON.stringify(result), {
-      headers: { 'content-type': 'application/json' }
-    });
+    const results = await sql`
+      SELECT
+        e.data->>'title' AS title,
+        a.data->>'name' AS author,
+        ei.isbn
+      FROM editions e
+      JOIN edition_isbns ei ON ei.edition_key = e.key
+      LEFT JOIN works w ON w.key = e.work_key
+      LEFT JOIN author_works aw ON aw.work_key = w.key
+      LEFT JOIN authors a ON aw.author_key = a.key
+      WHERE ei.isbn = ${isbn}
+      LIMIT 10
+    `;
+
+    return c.json({ results });
   } catch (error) {
     console.error('DB error:', error);
-    return new Response(JSON.stringify({ error: 'Query failed' }), { status: 500 });
+    return c.json({ error: 'Query failed' }, 500);
   }
-}
+});
 ```
+
+**Key Hono Patterns**:
+- Use `c.req.query('param')` for query parameters
+- Use `c.json(data, status)` for JSON responses
+- Use `c.get('sql')` for request-scoped database connection
+- Middleware applies to routes via `app.use()`
 
 ## Critical Constraints
 

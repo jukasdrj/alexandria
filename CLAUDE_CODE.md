@@ -6,16 +6,19 @@ This document helps Claude Code agents pick up development of the Alexandria pro
 
 **Alexandria** is a Cloudflare Workers application providing global access to a self-hosted OpenLibrary PostgreSQL database (54M+ books) through a secure Cloudflare Tunnel.
 
-**Current Status**: Infrastructure complete, hello world deployed, ready for database integration.
+**Current Status**: Phase 2 COMPLETE! ✅ Worker deployed with Hyperdrive + Tunnel database integration. API secured with Cloudflare Access.
 
 ## Key Information
 
 ### Already Working ✅
 - Cloudflare Tunnel running on Unraid server (Tower)
-- PostgreSQL database fully populated with OpenLibrary data
-- Worker deployed at https://alexandria.ooheynerds.com
+- PostgreSQL database fully populated with OpenLibrary data (54.8M editions, 49.3M ISBNs)
+- Worker deployed at https://alexandria.ooheynerds.com with Hono framework
+- Hyperdrive configured for connection pooling and performance
+- Cloudflare Access securing API (IP-restricted to home network)
 - SSH access configured (passwordless to root@Tower.local)
 - DNS configured (alexandria-db.ooheynerds.com)
+- Interactive dashboard with live stats and search functionality
 
 ### Project Structure
 ```
@@ -53,9 +56,17 @@ This document helps Claude Code agents pick up development of the Alexandria pro
 #### Local Development
 ```bash
 cd /Users/juju/dev_repos/alex/worker
-npm run dev     # Start local development server
+npm run dev     # Start local development server (requires Hyperdrive local connection string)
 npm run deploy  # Deploy to Cloudflare
+npm run tail    # View live Worker logs
 ```
+
+#### Current Tech Stack
+- **Framework**: Hono v4.10.7 (replaces itty-router for consistency)
+- **Database**: postgres v3.4.7 client
+- **Connection**: Hyperdrive (ID: 00ff424776f4415d95245c3c4c36e854)
+- **Security**: Cloudflare Access with IP bypass (47.187.18.143/32)
+- **Analytics**: Analytics Engine binding (ANALYTICS)
 
 #### SSH Access to Server
 ```bash
@@ -98,64 +109,44 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 ssh root@Tower.local "docker restart alexandria-tunnel"
 ```
 
-## Next Development Steps
+## Current API Endpoints
 
-### Priority 1: Add Database Queries to Worker
+### Available Routes
+- `GET /` - Interactive dashboard with live stats and search tester
+- `GET /health` - System health check with Hyperdrive latency
+- `GET /api/stats` - Database statistics (editions, ISBNs, works, authors)
+- `GET /api/search?isbn=<isbn>` - Search by ISBN-10 or ISBN-13
+- `GET /api/search?title=<title>` - Search by book title (partial match)
+- `GET /api/search?author=<author>` - Search by author name (partial match)
+- `GET /openapi.json` - OpenAPI 3.0 specification
 
-The worker currently serves static HTML. Next steps:
+### Example Queries
+```bash
+# Health check
+curl https://alexandria.ooheynerds.com/health
 
-1. **Add PostgreSQL driver**
-   ```bash
-   cd worker/
-   npm install postgres
-   ```
+# Search by ISBN
+curl "https://alexandria.ooheynerds.com/api/search?isbn=9780439064873"
 
-2. **Update wrangler.toml** with secrets:
-   ```toml
-   # Add to wrangler.toml
-   [vars]
-   DATABASE_HOST = "alexandria-db.ooheynerds.com"
-   DATABASE_NAME = "openlibrary"
-   DATABASE_USER = "openlibrary"
-   
-   # Set secret via CLI
-   npx wrangler secret put DATABASE_PASSWORD
-   # Enter: tommyboy
-   ```
+# Search by title
+curl "https://alexandria.ooheynerds.com/api/search?title=harry+potter&limit=5"
 
-3. **Update index.js** to handle queries:
-   - Add postgres import
-   - Create connection helper
-   - Add ISBN search endpoint
-   - Return JSON results
-
-### Example Query to Implement
-
-```javascript
-// Search by ISBN
-const result = await db.query(`
-  SELECT 
-    e.data->>'title' AS title,
-    a.data->>'name' AS author,
-    ei.isbn
-  FROM editions e
-  JOIN edition_isbns ei ON ei.edition_key = e.key
-  JOIN works w ON w.key = e.work_key
-  JOIN author_works aw ON aw.work_key = w.key
-  JOIN authors a ON aw.author_key = a.key
-  WHERE ei.isbn = $1
-  LIMIT 1
-`, [isbn]);
+# Get database stats
+curl https://alexandria.ooheynerds.com/api/stats
 ```
 
-### Priority 2: Consider Hyperdrive
+## Next Development Steps (Phase 3+)
 
-For production-ready performance:
-- Connection pooling
-- Edge caching
-- Better handling of concurrent requests
+### Potential Enhancements
+- **Rate Limiting**: Add Cloudflare WAF rules or Hono middleware (currently secured by IP restriction)
+- **Advanced Search**: Full-text search with pg_trgm indexes
+- **Caching Optimization**: Replace Hono cache with native Cloudflare Cache API
+- **Error Handling**: Sanitize error messages for production
+- **Input Validation**: Add length limits and sanitization for title/author queries
+- **Analytics Dashboard**: Use Analytics Engine binding to track usage
+- **Service Tokens**: Add Cloudflare Access service tokens for worker-to-worker communication
 
-See `docs/ARCHITECTURE.md` for Hyperdrive setup details.
+See `TODO.md` for detailed roadmap.
 
 ## Important Notes
 
@@ -213,11 +204,14 @@ ssh root@Tower.local "docker restart alexandria-tunnel postgres"
 
 ## Success Criteria
 
-You'll know it's working when:
-- ✅ https://alexandria.ooheynerds.com loads
-- ✅ Can search by ISBN and get results
-- ✅ Results are accurate from PostgreSQL
-- ✅ Response time is reasonable (<2 seconds)
+✅ **All Phase 2 objectives met:**
+- ✅ https://alexandria.ooheynerds.com loads with interactive dashboard
+- ✅ Can search by ISBN, title, and author with accurate results
+- ✅ Results come from PostgreSQL via Hyperdrive
+- ✅ Response time excellent (66-254ms for health checks, 238ms for searches)
+- ✅ API secured with Cloudflare Access (IP-restricted)
+- ✅ Worker uses Hono framework for consistency with other repos
+- ✅ Connection pooling via Hyperdrive working correctly
 
 ## Getting Help
 
