@@ -164,34 +164,49 @@ curl https://alexandria.ooheynerds.com/api/stats
 - **bendv3** (Cloudflare Workers): User data (D1/KV), AI/ML (Workers AI), orchestration
 - **books-v3** (iOS app): Local user data (SwiftData), UI/UX
 
-## Next Development Steps (Phase 4)
+## Next Development Steps
 
-### IMMEDIATE: Path 1 Implementation (2-3 hours)
-**Goal:** Make Alexandria the primary book data provider in bendv3
+### NEW: Enrichment Pipeline (5 Phases)
 
-**Follow:** `PATH_1_IMPLEMENTATION.md` for step-by-step guide
+Detailed implementation plans created November 29, 2025:
+- **`docs/ENRICHMENT_PHASES.md`** - High-level phase overview
+- **`docs/ENRICHMENT_DETAILED_PLAN.md`** - Full implementation guide with code patterns
 
-**Steps:**
-1. Create Alexandria API service in bendv3 (✅ normalizer already exists)
-2. Add to circuit breaker (15 min)
-3. Update provider enum (5 min)
-4. Make Alexandria primary provider (30 min)
-5. Test and verify (15 min)
+### Phase 1: Write Endpoints (2-3 hours) ⏳ NEXT
+Build write capability for Alexandria:
+- POST /api/enrich/edition
+- POST /api/enrich/work
+- POST /api/enrich/author
+- POST /api/enrich/queue
+- GET /api/enrich/status/:id
 
-**Expected Results:**
-- 80%+ ISBN lookups served by Alexandria
-- <30ms p95 latency for Alexandria hits
-- Fallback to Google Books for missing books
-- 90%+ cost savings ($5/month vs $50-200/month)
+### Phase 2: bendv3 Cache Simplification (1-2 hours)
+Remove redundant KV caching (PostgreSQL IS the cache):
+- Simplify alexandria-api.ts
+- Add fire-and-forget POST to Alexandria on Google Books fallback
 
-### Future Enhancements (Phase 5+)
-- **Write Endpoints**: POST /api/enrich/work, /api/enrich/edition
-- **Background Enrichment**: Process enrichment_queue
-- **ISBNdb Integration**: High-quality metadata enrichment
-- **User Corrections**: Moderation workflow for user-submitted fixes
-- **Materialized Views**: Analytics and reporting
-- **Advanced Search**: Multi-field fuzzy search
-- **Bulk Import**: Automated OpenLibrary dump updates
+### Phase 3: Enrichment Processor (3-4 hours)
+Background enrichment cron:
+- Process enrichment_queue every 15 minutes
+- ISBNdb client with rate limiting
+- Quality scoring algorithm
+
+### Phase 4: Warming Strategy Audit (2 hours)
+Remove redundant bendv3 warming:
+- Popular book warming → REMOVE (Alexandria has 54M books)
+- Analytics warming → REMOVE (redundant)
+- Keep user data warming only
+
+### Phase 5: OpenLibrary Update Strategy (4-6 hours)
+Keep data fresh:
+- Monthly full dump refresh
+- Daily incremental via Recent Changes API
+- sync_metadata table for tracking
+
+### Legacy: Path 1 Integration
+**File:** `PATH_1_IMPLEMENTATION.md`
+
+Original plan to make Alexandria primary provider in bendv3. Superseded by Phase 2 which includes this plus additional simplifications.
 
 See `TODO.md` for detailed roadmap.
 
