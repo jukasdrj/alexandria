@@ -1,0 +1,6 @@
+name = "alexandria"
+main = "index.js"
+compatibility_date = "2024-11-20"
+
+# Route to your domain
+route = { pattern = "alexandria.ooheynerds.com", zone_name = "ooheynerds.com" }

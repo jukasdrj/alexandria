@@ -1,0 +1,33 @@
+# Credentials & Secrets
+docs/CREDENTIALS.md
+.env
+.env.local
+.dev.vars
+*.pem
+*.json
+!package.json
+!wrangler.json
+
+# Cloudflare
+.wrangler/
+wrangler.toml.backup
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/

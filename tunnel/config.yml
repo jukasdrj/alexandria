@@ -1,0 +1,7 @@
+tunnel: 848928ab-4ab9-4733-93b0-3e7967c60acb
+credentials-file: /etc/cloudflared/848928ab-4ab9-4733-93b0-3e7967c60acb.json
+
+ingress:
+  - hostname: alexandria-db.ooheynerds.com
+    service: tcp://localhost:5432
+  - service: http_status:404

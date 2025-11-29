@@ -1,0 +1,17 @@
+{
+  "name": "alexandria-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker for Alexandria OpenLibrary database",
+  "main": "index.js",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "keywords": ["cloudflare", "workers", "openlibrary", "database"],
+  "author": "juju",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.51.0"
+  }
+}
