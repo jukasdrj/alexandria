@@ -6,15 +6,18 @@ This document helps Claude Code agents pick up development of the Alexandria pro
 
 **Alexandria** is a Cloudflare Workers application providing global access to a self-hosted OpenLibrary PostgreSQL database (54M+ books) through a secure Cloudflare Tunnel.
 
-**Current Status**: Phase 2 COMPLETE! ✅ Worker deployed with Hyperdrive + Tunnel database integration. API secured with Cloudflare Access.
+**Current Status**: Phase 3 COMPLETE! ✅ Database migration deployed with enrichment tables. Alexandria is a pure book metadata enrichment hub (NOT user data/social/AI). Ready for bendv3 integration (Path 1).
 
 ## Key Information
 
 ### Already Working ✅
 - Cloudflare Tunnel running on Unraid server (Tower)
 - PostgreSQL database fully populated with OpenLibrary data (54.8M editions, 49.3M ISBNs)
+- **NEW:** Enrichment tables deployed (enriched_works, enriched_editions, enriched_authors, enrichment_queue, enrichment_log)
+- **NEW:** 19 performance indexes created (GIN trigram for fuzzy search, B-tree for FKs)
+- **NEW:** Auto-update triggers on enriched tables
 - Worker deployed at https://alexandria.ooheynerds.com with Hono framework
-- Hyperdrive configured for connection pooling and performance
+- Hyperdrive configured for connection pooling and performance (ID: 00ff424776f4415d95245c3c4c36e854)
 - Cloudflare Access securing API (IP-restricted to home network)
 - SSH access configured (passwordless to root@Tower.local)
 - DNS configured (alexandria-db.ooheynerds.com)
@@ -23,11 +26,16 @@ This document helps Claude Code agents pick up development of the Alexandria pro
 ### Project Structure
 ```
 /Users/juju/dev_repos/alex/
-├── worker/          # Cloudflare Worker code
-├── tunnel/          # Tunnel configuration
-├── docs/            # Full documentation
-├── scripts/         # Deployment helpers
-└── TODO.md          # Development roadmap
+├── worker/                        # Cloudflare Worker code
+├── tunnel/                        # Tunnel configuration
+├── docs/                          # Full documentation
+│   └── SESSION_2025-11-29_database_migration.md  # Latest session
+├── migrations/                    # Database migrations
+│   └── 001_add_enrichment_tables.sql  # DEPLOYED ✅
+├── scripts/                       # Deployment helpers
+├── PATH_1_IMPLEMENTATION.md       # bendv3 integration guide (NEXT STEP)
+├── ALEXANDRIA_SCHEMA.md           # Complete database reference
+└── TODO.md                        # Development roadmap
 ```
 
 ## For Claude Code Agents
@@ -84,6 +92,9 @@ Port: 5432
 Database: openlibrary
 User: openlibrary
 Password: tommyboy
+
+# Check enrichment tables
+ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c '\dt enriched*'"
 ```
 
 ### Common Tasks
@@ -135,16 +146,52 @@ curl "https://alexandria.ooheynerds.com/api/search?title=harry+potter&limit=5"
 curl https://alexandria.ooheynerds.com/api/stats
 ```
 
-## Next Development Steps (Phase 3+)
+## Alexandria Architecture Principles
 
-### Potential Enhancements
-- **Rate Limiting**: Add Cloudflare WAF rules or Hono middleware (currently secured by IP restriction)
-- **Advanced Search**: Full-text search with pg_trgm indexes
-- **Caching Optimization**: Replace Hono cache with native Cloudflare Cache API
-- **Error Handling**: Sanitize error messages for production
-- **Input Validation**: Add length limits and sanitization for title/author queries
-- **Analytics Dashboard**: Use Analytics Engine binding to track usage
-- **Service Tokens**: Add Cloudflare Access service tokens for worker-to-worker communication
+### ✅ What Alexandria Stores (Book Metadata ONLY)
+- Book works, editions, authors
+- Cover images, descriptions, ISBNs
+- External IDs (Goodreads, Amazon, LibraryThing, Google Books, ISBNdb)
+- Multi-provider aggregation metadata
+- Quality scores and enrichment tracking
+
+### ❌ What Alexandria Does NOT Store
+- User data (reading lists, progress, ratings, collections)
+- Social features (friends, recommendations, activity feeds)
+- AI/ML computation (recommendation engine, analytics)
+
+**These live in:**
+- **bendv3** (Cloudflare Workers): User data (D1/KV), AI/ML (Workers AI), orchestration
+- **books-v3** (iOS app): Local user data (SwiftData), UI/UX
+
+## Next Development Steps (Phase 4)
+
+### IMMEDIATE: Path 1 Implementation (2-3 hours)
+**Goal:** Make Alexandria the primary book data provider in bendv3
+
+**Follow:** `PATH_1_IMPLEMENTATION.md` for step-by-step guide
+
+**Steps:**
+1. Create Alexandria API service in bendv3 (✅ normalizer already exists)
+2. Add to circuit breaker (15 min)
+3. Update provider enum (5 min)
+4. Make Alexandria primary provider (30 min)
+5. Test and verify (15 min)
+
+**Expected Results:**
+- 80%+ ISBN lookups served by Alexandria
+- <30ms p95 latency for Alexandria hits
+- Fallback to Google Books for missing books
+- 90%+ cost savings ($5/month vs $50-200/month)
+
+### Future Enhancements (Phase 5+)
+- **Write Endpoints**: POST /api/enrich/work, /api/enrich/edition
+- **Background Enrichment**: Process enrichment_queue
+- **ISBNdb Integration**: High-quality metadata enrichment
+- **User Corrections**: Moderation workflow for user-submitted fixes
+- **Materialized Views**: Analytics and reporting
+- **Advanced Search**: Multi-field fuzzy search
+- **Bulk Import**: Automated OpenLibrary dump updates
 
 See `TODO.md` for detailed roadmap.
 
@@ -204,7 +251,7 @@ ssh root@Tower.local "docker restart alexandria-tunnel postgres"
 
 ## Success Criteria
 
-✅ **All Phase 2 objectives met:**
+✅ **All Phase 3 objectives met:**
 - ✅ https://alexandria.ooheynerds.com loads with interactive dashboard
 - ✅ Can search by ISBN, title, and author with accurate results
 - ✅ Results come from PostgreSQL via Hyperdrive
@@ -212,6 +259,17 @@ ssh root@Tower.local "docker restart alexandria-tunnel postgres"
 - ✅ API secured with Cloudflare Access (IP-restricted)
 - ✅ Worker uses Hono framework for consistency with other repos
 - ✅ Connection pooling via Hyperdrive working correctly
+- ✅ Enrichment tables deployed with 6 tables, 19 indexes, 3 triggers
+- ✅ Database migration tested and verified
+- ✅ Architecture clarified (book metadata only, no user data)
+- ✅ Complete documentation created (schema, implementation guide, session notes)
+
+⏳ **Phase 4 objectives (NEXT):**
+- [ ] Alexandria integrated as primary provider in bendv3
+- [ ] 80%+ ISBN lookups served by Alexandria
+- [ ] <30ms p95 latency for Alexandria hits
+- [ ] Cost savings verified (90%+ reduction)
+- [ ] Fallback to Google Books working correctly
 
 ## Getting Help
 
