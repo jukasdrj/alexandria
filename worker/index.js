@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { cache } from 'hono/cache';
+import { handleEnrichEdition, handleEnrichWork, handleEnrichAuthor, handleQueueEnrichment, handleGetEnrichmentStatus } from './enrich-handlers.js';
 
 // =================================================================================
 // Configuration & Initialization
@@ -60,6 +61,172 @@ const openAPISpec = {
           '200': { description: 'Search results' },
           '400': { description: 'Invalid query' },
           '404': { description: 'No results found' }
+        }
+      }
+    },
+    '/api/enrich/edition': {
+      post: {
+        summary: 'Store or update edition metadata',
+        description: 'Enrich an edition with metadata from external providers (ISBNdb, Google Books, etc.)',
+        tags: ['Enrichment'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['isbn', 'primary_provider'],
+                properties: {
+                  isbn: { type: 'string', example: '9780439064873', description: 'ISBN-10 or ISBN-13' },
+                  title: { type: 'string', example: 'Harry Potter and the Sorcerer\'s Stone' },
+                  subtitle: { type: 'string' },
+                  publisher: { type: 'string', example: 'Scholastic' },
+                  publication_date: { type: 'string', example: '1998-09-01' },
+                  page_count: { type: 'integer', example: 309 },
+                  format: { type: 'string', example: 'Paperback' },
+                  language: { type: 'string', example: 'eng' },
+                  primary_provider: { type: 'string', enum: ['isbndb', 'google-books', 'openlibrary', 'user-correction'], example: 'isbndb' },
+                  cover_urls: { type: 'object', properties: { large: { type: 'string' }, medium: { type: 'string' }, small: { type: 'string' } } },
+                  cover_source: { type: 'string' },
+                  work_key: { type: 'string', description: 'OpenLibrary work key' },
+                  openlibrary_edition_id: { type: 'string' },
+                  amazon_asins: { type: 'array', items: { type: 'string' } },
+                  google_books_volume_ids: { type: 'array', items: { type: 'string' } },
+                  goodreads_edition_ids: { type: 'array', items: { type: 'string' } },
+                  alternate_isbns: { type: 'array', items: { type: 'string' } }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '201': { description: 'Edition created' },
+          '200': { description: 'Edition updated' },
+          '400': { description: 'Validation error' },
+          '500': { description: 'Internal server error' }
+        }
+      }
+    },
+    '/api/enrich/work': {
+      post: {
+        summary: 'Store or update work metadata',
+        description: 'Enrich a work (collection of editions) with metadata',
+        tags: ['Enrichment'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['work_key', 'title', 'primary_provider'],
+                properties: {
+                  work_key: { type: 'string', example: '/works/OL45883W' },
+                  title: { type: 'string', example: 'Harry Potter and the Philosopher\'s Stone' },
+                  subtitle: { type: 'string' },
+                  description: { type: 'string' },
+                  original_language: { type: 'string', example: 'eng' },
+                  first_publication_year: { type: 'integer', example: 1997 },
+                  subject_tags: { type: 'array', items: { type: 'string' } },
+                  primary_provider: { type: 'string', enum: ['isbndb', 'google-books', 'openlibrary'], example: 'openlibrary' },
+                  cover_urls: { type: 'object', properties: { large: { type: 'string' }, medium: { type: 'string' }, small: { type: 'string' } } },
+                  cover_source: { type: 'string' },
+                  openlibrary_work_id: { type: 'string' },
+                  goodreads_work_ids: { type: 'array', items: { type: 'string' } },
+                  amazon_asins: { type: 'array', items: { type: 'string' } },
+                  google_books_volume_ids: { type: 'array', items: { type: 'string' } }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '201': { description: 'Work created' },
+          '200': { description: 'Work updated' },
+          '400': { description: 'Validation error' },
+          '500': { description: 'Internal server error' }
+        }
+      }
+    },
+    '/api/enrich/author': {
+      post: {
+        summary: 'Store or update author biographical data',
+        description: 'Enrich an author with biographical metadata',
+        tags: ['Enrichment'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['author_key', 'name', 'primary_provider'],
+                properties: {
+                  author_key: { type: 'string', example: '/authors/OL23919A' },
+                  name: { type: 'string', example: 'J.K. Rowling' },
+                  gender: { type: 'string', example: 'female' },
+                  nationality: { type: 'string', example: 'British' },
+                  birth_year: { type: 'integer', example: 1965 },
+                  death_year: { type: 'integer' },
+                  bio: { type: 'string' },
+                  bio_source: { type: 'string' },
+                  author_photo_url: { type: 'string' },
+                  primary_provider: { type: 'string', enum: ['isbndb', 'openlibrary', 'wikidata'], example: 'wikidata' },
+                  openlibrary_author_id: { type: 'string' },
+                  goodreads_author_ids: { type: 'array', items: { type: 'string' } },
+                  wikidata_id: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '201': { description: 'Author created' },
+          '200': { description: 'Author updated' },
+          '400': { description: 'Validation error' },
+          '500': { description: 'Internal server error' }
+        }
+      }
+    },
+    '/api/enrich/queue': {
+      post: {
+        summary: 'Queue background enrichment job',
+        description: 'Queue an enrichment task to be processed in the background',
+        tags: ['Enrichment'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['entity_type', 'entity_key', 'providers_to_try'],
+                properties: {
+                  entity_type: { type: 'string', enum: ['work', 'edition', 'author'], example: 'edition' },
+                  entity_key: { type: 'string', example: '9780439064873', description: 'ISBN for editions, work_key for works, author_key for authors' },
+                  providers_to_try: { type: 'array', items: { type: 'string' }, example: ['isbndb', 'google-books'], description: 'List of providers to attempt enrichment from' },
+                  priority: { type: 'integer', minimum: 1, maximum: 10, default: 5, description: 'Job priority (1=lowest, 10=highest)' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '201': { description: 'Job queued successfully' },
+          '400': { description: 'Validation error' },
+          '500': { description: 'Internal server error' }
+        }
+      }
+    },
+    '/api/enrich/status/{id}': {
+      get: {
+        summary: 'Get enrichment job status',
+        description: 'Check the status of a queued enrichment job',
+        tags: ['Enrichment'],
+        parameters: [
+          { name: 'id', in: 'path', required: true, description: 'Job ID (UUID)', schema: { type: 'string', format: 'uuid' } }
+        ],
+        responses: {
+          '200': { description: 'Job status' },
+          '404': { description: 'Job not found' },
+          '500': { description: 'Internal server error' }
         }
       }
     }
@@ -163,6 +330,21 @@ app.get('/api/stats',
     }
   }
 );
+
+// POST /api/enrich/edition -> Store or update edition metadata
+app.post('/api/enrich/edition', handleEnrichEdition);
+
+// POST /api/enrich/work -> Store or update work metadata
+app.post('/api/enrich/work', handleEnrichWork);
+
+// POST /api/enrich/author -> Store or update author biographical data
+app.post('/api/enrich/author', handleEnrichAuthor);
+
+// POST /api/enrich/queue -> Queue background enrichment job
+app.post('/api/enrich/queue', handleQueueEnrichment);
+
+// GET /api/enrich/status/:id -> Check enrichment job status
+app.get('/api/enrich/status/:id', handleGetEnrichmentStatus);
 
 // GET /api/search -> Main search endpoint
 app.get('/api/search',

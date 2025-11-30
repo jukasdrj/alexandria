@@ -12,6 +12,7 @@ custom_domain = true
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "00ff424776f4415d95245c3c4c36e854"
+localConnectionString = "postgres://openlibrary:tommyboy@alexandria-db.ooheynerds.com:5432/openlibrary?sslmode=require"
 
 # Analytics Engine for monitoring and logging
 [[analytics_engine_datasets]]
