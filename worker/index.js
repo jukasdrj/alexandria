@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { cache } from 'hono/cache';
 import { handleEnrichEdition, handleEnrichWork, handleEnrichAuthor, handleQueueEnrichment, handleGetEnrichmentStatus } from './enrich-handlers.js';
+import { processCoverImage, processCoverBatch, coverExists, getCoverMetadata, getPlaceholderCover } from './services/image-processor.js';
 
 // =================================================================================
 // Configuration & Initialization
@@ -227,6 +228,78 @@ const openAPISpec = {
           '200': { description: 'Job status' },
           '404': { description: 'Job not found' },
           '500': { description: 'Internal server error' }
+        }
+      }
+    },
+    '/covers/{isbn}/{size}': {
+      get: {
+        summary: 'Get cover image',
+        description: 'Serve cover image from R2 storage. Redirects to placeholder if not found.',
+        tags: ['Covers'],
+        parameters: [
+          { name: 'isbn', in: 'path', required: true, description: 'ISBN-10 or ISBN-13', schema: { type: 'string' } },
+          { name: 'size', in: 'path', required: true, description: 'Image size', schema: { type: 'string', enum: ['small', 'medium', 'large', 'original'] } }
+        ],
+        responses: {
+          '200': { description: 'Cover image (image/jpeg or image/png)' },
+          '302': { description: 'Redirect to placeholder if not found' },
+          '400': { description: 'Invalid ISBN or size' }
+        }
+      }
+    },
+    '/covers/{isbn}/status': {
+      get: {
+        summary: 'Check cover status',
+        description: 'Check if a cover exists and get metadata',
+        tags: ['Covers'],
+        parameters: [
+          { name: 'isbn', in: 'path', required: true, description: 'ISBN-10 or ISBN-13', schema: { type: 'string' } }
+        ],
+        responses: {
+          '200': { description: 'Cover status and metadata' },
+          '400': { description: 'Invalid ISBN' }
+        }
+      }
+    },
+    '/covers/{isbn}/process': {
+      post: {
+        summary: 'Process cover image',
+        description: 'Download, process, and store cover image from providers (ISBNdb, Google Books, OpenLibrary)',
+        tags: ['Covers'],
+        parameters: [
+          { name: 'isbn', in: 'path', required: true, description: 'ISBN-10 or ISBN-13', schema: { type: 'string' } },
+          { name: 'force', in: 'query', description: 'Force reprocessing even if exists', schema: { type: 'boolean' } }
+        ],
+        responses: {
+          '201': { description: 'Cover processed successfully' },
+          '200': { description: 'Cover already exists' },
+          '404': { description: 'No cover found from any provider' },
+          '400': { description: 'Invalid ISBN' }
+        }
+      }
+    },
+    '/covers/batch': {
+      post: {
+        summary: 'Batch process covers',
+        description: 'Process multiple cover images (max 10 per request)',
+        tags: ['Covers'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['isbns'],
+                properties: {
+                  isbns: { type: 'array', items: { type: 'string' }, maxItems: 10, example: ['9780439064873', '9780141439518'] }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '200': { description: 'Batch processing results' },
+          '400': { description: 'Invalid request' }
         }
       }
     }
@@ -475,6 +548,170 @@ app.get('/api/search',
     }
   }
 );
+
+// =================================================================================
+// Cover Image Routes
+// =================================================================================
+
+// GET /covers/:isbn/:size - Serve cover image from R2
+// MVP: Currently serves original for all sizes. On-demand resizing via CF Images
+// can be added later, or pre-generated sizes stored in R2.
+app.get('/covers/:isbn/:size', async (c) => {
+  const { isbn, size } = c.req.param();
+
+  // Validate size parameter (accepted for future compatibility)
+  const validSizes = ['small', 'medium', 'large', 'original'];
+  if (!validSizes.includes(size)) {
+    return c.json({
+      error: 'Invalid size',
+      message: 'Size must be one of: small, medium, large, original'
+    }, 400);
+  }
+
+  // Normalize ISBN
+  const normalizedISBN = isbn.replace(/[-\s]/g, '');
+  if (!/^[0-9]{10,13}X?$/i.test(normalizedISBN)) {
+    return c.json({ error: 'Invalid ISBN format' }, 400);
+  }
+
+  try {
+    // MVP: We only store original - try common extensions
+    // Future: Add pre-generated sizes or use CF Image Resizing
+    const extensions = ['jpg', 'png', 'webp'];
+    let object = null;
+
+    for (const ext of extensions) {
+      const key = `isbn/${normalizedISBN}/original.${ext}`;
+      object = await c.env.COVER_IMAGES.get(key);
+      if (object) break;
+    }
+
+    if (!object) {
+      // Redirect to placeholder if not found
+      return c.redirect(getPlaceholderCover(), 302);
+    }
+
+    // Return image with caching headers
+    const headers = new Headers();
+    headers.set('Content-Type', object.httpMetadata?.contentType || 'image/jpeg');
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set('CDN-Cache-Control', 'max-age=31536000');
+    // Note: size parameter currently ignored - serving original for all requests
+
+    return new Response(object.body, { headers });
+
+  } catch (error) {
+    console.error(`Error serving cover for ${normalizedISBN}:`, error);
+    return c.redirect(getPlaceholderCover(), 302);
+  }
+});
+
+// GET /covers/:isbn/status - Check if cover exists
+app.get('/covers/:isbn/status', async (c) => {
+  const { isbn } = c.req.param();
+  const normalizedISBN = isbn.replace(/[-\s]/g, '');
+
+  if (!/^[0-9]{10,13}X?$/i.test(normalizedISBN)) {
+    return c.json({ error: 'Invalid ISBN format' }, 400);
+  }
+
+  try {
+    const metadata = await getCoverMetadata(c.env, normalizedISBN);
+
+    if (!metadata) {
+      return c.json({
+        exists: false,
+        isbn: normalizedISBN
+      });
+    }
+
+    return c.json({
+      exists: true,
+      isbn: normalizedISBN,
+      ...metadata,
+      urls: {
+        original: `/covers/${normalizedISBN}/original`,
+        large: `/covers/${normalizedISBN}/large`,
+        medium: `/covers/${normalizedISBN}/medium`,
+        small: `/covers/${normalizedISBN}/small`
+      }
+    });
+
+  } catch (error) {
+    console.error(`Error checking cover status for ${normalizedISBN}:`, error);
+    return c.json({ error: 'Failed to check cover status' }, 500);
+  }
+});
+
+// POST /covers/:isbn/process - Trigger cover processing
+app.post('/covers/:isbn/process', async (c) => {
+  const { isbn } = c.req.param();
+  const normalizedISBN = isbn.replace(/[-\s]/g, '');
+
+  if (!/^[0-9]{10,13}X?$/i.test(normalizedISBN)) {
+    return c.json({ error: 'Invalid ISBN format' }, 400);
+  }
+
+  // Check for force flag in query params
+  const force = c.req.query('force') === 'true';
+
+  try {
+    const result = await processCoverImage(normalizedISBN, c.env, { force });
+
+    const statusCode = result.status === 'processed' ? 201 :
+                       result.status === 'already_exists' ? 200 :
+                       result.status === 'no_cover' ? 404 : 500;
+
+    return c.json(result, statusCode);
+
+  } catch (error) {
+    console.error(`Error processing cover for ${normalizedISBN}:`, error);
+    return c.json({
+      status: 'error',
+      isbn: normalizedISBN,
+      error: error.message
+    }, 500);
+  }
+});
+
+// POST /covers/batch - Process multiple covers
+app.post('/covers/batch', async (c) => {
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { isbns } = body;
+
+  if (!Array.isArray(isbns)) {
+    return c.json({ error: 'isbns must be an array' }, 400);
+  }
+
+  if (isbns.length === 0) {
+    return c.json({ error: 'isbns array cannot be empty' }, 400);
+  }
+
+  if (isbns.length > 10) {
+    return c.json({
+      error: 'Batch size exceeded',
+      message: 'Maximum 10 ISBNs per batch request'
+    }, 400);
+  }
+
+  try {
+    const result = await processCoverBatch(isbns, c.env);
+    return c.json(result);
+
+  } catch (error) {
+    console.error('Batch processing error:', error);
+    return c.json({
+      error: 'Batch processing failed',
+      message: error.message
+    }, 500);
+  }
+});
 
 // =================================================================================
 // Worker Entrypoint

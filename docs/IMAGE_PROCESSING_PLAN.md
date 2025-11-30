@@ -130,18 +130,28 @@ const ALLOWED_DOMAINS = new Set([
 
 ---
 
-## Phase 5: Queue Integration [Medium Complexity]
+## Phase 5: Queue Integration [Medium Complexity] - DEFERRED
+
+**Status:** Deferred until Issue #13 (Background Queue Consumer) is implemented.
 
 **Ties to Issue #13 (Background Queue Consumer)**
 
-**Database additions:**
+The cover processing endpoints (POST /covers/:isbn/process and POST /covers/batch) are
+fully functional and can be called directly. Queue integration will allow:
+- Automatic cover fetching during enrichment jobs
+- Batch processing via cron triggers
+- Priority-based processing
+
+**When Issue #13 is implemented, add:**
+
+1. Database columns to enrichment_log:
 ```sql
 ALTER TABLE enrichment_log ADD COLUMN cover_status TEXT;
 ALTER TABLE enrichment_log ADD COLUMN cover_url TEXT;
 ALTER TABLE enrichment_log ADD COLUMN cover_source TEXT;
 ```
 
-**Queue Job Structure:**
+2. Queue job type for covers:
 ```javascript
 {
   type: 'process_cover',
@@ -153,7 +163,7 @@ ALTER TABLE enrichment_log ADD COLUMN cover_source TEXT;
 }
 ```
 
-**Optional cron (wrangler.toml):**
+3. Optional cron trigger (wrangler.toml):
 ```toml
 [triggers]
 crons = ["0 * * * *"]  # Every hour, process pending covers

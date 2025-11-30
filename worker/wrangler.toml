@@ -45,3 +45,33 @@ secret_name = "ISBNDB_API_KEY"
 binding = "GOOGLE_BOOKS_API_KEY"
 store_id = "b0562ac16fde468c8af12717a6c88400"
 secret_name = "Google_books_hardoooe"
+
+# =============================================================================
+# R2 Storage Bindings
+# =============================================================================
+# R2 bucket for cover image storage
+# Structure: isbn/{isbn13}/[original|large|medium|small].webp
+#
+# Usage in code:
+#   await env.COVER_IMAGES.put(key, data, { httpMetadata: {...} })
+#   const obj = await env.COVER_IMAGES.get(key)
+#   await env.COVER_IMAGES.head(key)  // Check existence
+# =============================================================================
+
+[[r2_buckets]]
+binding = "COVER_IMAGES"
+bucket_name = "alexandria-covers"
+
+# =============================================================================
+# KV Namespace Bindings
+# =============================================================================
+# KV for caching, rate limiting, and metadata storage
+#
+# Usage in code:
+#   await env.CACHE.get(key)
+#   await env.CACHE.put(key, value, { expirationTtl: 3600 })
+# =============================================================================
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "dd278b63596b4f96828c7db4b3d9adf1"
