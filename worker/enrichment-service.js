@@ -11,6 +11,7 @@ import { calculateEditionQuality, calculateWorkQuality, calculateCompleteness, f
  * @returns {Promise<{isbn: string, action: 'created'|'updated', quality_improvement: number, stored_at: string}>}
  */
 export async function enrichEdition(sql, edition) {
+  const startTime = Date.now();
   const qualityScore = calculateEditionQuality(edition);
   const completenessScore = calculateCompleteness(edition, [
     'title', 'subtitle', 'publisher', 'publication_date', 'page_count',
@@ -164,6 +165,17 @@ export async function enrichEdition(sql, edition) {
     const previousQuality = wasInsert ? 0 : (existing?.isbndb_quality || 0);
     const qualityImprovement = row.isbndb_quality - previousQuality;
 
+    // Log the enrichment operation
+    await logEnrichmentOperation(sql, {
+      entity_type: 'edition',
+      entity_key: edition.isbn,
+      provider: edition.primary_provider,
+      operation: wasInsert ? 'create' : 'update',
+      success: true,
+      fields_updated: flattenFieldKeys(edition, ['isbn', 'primary_provider']),
+      response_time_ms: Date.now() - startTime
+    });
+
     return {
       isbn: row.isbn,
       action: wasInsert ? 'created' : 'updated',
@@ -172,6 +184,18 @@ export async function enrichEdition(sql, edition) {
     };
   } catch (error) {
     console.error('enrichEdition database error:', error);
+
+    // Log failed operation
+    await logEnrichmentOperation(sql, {
+      entity_type: 'edition',
+      entity_key: edition.isbn,
+      provider: edition.primary_provider,
+      operation: 'upsert',
+      success: false,
+      error_message: error.message,
+      response_time_ms: Date.now() - startTime
+    }).catch(() => {}); // Don't throw if logging fails
+
     throw new Error(`Database operation failed: ${error.message}`);
   }
 }
@@ -183,6 +207,7 @@ export async function enrichEdition(sql, edition) {
  * @returns {Promise<{work_key: string, action: 'created'|'updated', quality_improvement: number, stored_at: string}>}
  */
 export async function enrichWork(sql, work) {
+  const startTime = Date.now();
   const qualityScore = calculateWorkQuality(work);
   const completenessScore = calculateCompleteness(work, [
     'title', 'subtitle', 'description', 'original_language', 'first_publication_year',
@@ -276,6 +301,17 @@ export async function enrichWork(sql, work) {
 
     const row = result[0];
 
+    // Log the enrichment operation
+    await logEnrichmentOperation(sql, {
+      entity_type: 'work',
+      entity_key: work.work_key,
+      provider: work.primary_provider,
+      operation: row.was_insert ? 'create' : 'update',
+      success: true,
+      fields_updated: flattenFieldKeys(work, ['work_key', 'primary_provider']),
+      response_time_ms: Date.now() - startTime
+    });
+
     return {
       work_key: row.work_key,
       action: row.was_insert ? 'created' : 'updated',
@@ -284,6 +320,18 @@ export async function enrichWork(sql, work) {
     };
   } catch (error) {
     console.error('enrichWork database error:', error);
+
+    // Log failed operation
+    await logEnrichmentOperation(sql, {
+      entity_type: 'work',
+      entity_key: work.work_key,
+      provider: work.primary_provider,
+      operation: 'upsert',
+      success: false,
+      error_message: error.message,
+      response_time_ms: Date.now() - startTime
+    }).catch(() => {});
+
     throw new Error(`Database operation failed: ${error.message}`);
   }
 }
@@ -295,6 +343,7 @@ export async function enrichWork(sql, work) {
  * @returns {Promise<{author_key: string, action: 'created'|'updated', stored_at: string}>}
  */
 export async function enrichAuthor(sql, author) {
+  const startTime = Date.now();
   try {
     const result = await sql`
       INSERT INTO enriched_authors (
@@ -350,6 +399,17 @@ export async function enrichAuthor(sql, author) {
 
     const row = result[0];
 
+    // Log the enrichment operation
+    await logEnrichmentOperation(sql, {
+      entity_type: 'author',
+      entity_key: author.author_key,
+      provider: author.primary_provider,
+      operation: row.was_insert ? 'create' : 'update',
+      success: true,
+      fields_updated: flattenFieldKeys(author, ['author_key', 'primary_provider']),
+      response_time_ms: Date.now() - startTime
+    });
+
     return {
       author_key: row.author_key,
       action: row.was_insert ? 'created' : 'updated',
@@ -357,6 +417,18 @@ export async function enrichAuthor(sql, author) {
     };
   } catch (error) {
     console.error('enrichAuthor database error:', error);
+
+    // Log failed operation
+    await logEnrichmentOperation(sql, {
+      entity_type: 'author',
+      entity_key: author.author_key,
+      provider: author.primary_provider,
+      operation: 'upsert',
+      success: false,
+      error_message: error.message,
+      response_time_ms: Date.now() - startTime
+    }).catch(() => {});
+
     throw new Error(`Database operation failed: ${error.message}`);
   }
 }
@@ -451,4 +523,76 @@ export async function getEnrichmentStatus(sql, jobId) {
     console.error('getEnrichmentStatus database error:', error);
     throw new Error(`Failed to get job status: ${error.message}`);
   }
+}
+
+/**
+ * Log an enrichment operation to the audit log
+ * @param {import('postgres').Sql} sql - postgres connection
+ * @param {Object} logEntry - Log entry data
+ * @param {string} logEntry.entity_type - Type: work, edition, or author
+ * @param {string} logEntry.entity_key - ISBN, work_key, or author_key
+ * @param {string} logEntry.provider - Provider that performed the enrichment
+ * @param {string} logEntry.operation - Operation type: create, update, delete
+ * @param {boolean} logEntry.success - Whether the operation succeeded
+ * @param {string[]} [logEntry.fields_updated] - List of fields that were updated
+ * @param {string} [logEntry.error_message] - Error message if failed
+ * @param {number} [logEntry.response_time_ms] - Response time in milliseconds
+ * @returns {Promise<void>}
+ */
+async function logEnrichmentOperation(sql, logEntry) {
+  try {
+    await sql`
+      INSERT INTO enrichment_log (
+        entity_type,
+        entity_key,
+        provider,
+        operation,
+        success,
+        fields_updated,
+        error_message,
+        response_time_ms,
+        created_at
+      ) VALUES (
+        ${logEntry.entity_type},
+        ${logEntry.entity_key},
+        ${logEntry.provider},
+        ${logEntry.operation},
+        ${logEntry.success},
+        ${logEntry.fields_updated || null},
+        ${logEntry.error_message || null},
+        ${logEntry.response_time_ms || null},
+        NOW()
+      )
+    `;
+  } catch (error) {
+    // Log but don't throw - logging shouldn't break enrichment
+    console.error('Failed to write enrichment_log:', error.message);
+  }
+}
+
+/**
+ * Flatten object keys for logging, expanding nested objects like cover_urls
+ * @param {Object} obj - Object to extract keys from
+ * @param {string[]} excludeKeys - Keys to exclude from the result
+ * @returns {string[]} Flattened list of field names that have values
+ */
+function flattenFieldKeys(obj, excludeKeys = []) {
+  const fields = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (excludeKeys.includes(key) || value == null) continue;
+
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      // Flatten nested objects (e.g., cover_urls.large, cover_urls.medium)
+      for (const [subKey, subValue] of Object.entries(value)) {
+        if (subValue != null) {
+          fields.push(`${key}.${subKey}`);
+        }
+      }
+    } else {
+      fields.push(key);
+    }
+  }
+
+  return fields;
 }
