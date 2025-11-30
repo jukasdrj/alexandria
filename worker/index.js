@@ -5,6 +5,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { cache } from 'hono/cache';
 import { handleEnrichEdition, handleEnrichWork, handleEnrichAuthor, handleQueueEnrichment, handleGetEnrichmentStatus } from './enrich-handlers.js';
 import { processCoverImage, processCoverBatch, coverExists, getCoverMetadata, getPlaceholderCover } from './services/image-processor.js';
+import { handleProcessCover, handleServeCover } from './cover-handlers.js';
 
 // =================================================================================
 // Configuration & Initialization
@@ -302,6 +303,51 @@ const openAPISpec = {
           '400': { description: 'Invalid request' }
         }
       }
+    },
+    '/api/covers/process': {
+      post: {
+        summary: 'Process cover image from provider URL',
+        description: 'Download, validate, and store cover image in R2 (bookstrack-covers-processed bucket)',
+        tags: ['Covers'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['work_key', 'provider_url'],
+                properties: {
+                  work_key: { type: 'string', example: '/works/OL45804W' },
+                  provider_url: { type: 'string', example: 'https://covers.openlibrary.org/b/id/8091323-L.jpg' },
+                  isbn: { type: 'string', example: '9780439064873', description: 'Optional, for logging' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '200': { description: 'Cover processed successfully' },
+          '400': { description: 'Invalid request' },
+          '403': { description: 'Domain not allowed' },
+          '500': { description: 'Processing error' }
+        }
+      }
+    },
+    '/api/covers/{work_key}/{size}': {
+      get: {
+        summary: 'Serve processed cover image',
+        description: 'Retrieve cover image from R2 (bookstrack-covers-processed bucket)',
+        tags: ['Covers'],
+        parameters: [
+          { name: 'work_key', in: 'path', required: true, schema: { type: 'string' }, description: 'OpenLibrary work key (without /works/ prefix)' },
+          { name: 'size', in: 'path', required: true, schema: { type: 'string', enum: ['large', 'medium', 'small'] } }
+        ],
+        responses: {
+          '200': { description: 'Cover image' },
+          '302': { description: 'Redirect to placeholder' },
+          '400': { description: 'Invalid size parameter' }
+        }
+      }
     }
   }
 };
@@ -550,7 +596,17 @@ app.get('/api/search',
 );
 
 // =================================================================================
-// Cover Image Routes
+// Cover Image Routes (Work-based - bookstrack-covers-processed bucket)
+// =================================================================================
+
+// POST /api/covers/process - Process cover image from provider URL
+app.post('/api/covers/process', handleProcessCover);
+
+// GET /api/covers/:work_key/:size - Serve processed cover by work key
+app.get('/api/covers/:work_key/:size', handleServeCover);
+
+// =================================================================================
+// Cover Image Routes (ISBN-based - legacy)
 // =================================================================================
 
 // GET /covers/:isbn/:size - Serve cover image from R2

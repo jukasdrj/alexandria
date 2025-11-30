@@ -60,7 +60,7 @@ secret_name = "Google_books_hardoooe"
 
 [[r2_buckets]]
 binding = "COVER_IMAGES"
-bucket_name = "alexandria-covers"
+bucket_name = "bookstrack-covers-processed"
 
 # =============================================================================
 # KV Namespace Bindings
