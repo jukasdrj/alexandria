@@ -17,3 +17,31 @@ localConnectionString = "postgres://openlibrary:tommyboy@alexandria-db.ooheynerd
 # Analytics Engine for monitoring and logging
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
+
+# =============================================================================
+# Secrets Store Bindings (account-level secrets)
+# =============================================================================
+# These use Cloudflare Secrets Store for centralized secret management.
+# Store ID: b0562ac16fde468c8af12717a6c88400 (default_secrets_store)
+#
+# IMPORTANT: Access pattern differs from regular env variables!
+#   Regular secret:       env.SECRET_NAME (string)
+#   Secrets Store:        await env.SECRET_NAME.get() (async)
+#
+# Usage in code:
+#   const isbndbKey = await env.ISBNDB_API_KEY.get();
+#   const googleBooksKey = await env.GOOGLE_BOOKS_API_KEY.get();
+# =============================================================================
+
+# ISBNdb API - Primary source for cover images and book metadata
+# Rate limit: 1 request/second on paid plan
+[[secrets_store_secrets]]
+binding = "ISBNDB_API_KEY"
+store_id = "b0562ac16fde468c8af12717a6c88400"
+secret_name = "ISBNDB_API_KEY"
+
+# Google Books API - Fallback for cover images
+[[secrets_store_secrets]]
+binding = "GOOGLE_BOOKS_API_KEY"
+store_id = "b0562ac16fde468c8af12717a6c88400"
+secret_name = "Google_books_hardoooe"
