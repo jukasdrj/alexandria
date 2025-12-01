@@ -398,9 +398,14 @@ app.get('/health', async (c) => {
     const start = Date.now();
     await sql`SELECT 1`;
     const latency = Date.now() - start;
+    
+    // Check R2 binding
+    const r2Status = c.env.COVER_IMAGES ? 'bound' : 'not_configured';
+    
     return c.json({
       status: 'ok',
       database: 'connected',
+      r2_covers: r2Status,
       hyperdrive_latency_ms: latency,
       timestamp: new Date().toISOString(),
     });
@@ -409,6 +414,7 @@ app.get('/health', async (c) => {
     return c.json({
       status: 'error',
       database: 'disconnected',
+      r2_covers: c.env.COVER_IMAGES ? 'bound' : 'not_configured',
       message: e.message
     }, 503);
   }

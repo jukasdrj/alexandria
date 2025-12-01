@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 2 COMPLETE! Worker live with Hyperdrive + Tunnel database access.
+**Current Status**: Phase 2 + Cover Processing COMPLETE! Worker live with Hyperdrive + Tunnel database access + R2 cover image storage.
 
 ## Architecture Flow
 
@@ -18,6 +18,11 @@ Internet → Cloudflare Access (IP bypass: 47.187.18.143/32)
 → Tunnel (alexandria-db.ooheynerds.com)
 → Unraid (192.168.1.240:5432, SSL enabled)
 → PostgreSQL (54.8M editions)
+
+Cover Images:
+→ Worker receives provider URL (OpenLibrary, ISBNdb, Google Books)
+→ Downloads, validates, stores in R2 (bookstrack-covers-processed bucket)
+→ Serves via /api/covers/:work_key/:size or /covers/:isbn/:size
 ```
 
 **IMPORTANT**:
@@ -146,6 +151,52 @@ export default app;
 
 **CRITICAL I/O Context Fix**: Connection must be request-scoped (`c.get('sql')`) not global. Global connections cause "Cannot perform I/O on behalf of a different request" errors.
 
+## Cover Image Processing (COMPLETE ✅)
+
+### R2 Storage
+- **Bucket**: `bookstrack-covers-processed`
+- **Binding**: `COVER_IMAGES`
+- **Structure**: `covers/{work_key}/{hash}/original` or `isbn/{isbn}/original.{ext}`
+
+### Endpoints
+
+**Work-based (new)**:
+- `POST /api/covers/process` - Process cover from provider URL
+- `GET /api/covers/:work_key/:size` - Serve cover (large/medium/small)
+
+**ISBN-based (legacy)**:
+- `POST /covers/:isbn/process` - Trigger cover processing from providers
+- `GET /covers/:isbn/:size` - Serve cover image
+- `GET /covers/:isbn/status` - Check if cover exists
+- `POST /covers/batch` - Process multiple ISBNs (max 10)
+
+### Domain Whitelist (Security)
+Only these domains are allowed for cover downloads:
+- `books.google.com`
+- `covers.openlibrary.org`
+- `images.isbndb.com`
+- `images-na.ssl-images-amazon.com`
+- `m.media-amazon.com`
+
+### Processing Pipeline
+```javascript
+// Work-based: POST /api/covers/process
+const response = await fetch('https://alexandria.ooheynerds.com/api/covers/process', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    work_key: '/works/OL45804W',
+    provider_url: 'https://covers.openlibrary.org/b/id/8091323-L.jpg',
+    isbn: '9780439064873'  // optional, for logging
+  })
+});
+
+// ISBN-based: POST /covers/:isbn/process
+const response = await fetch('https://alexandria.ooheynerds.com/covers/9780439064873/process', {
+  method: 'POST'
+});
+```
+
 ## Sample Query (Test First!)
 
 **CRITICAL**: Test this in psql before implementing:
@@ -263,17 +314,42 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 
 ```
 alex/
-├── worker/              # Cloudflare Worker code
-│   ├── index.js         # Main worker (currently static HTML)
-│   ├── wrangler.toml    # Wrangler config
-│   └── package.json     # Dependencies
-├── scripts/             # Deployment & monitoring scripts
-├── docs/                # Documentation
-│   ├── CREDENTIALS.md   # Passwords (gitignored!)
-│   ├── ARCHITECTURE.md  # System design
-│   └── SETUP.md         # Infrastructure setup
-├── tunnel/config.yml    # Tunnel config reference
-└── TODO.md              # Development roadmap
+├── worker/                    # Cloudflare Worker code
+│   ├── index.js               # Main worker + Hono routes
+│   ├── wrangler.toml          # Wrangler config (Hyperdrive, R2, KV, Secrets)
+│   ├── cover-handlers.js      # Work-based cover processing (POST /api/covers/process)
+│   ├── image-utils.js         # Image download, validation, hashing utilities
+│   ├── enrich-handlers.js     # Enrichment API handlers
+│   ├── enrichment-service.js  # Enrichment business logic
+│   ├── services/
+│   │   ├── image-processor.js # ISBN-based cover processing pipeline
+│   │   └── cover-fetcher.js   # Multi-provider cover URL fetching
+│   └── package.json           # Dependencies
+├── scripts/                   # Deployment & monitoring scripts
+├── docs/                      # Documentation
+│   ├── CREDENTIALS.md         # Passwords (gitignored!)
+│   ├── ARCHITECTURE.md        # System design
+│   └── SETUP.md               # Infrastructure setup
+├── tunnel/config.yml          # Tunnel config reference
+└── TODO.md                    # Development roadmap
+```
+
+## Cloudflare Bindings Reference
+
+```toml
+# wrangler.toml bindings summary
+[[hyperdrive]]
+binding = "HYPERDRIVE"                    # PostgreSQL via Hyperdrive
+
+[[r2_buckets]]
+binding = "COVER_IMAGES"                  # R2: bookstrack-covers-processed
+
+[[kv_namespaces]]
+binding = "CACHE"                         # KV for caching
+
+[[secrets_store_secrets]]
+binding = "ISBNDB_API_KEY"                # ISBNdb API key
+binding = "GOOGLE_BOOKS_API_KEY"          # Google Books API key
 ```
 
 ## Additional Context
