@@ -192,6 +192,11 @@ export function validateEnrichmentRequest(body, type) {
 
 /**
  * Format PostgreSQL array literal
+ *
+ * The postgres.js library doesn't automatically handle arrays when used with
+ * Hyperdrive in Cloudflare Workers. We need to format arrays as PostgreSQL
+ * array literals manually.
+ *
  * @param {string[]|null|undefined} arr - Array to format
  * @returns {string|null} PostgreSQL array literal or null
  */
@@ -203,5 +208,13 @@ export function formatPgArray(arr) {
   const cleanArr = arr.filter(item => item != null && item !== '');
   if (cleanArr.length === 0) return null;
 
-  return cleanArr;
+  // Format as PostgreSQL array literal: {"value1","value2"}
+  // Escape any double quotes or backslashes in values
+  const escaped = cleanArr.map(item => {
+    const str = String(item);
+    // Escape backslashes first, then double quotes
+    return '"' + str.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  });
+
+  return '{' + escaped.join(',') + '}';
 }
