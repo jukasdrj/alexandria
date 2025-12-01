@@ -460,7 +460,7 @@ export async function queueEnrichment(sql, queueRequest) {
         gen_random_uuid(),
         ${queueRequest.entity_type},
         ${queueRequest.entity_key},
-        ${queueRequest.providers_to_try},
+        ${formatPgArray(queueRequest.providers_to_try)},
         ${priority},
         'pending',
         NOW()

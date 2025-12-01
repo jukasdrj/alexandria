@@ -6,6 +6,7 @@ import { cache } from 'hono/cache';
 import { handleEnrichEdition, handleEnrichWork, handleEnrichAuthor, handleQueueEnrichment, handleGetEnrichmentStatus } from './enrich-handlers.js';
 import { processCoverImage, processCoverBatch, coverExists, getCoverMetadata, getPlaceholderCover } from './services/image-processor.js';
 import { handleProcessCover, handleServeCover } from './cover-handlers.js';
+import { processEnrichmentQueue } from './queue-consumer.js';
 
 // =================================================================================
 // Configuration & Initialization
@@ -779,7 +780,26 @@ app.post('/covers/batch', async (c) => {
 // Worker Entrypoint
 // =================================================================================
 
-export default app;
+export default {
+  // HTTP request handler (Hono app)
+  fetch: app.fetch,
+
+  // Scheduled handler for cron triggers (enrichment queue consumer)
+  async scheduled(event, env, ctx) {
+    console.log(`Cron triggered at ${new Date().toISOString()}`);
+
+    // Use waitUntil to ensure the queue processing completes
+    ctx.waitUntil(
+      processEnrichmentQueue(env)
+        .then(results => {
+          console.log(`Queue processing complete:`, JSON.stringify(results));
+        })
+        .catch(error => {
+          console.error(`Queue processing failed:`, error);
+        })
+    );
+  }
+};
 
 
 // =================================================================================

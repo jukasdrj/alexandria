@@ -75,3 +75,20 @@ bucket_name = "bookstrack-covers-processed"
 [[kv_namespaces]]
 binding = "CACHE"
 id = "dd278b63596b4f96828c7db4b3d9adf1"
+
+# =============================================================================
+# Cron Triggers - Scheduled Tasks
+# =============================================================================
+# Queue consumer runs every 5 minutes to process pending enrichment jobs
+# from the enrichment_queue table.
+#
+# The scheduled handler:
+#   1. Fetches pending jobs (priority DESC, created_at ASC)
+#   2. Marks jobs as 'processing'
+#   3. Calls provider APIs (ISBNdb, Google Books, OpenLibrary)
+#   4. Stores results via enrichment service
+#   5. Updates job status to 'completed' or 'failed'
+# =============================================================================
+
+[triggers]
+crons = ["*/5 * * * *"]
