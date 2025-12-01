@@ -7,12 +7,25 @@
 
 import postgres from 'postgres';
 import { enrichEdition, enrichWork, enrichAuthor } from './enrichment-service.js';
-import { fetchISBNdbCover, fetchGoogleBooksCover, fetchOpenLibraryCover } from './services/cover-fetcher.js';
 import { formatPgArray } from './utils.js';
 
 // Configuration
 const BATCH_SIZE = 10;  // Max jobs to process per cron invocation
 const JOB_TIMEOUT_MS = 30000;  // 30 second timeout per job
+
+/**
+ * Wrap a promise with a timeout
+ * @param {Promise} promise - Promise to wrap
+ * @param {number} ms - Timeout in milliseconds
+ * @param {string} message - Error message on timeout
+ * @returns {Promise} - Original promise or rejection on timeout
+ */
+function withTimeout(promise, ms, message) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(message)), ms)
+  );
+  return Promise.race([promise, timeout]);
+}
 
 /**
  * Main queue consumer - called by scheduled handler
@@ -54,12 +67,12 @@ export async function processEnrichmentQueue(env) {
 
     console.log(`Queue consumer: Processing ${jobs.length} jobs`);
 
-    // Process each job
+    // Process each job with timeout
     for (const job of jobs) {
       results.processed++;
 
       try {
-        await processJob(sql, job, env);
+        await withTimeout(processJob(sql, job, env), JOB_TIMEOUT_MS, `Job ${job.id} timed out`);
         results.succeeded++;
       } catch (error) {
         results.failed++;
@@ -83,7 +96,7 @@ export async function processEnrichmentQueue(env) {
 
 /**
  * Parse PostgreSQL array string into JavaScript array
- * Handles format: {item1,item2,item3} or already-parsed arrays
+ * Handles format: {item1,item2,item3} or {"quoted","items"} with escaped quotes
  * @param {string|string[]} pgArray - PostgreSQL array string or JS array
  * @returns {string[]} Parsed array
  */
@@ -103,21 +116,35 @@ function parsePgArray(pgArray) {
     const inner = pgArray.slice(1, -1);
     if (!inner) return [];
 
-    // Split by comma, handling quoted strings
+    // Parse with proper handling of quoted strings and escaped characters
     const items = [];
     let current = '';
     let inQuotes = false;
+    let i = 0;
 
-    for (const char of inner) {
+    while (i < inner.length) {
+      const char = inner[i];
+
       if (char === '"' && !inQuotes) {
+        // Start of quoted string
         inQuotes = true;
+        i++;
+      } else if (char === '\\' && inQuotes && i + 1 < inner.length) {
+        // Escaped character inside quotes (e.g., \" or \\)
+        current += inner[i + 1];
+        i += 2;
       } else if (char === '"' && inQuotes) {
+        // End of quoted string
         inQuotes = false;
+        i++;
       } else if (char === ',' && !inQuotes) {
+        // Item separator
         items.push(current);
         current = '';
+        i++;
       } else {
         current += char;
+        i++;
       }
     }
     if (current) items.push(current);
