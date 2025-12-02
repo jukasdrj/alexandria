@@ -5,6 +5,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { cache } from 'hono/cache';
 import { handleEnrichEdition, handleEnrichWork, handleEnrichAuthor, handleQueueEnrichment, handleGetEnrichmentStatus } from './enrich-handlers.js';
 import { processCoverImage, processCoverBatch, coverExists, getCoverMetadata, getPlaceholderCover } from './services/image-processor.js';
+import { resolveCoverUrl, extractOpenLibraryCover } from './services/cover-resolver.js';
 import { handleProcessCover, handleServeCover } from './cover-handlers.js';
 import { processEnrichmentQueue } from './queue-consumer.js';
 
@@ -510,7 +511,8 @@ app.get('/api/search',
             e.data->>'number_of_pages' AS pages,
             w.data->>'title' AS work_title,
             e.key AS edition_key,
-            w.key AS work_key
+            w.key AS work_key,
+            (e.data->'covers'->0)::text AS cover_id
           FROM editions e
           JOIN edition_isbns ei ON ei.edition_key = e.key
           LEFT JOIN works w ON w.key = e.work_key
@@ -531,7 +533,8 @@ app.get('/api/search',
             e.data->>'number_of_pages' AS pages,
             w.data->>'title' AS work_title,
             e.key AS edition_key,
-            w.key AS work_key
+            w.key AS work_key,
+            (e.data->'covers'->0)::text AS cover_id
           FROM editions e
           LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
           LEFT JOIN works w ON w.key = e.work_key
@@ -551,7 +554,8 @@ app.get('/api/search',
             e.data->>'number_of_pages' AS pages,
             w.data->>'title' AS work_title,
             e.key AS edition_key,
-            w.key AS work_key
+            w.key AS work_key,
+            (e.data->'covers'->0)::text AS cover_id
           FROM authors a
           JOIN author_works aw ON aw.author_key = a.key
           JOIN works w ON w.key = aw.work_key
@@ -571,16 +575,45 @@ app.get('/api/search',
         }, 404);
       }
 
-      const formattedResults = results.map(row => ({
-        title: row.title,
-        author: row.author,
-        isbn: row.isbn,
-        publish_date: row.publish_date,
-        publishers: row.publishers ? JSON.parse(row.publishers) : null,
-        pages: row.pages,
-        work_title: row.work_title,
-        openlibrary_edition: row.edition_key ? `https://openlibrary.org${row.edition_key}` : null,
-        openlibrary_work: row.work_key ? `https://openlibrary.org${row.work_key}` : null,
+      // Resolve cover URLs with lazy-loading (R2 cache or external)
+      const formattedResults = await Promise.all(results.map(async (row) => {
+        // Build external OpenLibrary cover URL from cover_id
+        let externalCoverUrl = null;
+        if (row.cover_id) {
+          const coverId = row.cover_id.replace(/"/g, ''); // Remove JSON quotes
+          if (coverId && coverId !== 'null') {
+            externalCoverUrl = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+          }
+        }
+        
+        // Resolve cover URL (Alexandria R2 if cached, external if not)
+        let coverUrl = null;
+        let coverSource = null;
+        if (row.isbn) {
+          try {
+            const coverResult = await resolveCoverUrl(row.isbn, externalCoverUrl, c.env, c.executionCtx);
+            coverUrl = coverResult.url;
+            coverSource = coverResult.source;
+          } catch (e) {
+            console.error(`Cover resolve failed for ${row.isbn}:`, e.message);
+            coverUrl = externalCoverUrl; // Fallback
+            coverSource = 'external-fallback';
+          }
+        }
+        
+        return {
+          title: row.title,
+          author: row.author,
+          isbn: row.isbn,
+          coverUrl,
+          coverSource,
+          publish_date: row.publish_date,
+          publishers: row.publishers ? JSON.parse(row.publishers) : null,
+          pages: row.pages,
+          work_title: row.work_title,
+          openlibrary_edition: row.edition_key ? `https://openlibrary.org${row.edition_key}` : null,
+          openlibrary_work: row.work_key ? `https://openlibrary.org${row.work_key}` : null,
+        };
       }));
 
       return c.json({

@@ -28,6 +28,8 @@ Cover Images:
 **IMPORTANT**:
 - Tunnel is outbound-only from home network. No inbound firewall ports needed.
 - API secured with Cloudflare Access - only accessible from home IP (47.187.18.143/32)
+- Tunnel uses **Zero Trust remotely-managed configuration** (token-based, not config.yml)
+- Public hostname configured in Zero Trust dashboard: `alexandria-db.ooheynerds.com` → `tcp://localhost:5432`
 
 ## Database Schema (CRITICAL)
 
@@ -270,9 +272,12 @@ app.get('/api/search', async (c) => {
 - Indexes exist on common columns - use them
 - Complex joins need careful design (50M+ rows)
 
-### SSH Access
+### SSH Access & Auto-Start
 - Passwordless configured: `ssh root@Tower.local`
-- **IMPORTANT**: Backup `/root/.cloudflared/config.yml` before modifying tunnel config
+- **Auto-start configured**: Both `postgres` and `alexandria-tunnel` containers use `--restart unless-stopped`
+  - Containers auto-start on Tower boot
+  - Containers auto-restart on crash/unexpected exit
+  - Containers stay stopped only if manually stopped with `docker stop`
 
 ### Security
 - **docs/CREDENTIALS.md** has all passwords (gitignored - NEVER commit!)
@@ -294,8 +299,20 @@ npx wrangler login    # Re-auth if needed
 
 ### Tunnel Issues
 ```bash
+# The tunnel uses a Zero Trust token (remotely-managed)
+# Restart tunnel:
 ssh root@Tower.local "docker restart alexandria-tunnel"
 ./scripts/tunnel-status.sh  # Should show 4 connections
+
+# If container is missing, recreate it:
+ssh root@Tower.local "docker run -d \
+  --name alexandria-tunnel \
+  --restart unless-stopped \
+  --network host \
+  cloudflare/cloudflared:latest \
+  tunnel run --token eyJhIjoiZDAzYmVkMGJlNmQ5NzZhY2Q4YTE3MDdiNTUwNTJmNzkiLCJ0IjoiODQ4OTI4YWItNGFiOS00NzMzLTkzYjAtM2U3OTY3YzYwYWNiIiwicyI6Ik1EaGpOREZtWlRRdE5UUTBPUzAwTmpSbUxUazBPVFF0TldGa01UTmtNVE5pWVRBMCJ9"
+
+# IMPORTANT: Must use --network host for tunnel to access PostgreSQL on localhost:5432
 ```
 
 ### Database Issues
