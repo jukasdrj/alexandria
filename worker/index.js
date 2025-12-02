@@ -831,6 +831,22 @@ export default {
           console.error(`Queue processing failed:`, error);
         })
     );
+  },
+
+  // Queue consumer handler for enrichment queue
+  async queue(batch, env, ctx) {
+    console.log(`Queue consumer triggered with ${batch.messages.length} messages`);
+
+    for (const message of batch.messages) {
+      try {
+        console.log(`Processing queue message:`, message.body);
+        // Add queue message processing logic here when needed
+        message.ack();
+      } catch (error) {
+        console.error(`Failed to process queue message:`, error);
+        message.retry();
+      }
+    }
   }
 };
 
