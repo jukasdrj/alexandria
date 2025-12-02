@@ -42,6 +42,17 @@ Tables:
 - **edition_isbns** (49.3M): `edition_key`, `isbn` ← **USE THIS FOR ISBN QUERIES**
 - **author_works** (42.8M): `author_key`, `work_key` (relationships)
 
+## Configuration
+
+**Wrangler Configuration**: `worker/wrangler.jsonc` (JSON format, recommended by Cloudflare)
+- Schema validation with `$schema` for IDE autocomplete
+- Optimized for **Cloudflare Workers Paid Plan**:
+  - Extended CPU limits: 300s (5 minutes)
+  - Smart placement for optimal routing
+  - Full observability with 100% sampling
+  - Queue-based background processing
+  - Multiple Analytics Engine datasets
+
 ## Essential Commands
 
 ### Worker Development
@@ -116,11 +127,17 @@ npx wrangler hyperdrive create alexandria-db \
   --caching-disabled
 ```
 
-**wrangler.toml configuration**:
-```toml
-[[hyperdrive]]
-binding = "HYPERDRIVE"
-id = "00ff424776f4415d95245c3c4c36e854"
+**wrangler.jsonc configuration**:
+```jsonc
+{
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "00ff424776f4415d95245c3c4c36e854",
+      "localConnectionString": "postgres://openlibrary:tommyboy@alexandria-db.ooheynerds.com:5432/openlibrary?sslmode=require"
+    }
+  ]
+}
 ```
 
 **Worker code** (using Hono + Hyperdrive):
@@ -353,20 +370,33 @@ alex/
 
 ## Cloudflare Bindings Reference
 
-```toml
-# wrangler.toml bindings summary
-[[hyperdrive]]
-binding = "HYPERDRIVE"                    # PostgreSQL via Hyperdrive
-
-[[r2_buckets]]
-binding = "COVER_IMAGES"                  # R2: bookstrack-covers-processed
-
-[[kv_namespaces]]
-binding = "CACHE"                         # KV for caching
-
-[[secrets_store_secrets]]
-binding = "ISBNDB_API_KEY"                # ISBNdb API key
-binding = "GOOGLE_BOOKS_API_KEY"          # Google Books API key
+```jsonc
+// wrangler.jsonc bindings summary
+{
+  "hyperdrive": [{
+    "binding": "HYPERDRIVE"                 // PostgreSQL via Hyperdrive
+  }],
+  "r2_buckets": [{
+    "binding": "COVER_IMAGES"               // R2: bookstrack-covers-processed
+  }],
+  "kv_namespaces": [{
+    "binding": "CACHE"                      // KV for caching
+  }],
+  "secrets_store_secrets": [
+    { "binding": "ISBNDB_API_KEY" },        // ISBNdb API key
+    { "binding": "GOOGLE_BOOKS_API_KEY" }   // Google Books API key
+  ],
+  "analytics_engine_datasets": [
+    { "binding": "ANALYTICS" },             // Performance metrics
+    { "binding": "QUERY_ANALYTICS" },       // Query tracking
+    { "binding": "COVER_ANALYTICS" }        // Cover processing stats
+  ],
+  "queues": {
+    "producers": [{
+      "binding": "ENRICHMENT_QUEUE"         // Background processing queue
+    }]
+  }
+}
 ```
 
 ## Additional Context
