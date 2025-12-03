@@ -3,11 +3,15 @@
   "version": "2.0.0",
   "description": "Cloudflare Worker for Alexandria OpenLibrary database",
   "main": "index.ts",
-  "types": "index.ts",
+  "types": "types.ts",
   "exports": {
     ".": {
-      "types": "./index.ts",
+      "types": "./types.ts",
       "default": "./index.ts"
+    },
+    "./types": {
+      "types": "./types.ts",
+      "default": "./types.ts"
     }
   },
   "scripts": {
