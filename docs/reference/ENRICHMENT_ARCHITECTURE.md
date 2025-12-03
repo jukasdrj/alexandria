@@ -1,6 +1,24 @@
 # Alexandria Enrichment Architecture
 
+**Status**: Phase 1 COMPLETE | Phases 2-4 PLANNING
+
+This document outlines the enrichment pipeline architecture for Alexandria. Basic enrichment endpoints (Phase 1) are live. Advanced features (Phases 2-4) are planned.
+
 **Goal**: Transform Alexandria from a static OpenLibrary mirror into a self-enriching, intelligent book data service that minimizes paid API costs while maximizing data quality.
+
+---
+
+## Implementation Status
+
+**✅ Phase 1 Complete (Write Endpoints)**
+- [x] `POST /api/enrich/edition` - Store edition metadata
+- [x] `POST /api/enrich/work` - Store work metadata
+- [x] `POST /api/enrich/author` - Store author metadata
+- [x] `POST /api/enrich/queue` - Queue background enrichment
+- [x] `GET /api/enrich/status/:id` - Check job status
+- [x] Quality scoring and conflict detection
+
+**🔜 Phases 2-4 Planned (see below)**
 
 ---
 
@@ -35,9 +53,31 @@
 
 ---
 
-## Phase 1: Strengthen bendv3 ↔ Alexandria Trust
+## Phase 1: Enrichment Write Endpoints ✅ COMPLETE
 
-### 1.1 Title/Author Search via Alexandria
+Basic enrichment endpoints are live and functional. These allow external services to write enriched metadata back to Alexandria.
+
+### Implemented Endpoints
+
+- `POST /api/enrich/edition` - Store edition metadata with quality scoring
+- `POST /api/enrich/work` - Store work metadata with conflict detection
+- `POST /api/enrich/author` - Store author metadata with validation
+- `POST /api/enrich/queue` - Queue background enrichment jobs
+- `GET /api/enrich/status/:id` - Check enrichment job status
+
+### Quality Scoring
+
+Enrichment data includes quality scores based on:
+- Completeness (all required fields present)
+- Provider trust level (ISBNdb > Google Books > user corrections)
+- Data freshness
+- Field-level conflict detection
+
+---
+
+## Phase 2: Strengthen bendv3 ↔ Alexandria Trust (PLANNED)
+
+### 2.1 Title/Author Search via Alexandria
 
 **Current**: Title searches go directly to Google Books
 **Target**: Alexandria searched first (54M works available)
@@ -59,7 +99,7 @@ CREATE INDEX CONCURRENTLY idx_authors_name_trgm
 - Add `searchAlexandriaByTitle(title, author, env, ctx)`
 - Insert before Google Books in `enrichMultipleBooks()` for title searches
 
-### 1.2 Quality-Aware Write-Back
+### 2.2 Quality-Aware Write-Back
 
 **Current**: Every external API hit writes to Alexandria
 **Target**: Smart write-back that respects existing quality
@@ -85,7 +125,7 @@ async function shouldWriteToAlexandria(isbn, newData, env) {
 }
 ```
 
-### 1.3 Enrichment Status Communication Protocol
+### 2.3 Enrichment Status Communication Protocol
 
 **Alexandria Response Enhancement**:
 ```json
@@ -120,9 +160,9 @@ if (alexandriaResult.enrichment_hints?.suggested_action === 'enrich_edition_deta
 
 ---
 
-## Phase 2: Alexandria Self-Enrichment Pipeline
+## Phase 3: Alexandria Self-Enrichment Pipeline (PLANNED)
 
-### 2.1 Data Sources & Sync Strategy
+### 3.1 Data Sources & Sync Strategy
 
 | Source | Strategy | Frequency | Notes |
 |--------|----------|-----------|-------|
@@ -132,7 +172,7 @@ if (alexandriaResult.enrichment_hints?.suggested_action === 'enrich_edition_deta
 | Google Books | On-demand only | Free tier | Covers and basic metadata |
 | Wikidata | Author enrichment | As needed | Gender, nationality, birth/death |
 
-### 2.2 OpenLibrary Dump Sync
+### 3.2 OpenLibrary Dump Sync
 
 **Monthly Process**:
 ```bash
@@ -157,7 +197,7 @@ psql -c "
 psql -c "REINDEX INDEX CONCURRENTLY idx_edition_isbns_isbn;"
 ```
 
-### 2.3 OpenLibrary Recent Changes API
+### 3.3 OpenLibrary Recent Changes API
 
 **Endpoint**: `https://openlibrary.org/recentchanges.json?limit=1000`
 
@@ -180,7 +220,7 @@ export default {
 }
 ```
 
-### 2.4 Proactive ISBNdb Enrichment
+### 3.4 Proactive ISBNdb Enrichment
 
 **Budget**: 5000 calls/day
 **Strategy**: Prioritized queue
@@ -221,7 +261,7 @@ P4 (low quality):        500 calls (10%)
 P5 (author expansion):   250 calls (5%)
 ```
 
-### 2.5 Test Data Bootstrap
+### 3.5 Test Data Bootstrap
 
 **Your 10 years of reading data** (~1700 books):
 ```
@@ -257,9 +297,9 @@ async function bootstrapFromCSV(csvPath, env) {
 
 ---
 
-## Phase 3: Author Enrichment Pipeline
+## Phase 4: Author Enrichment Pipeline (PLANNED)
 
-### 3.1 Diversity & Biographical Data
+### 4.1 Diversity & Biographical Data
 
 **Fields to Enrich**:
 - `gender` (Female/Male/Non-binary/Other/Unknown)
@@ -274,7 +314,7 @@ async function bootstrapFromCSV(csvPath, env) {
 2. **OpenLibrary** (basic bio)
 3. **ISBNdb** (limited author info)
 
-### 3.2 Wikidata Integration
+### 4.2 Wikidata Integration
 
 **Query Example**:
 ```sparql
@@ -303,7 +343,7 @@ POST /api/enrich/author
 }
 ```
 
-### 3.3 Author Bibliography Expansion
+### 4.3 Author Bibliography Expansion
 
 When a new author is discovered:
 1. Query OpenLibrary for all works by author
@@ -312,15 +352,15 @@ When a new author is discovered:
 
 ---
 
-## Phase 4: Cover Image Pipeline
+## Phase 5: Cover Image Pipeline
 
-### 4.1 Current State
+### 5.1 Current State
 
 - R2 bucket: `bookstrack-covers-processed`
 - Stored by work_key or ISBN
 - Single quality level (original)
 
-### 4.2 Target State
+### 5.2 Target State
 
 **Storage Structure**:
 ```

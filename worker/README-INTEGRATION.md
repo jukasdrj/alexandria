@@ -4,15 +4,18 @@ This guide shows how to integrate with Alexandria's TypeScript-enabled API from 
 
 ## Quick Start
 
-Once Alexandria exports its types, simply enable the feature flag for instant activation with zero downtime.
+**Status**: Types are ready for export. Package will be published to npm as `alexandria-worker` once testing is complete.
 
-### Installation
+### Installation (Coming Soon)
 
 ```bash
 npm install alexandria-worker
-# or
-yarn add alexandria-worker
 ```
+
+**For now**, you can:
+1. Use the API directly via `fetch()` (see examples below)
+2. Copy `types.ts` from this repo for TypeScript support
+3. Wait for npm package publication (coming soon)
 
 ### Basic Usage
 
@@ -526,9 +529,9 @@ if (features.isEnabled('alexandria-integration')) {
 }
 ```
 
-## Feature Flag Activation
+## Feature Flag Activation (bendv3)
 
-Once Alexandria exports its types package, bendv3 can enable the integration:
+**Current Status**: Ready for integration once npm package is published.
 
 ```typescript
 // bendv3/config/features.ts
@@ -544,13 +547,14 @@ export const features = {
 };
 ```
 
-**Zero-downtime activation steps**:
-1. ✅ Alexandria exports TypeScript types (this PR)
-2. Install `alexandria-worker` in bendv3
-3. Import types and implement service
-4. Add feature flag to config
-5. Enable flag: `ENABLE_ALEXANDRIA=true`
-6. Deploy - instant activation!
+**Integration Steps**:
+1. ✅ Alexandria exports TypeScript types
+2. ⏳ Publish `alexandria-worker` to npm
+3. Install package in bendv3
+4. Import types and implement service (see example above)
+5. Add feature flag to config
+6. Enable flag: `ENABLE_ALEXANDRIA=true`
+7. Deploy - instant activation!
 
 ## Performance Considerations
 
@@ -597,15 +601,26 @@ GET https://alexandria.ooheynerds.com/openapi.json
 
 ## Change Log
 
-### v2.0.0 - TypeScript Migration (Current)
+### v2.0.0 - TypeScript Migration (In Progress)
 - ✅ Full TypeScript support with exported types
 - ✅ Zod runtime validation on all endpoints
 - ✅ Type-safe API client patterns
-- ✅ Comprehensive type definitions for bendv3 integration
+- ✅ Comprehensive type definitions for external integration
 - ✅ Zero breaking changes to existing API
+- ⏳ npm package publication pending
 
-### v1.x - JavaScript Era
-- Book search by ISBN, title, author
-- Cover image processing and storage
-- Enrichment APIs for editions, works, authors
+### v1.6.0 - Enrichment API
+- Edition, work, and author enrichment endpoints
+- Quality scoring and conflict detection
+- Background queue processing
+
+### v1.5.0 - Cover Processing
+- R2-based cover storage and serving
+- Multi-provider cover fetching
+- Work-based and ISBN-based endpoints
+
+### v1.0.0 - Database Integration
+- Hyperdrive connection pooling
+- ISBN, title, and author search
+- Interactive dashboard
 - OpenAPI specification

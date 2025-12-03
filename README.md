@@ -1,118 +1,186 @@
-# Alexandria - OpenLibrary Database on Cloudflare
+# Alexandria
 
-A Cloudflare Workers application that exposes the complete OpenLibrary database (54M+ books) through a secure Cloudflare Tunnel connection to a self-hosted PostgreSQL database.
+**Self-hosted OpenLibrary database (54M+ books) accessible globally via Cloudflare Workers**
 
-## 🏗️ Architecture
+Production API: `https://alexandria.ooheynerds.com`
+
+## Overview
+
+Alexandria exposes a complete PostgreSQL mirror of OpenLibrary through Cloudflare's edge network. The database runs on a home Unraid server and is accessible worldwide via Cloudflare Tunnel + Hyperdrive.
+
+## Architecture
 
 ```
-Internet → Cloudflare Edge
+Internet → Cloudflare Edge (300+ locations)
     ↓
-Cloudflare Worker (alexandria.ooheynerds.com)
-    ↓ (Future: Hyperdrive for connection pooling)
-Cloudflare Tunnel (alexandria-db.ooheynerds.com)
+Worker (alexandria.ooheynerds.com) + Hono + Zod validation
     ↓
-Unraid Server "Tower" (192.168.1.240)
+Hyperdrive (connection pooling + query caching)
     ↓
-PostgreSQL Container (openlibrary database)
+Cloudflare Access (mTLS auth)
+    ↓
+Tunnel (alexandria-db.ooheynerds.com)
+    ↓
+Unraid Server (192.168.1.240)
+    ↓
+PostgreSQL 18 (54.8M editions, SSL enabled)
+    ↓
+R2 Bucket (cover images)
 ```
 
-## 📊 Database Statistics
+## Features
 
-- **14.7M** Authors
-- **40.1M** Works  
-- **54.8M** Editions
-- **49.3M** ISBNs
-- **42.8M** Author-Work relationships
+✅ **Database Access** (Phase 2 Complete)
+- Hyperdrive connection pooling
+- ISBN, title, and author search
+- 54.8M editions, 49.3M ISBNs, 40.1M works, 14.7M authors
 
-## 🚀 Current Status
+✅ **Cover Processing** (Phase 2.5 Complete)
+- R2 storage with multi-size variants
+- Work-based and ISBN-based endpoints
+- Multi-provider fetching (OpenLibrary, ISBNdb, Google Books)
 
-✅ **Phase 1 Complete**: Infrastructure & Hello World
-- Cloudflare Tunnel deployed on Unraid
-- Worker deployed at https://alexandria.ooheynerds.com
-- DNS configured (alexandria-db.ooheynerds.com)
-- Static hello world page live
+✅ **Enrichment API** (Phase 2.6 Complete)
+- Edition, work, and author metadata endpoints
+- Quality scoring and conflict detection
+- Background queue processing
 
-🔄 **Phase 2 Next**: Live Database Queries
-- Add PostgreSQL driver to Worker
-- Implement search functionality
-- Optional: Add Hyperdrive for performance
+✅ **TypeScript Integration** (v2.0.0)
+- Exported types for external consumers
+- Zod runtime validation
+- OpenAPI 3.0 specification
 
-## 📁 Project Structure
+## Quick Start
+
+```bash
+# Development
+cd worker/
+npm install
+npm run dev              # Local dev server (localhost:8787)
+
+# Deploy
+npm run deploy           # Deploy to Cloudflare
+npm run tail             # Live logs
+
+# Infrastructure checks
+./scripts/tunnel-status.sh  # Verify tunnel (expect 4 connections)
+./scripts/db-check.sh        # Database health + sample query
+```
+
+## API Endpoints
+
+**Search:**
+- `GET /api/search?isbn={isbn}` - ISBN lookup
+- `GET /api/search?title={title}` - Title search
+- `GET /api/search?author={author}` - Author search
+- `GET /api/stats` - Database statistics
+
+**Covers:**
+- `POST /api/covers/process` - Process cover from URL
+- `GET /api/covers/:work_key/:size` - Serve cover (large/medium/small)
+- `POST /covers/:isbn/process` - Legacy ISBN-based processing
+- `GET /covers/:isbn/:size` - Legacy ISBN-based serving
+
+**Enrichment:**
+- `POST /api/enrich/edition` - Store edition metadata
+- `POST /api/enrich/work` - Store work metadata
+- `POST /api/enrich/author` - Store author metadata
+- `POST /api/enrich/queue` - Queue background job
+- `GET /api/enrich/status/:id` - Job status
+
+**System:**
+- `GET /health` - Health check
+- `GET /openapi.json` - OpenAPI 3.0 spec
+
+## TypeScript Integration
+
+```bash
+# Install package (when published)
+npm install alexandria-worker
+```
+
+```typescript
+import type {
+  SearchQuery,
+  SearchResult,
+  BookResult,
+  ENDPOINTS
+} from 'alexandria-worker/types';
+
+// Type-safe API client
+const books = await fetch('https://alexandria.ooheynerds.com/api/search?isbn=9780439064873')
+  .then(res => res.json()) as SearchResult;
+```
+
+See [worker/README-INTEGRATION.md](./worker/README-INTEGRATION.md) for full integration guide.
+
+## Project Structure
 
 ```
 alex/
-├── worker/           # Cloudflare Worker code
-│   ├── index.js      # Main worker application
-│   └── wrangler.toml # Wrangler configuration
-├── tunnel/           # Tunnel configuration
-│   └── config.yml    # Tunnel ingress rules
-├── docs/             # Documentation
-│   ├── SETUP.md      # Initial setup guide
-│   ├── CREDENTIALS.md # Credential storage
-│   └── ARCHITECTURE.md # Architecture details
-└── scripts/          # Deployment scripts
-    ├── deploy-worker.sh
-    └── tunnel-status.sh
+├── worker/                    # Cloudflare Worker
+│   ├── index.ts              # Main worker (Hono framework)
+│   ├── types.ts              # Exported TypeScript types
+│   ├── wrangler.jsonc        # Cloudflare configuration
+│   └── README-INTEGRATION.md # Integration guide
+├── scripts/                  # Infrastructure scripts
+│   ├── deploy-worker.sh
+│   ├── tunnel-status.sh
+│   └── db-check.sh
+├── docs/                     # Documentation
+│   ├── CREDENTIALS.md        # Credentials (gitignored)
+│   └── reference/            # Reference documentation
+└── CLAUDE.md                 # Claude Code instructions
 ```
 
-## 🔑 Key Information
+## Infrastructure
 
-### Cloudflare Resources
-- **Account**: Jukasdrj@gmail.com's Account
-- **Domain**: ooheynerds.com
-- **Worker**: alexandria
-- **Tunnel ID**: 848928ab-4ab9-4733-93b0-3e7967c60acb
-- **Tunnel Name**: alexandria
+**Cloudflare Resources:**
+- Domain: `ooheynerds.com`
+- Worker: `alexandria.ooheynerds.com`
+- Tunnel: `alexandria-db.ooheynerds.com` (ID: 848928ab-4ab9-4733-93b0-3e7967c60acb)
+- Hyperdrive: Connection pooling + caching (ID: 00ff424776f4415d95245c3c4c36e854)
+- R2 Bucket: `bookstrack-covers-processed`
 
-### Server Details
-- **Unraid Server**: Tower (192.168.1.240)
-- **SSH Access**: root@Tower.local (passwordless via SSH key)
-- **PostgreSQL Port**: 5432
-- **Database**: openlibrary
-- **User**: openlibrary
-- **Data Path**: /mnt/user/domains/OL_DB/
+**Home Server (Unraid):**
+- Host: `Tower.local` (192.168.1.240)
+- PostgreSQL: Port 5432, SSL enabled
+- Database: `openlibrary` (250GB, 54M+ records)
+- SSH: `root@Tower.local` (passwordless)
 
-## 🛠️ Quick Commands
+**Tunnel Configuration:**
+- Uses **Zero Trust remotely-managed** token (not config file)
+- Configured via Cloudflare dashboard
+- Public hostname: `alexandria-db.ooheynerds.com` → `tcp://localhost:5432`
+- Auto-restarts on failure
 
-```bash
-# Deploy worker
-cd worker && npx wrangler deploy
+## Documentation
 
-# Check tunnel status (on Unraid)
-ssh root@Tower.local "docker logs alexandria-tunnel --tail 20"
+- [CLAUDE.md](./CLAUDE.md) - Complete project guide for Claude Code
+- [Integration Guide](./worker/README-INTEGRATION.md) - TypeScript API integration
+- [TODO.md](./TODO.md) - Development roadmap
 
-# Access database directly
-ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
+## Development Roadmap
 
-# View live site
-open https://alexandria.ooheynerds.com
-```
+**✅ Complete:**
+- Phase 1: Infrastructure (Tunnel, Worker, DNS)
+- Phase 2: Database Integration (Hyperdrive, Search)
+- Phase 2.5: Cover Processing (R2, Multi-provider)
+- Phase 2.6: Enrichment API (Metadata, Queue)
 
-## 📚 Documentation
+**🔜 Next:**
+- Phase 3: Performance (pg_trgm, GIN indexes, caching)
+- Phase 4: Advanced Search (Combined queries, pagination)
+- Phase 5: Operations (CI/CD, monitoring, alerts)
 
-- [Setup Guide](./docs/SETUP.md) - Complete setup instructions
-- [Architecture](./docs/ARCHITECTURE.md) - Technical architecture details
-- [Credentials](./docs/CREDENTIALS.md) - All credentials and access info
+See [TODO.md](./TODO.md) for details.
 
-## 🎯 Next Development Goals
+## License
 
-1. **Add Live Queries**: Implement ISBN search functionality
-2. **Hyperdrive Setup**: Add connection pooling for performance
-3. **Search UI**: Build search interface with results
-4. **API Endpoints**: Create RESTful API for book queries
-5. **Performance**: Add caching and optimization
+MIT
 
-## 🤝 Getting Started with Claude Code
+## Links
 
-This project is ready for Claude Code agents:
-- All configuration files in place
-- SSH access configured
-- Deployment scripts ready
-- Comprehensive documentation
-
-## 📝 Notes
-
-- Tunnel runs as Docker container on Unraid
-- Database already fully populated with OpenLibrary data
-- Worker deployed via Wrangler CLI
-- Future: Add Cloudflare Access for enhanced security
+- **Production API**: https://alexandria.ooheynerds.com
+- **GitHub**: https://github.com/jukasdrj/alexandria
+- **npm** (pending): `alexandria-worker`
