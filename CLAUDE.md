@@ -322,12 +322,13 @@ ssh root@Tower.local "docker restart alexandria-tunnel"
 ./scripts/tunnel-status.sh  # Should show 4 connections
 
 # If container is missing, recreate it:
+# Get the tunnel token from Cloudflare Zero Trust dashboard or docs/CREDENTIALS.md (gitignored)
 ssh root@Tower.local "docker run -d \
   --name alexandria-tunnel \
   --restart unless-stopped \
   --network host \
   cloudflare/cloudflared:latest \
-  tunnel run --token eyJhIjoiZDAzYmVkMGJlNmQ5NzZhY2Q4YTE3MDdiNTUwNTJmNzkiLCJ0IjoiODQ4OTI4YWItNGFiOS00NzMzLTkzYjAtM2U3OTY3YzYwYWNiIiwicyI6Ik1EaGpOREZtWlRRdE5UUTBPUzAwTmpSbUxUazBPVFF0TldGa01UTmtNVE5pWVRBMCJ9"
+  tunnel run --token <YOUR_TUNNEL_TOKEN>"
 
 # IMPORTANT: Must use --network host for tunnel to access PostgreSQL on localhost:5432
 ```
