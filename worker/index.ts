@@ -110,7 +110,7 @@ const QueueEnrichmentSchema = z.object({
   entity_type: z.enum(['work', 'edition', 'author']),
   entity_key: z.string(),
   providers_to_try: z.array(z.string()),
-  priority: z.number().min(1).max(10).optional().default(5),
+  priority: z.number().min(1).max(10).default(5),
 });
 
 // Instantiate the Hono app with typed environment and variables
@@ -742,8 +742,11 @@ app.get('/api/search',
 // Cover Image Routes (Work-based - bookstrack-covers-processed bucket)
 // =================================================================================
 
-// POST /api/covers/process - Process cover image from provider URL
-app.post('/api/covers/process', handleProcessCover);
+// POST /api/covers/process - Process cover image from provider URL (with Zod validation)
+app.post('/api/covers/process',
+  zValidator('json', ProcessCoverSchema),
+  handleProcessCover
+);
 
 // GET /api/covers/:work_key/:size - Serve processed cover by work key
 app.get('/api/covers/:work_key/:size', handleServeCover);
@@ -865,10 +868,11 @@ app.post('/covers/:isbn/process', async (c) => {
 
   } catch (error) {
     console.error(`Error processing cover for ${normalizedISBN}:`, error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return c.json({
       status: 'error',
       isbn: normalizedISBN,
-      error: error.message
+      error: message
     }, 500);
   }
 });
@@ -885,9 +889,10 @@ app.post('/covers/batch',
 
     } catch (error) {
       console.error('Batch processing error:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
       return c.json({
         error: 'Batch processing failed',
-        message: error.message
+        message
       }, 500);
     }
   }
