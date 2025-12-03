@@ -8,6 +8,7 @@ import { processCoverImage, processCoverBatch, coverExists, getCoverMetadata, ge
 import { resolveCoverUrl, extractOpenLibraryCover } from './services/cover-resolver.js';
 import { handleProcessCover, handleServeCover } from './cover-handlers.js';
 import { processEnrichmentQueue } from './queue-consumer.js';
+import { errorHandler } from './middleware/error-handler.js';
 
 // =================================================================================
 // Configuration & Initialization
@@ -361,6 +362,9 @@ const openAPISpec = {
 // Global middleware
 app.use('*', cors());
 app.use('*', secureHeaders());
+
+// Global error handler - consistent JSON responses for bendv3 integration
+app.onError(errorHandler);
 
 // Database initialization middleware
 app.use('*', async (c, next) => {

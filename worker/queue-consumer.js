@@ -8,6 +8,7 @@
 import postgres from 'postgres';
 import { enrichEdition, enrichWork, enrichAuthor } from './enrichment-service.js';
 import { formatPgArray } from './utils.js';
+import { fetchWithRetry, fetchJSON } from './lib/fetch-utils.js';
 
 // Configuration
 const BATCH_SIZE = 10;  // Max jobs to process per cron invocation
@@ -326,12 +327,16 @@ async function fetchISBNdbEdition(isbn, env) {
       return null;
     }
 
-    const response = await fetch(`https://api2.isbndb.com/book/${isbn}`, {
-      headers: {
-        'Authorization': apiKey,
-        'User-Agent': 'Alexandria/1.0 (enrichment)'
-      }
-    });
+    const response = await fetchWithRetry(
+      `https://api2.isbndb.com/book/${isbn}`,
+      {
+        headers: {
+          'Authorization': apiKey,
+          'User-Agent': 'Alexandria/1.0 (enrichment)'
+        }
+      },
+      { timeoutMs: 10000, maxRetries: 2 }  // 10s timeout, 2 retries
+    );
 
     if (!response.ok) {
       if (response.status === 404) return null;
@@ -379,9 +384,11 @@ async function fetchGoogleBooksEdition(isbn, env) {
       // API key optional
     }
 
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' }
-    });
+    const response = await fetchWithRetry(
+      url,
+      { headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' } },
+      { timeoutMs: 10000, maxRetries: 2 }  // 10s timeout, 2 retries
+    );
 
     if (!response.ok) {
       throw new Error(`Google Books API error: ${response.status}`);
@@ -432,9 +439,10 @@ async function fetchGoogleBooksEdition(isbn, env) {
  */
 async function fetchOpenLibraryEdition(isbn) {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`,
-      { headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' } }
+      { headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' } },
+      { timeoutMs: 10000, maxRetries: 2 }  // 10s timeout, 2 retries
     );
 
     if (!response.ok) {
@@ -492,9 +500,10 @@ async function enrichWorkFromProvider(sql, workKey, provider, env) {
     // Normalize work key
     const key = workKey.startsWith('/works/') ? workKey : `/works/${workKey}`;
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://openlibrary.org${key}.json`,
-      { headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' } }
+      { headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' } },
+      { timeoutMs: 10000, maxRetries: 2 }  // 10s timeout, 2 retries
     );
 
     if (!response.ok) {
@@ -564,9 +573,10 @@ async function enrichAuthorFromProvider(sql, authorKey, provider, env) {
     // Normalize author key
     const key = authorKey.startsWith('/authors/') ? authorKey : `/authors/${authorKey}`;
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://openlibrary.org${key}.json`,
-      { headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' } }
+      { headers: { 'User-Agent': 'Alexandria/1.0 (enrichment)' } },
+      { timeoutMs: 10000, maxRetries: 2 }  // 10s timeout, 2 retries
     );
 
     if (!response.ok) {
