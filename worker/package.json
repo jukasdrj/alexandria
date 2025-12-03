@@ -1,7 +1,7 @@
 {
   "name": "alexandria-worker",
-  "version": "2.0.0",
-  "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types and Zod validation",
+  "version": "2.1.0",
+  "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types, Zod validation, and intelligent search",
   "main": "index.ts",
   "types": "types.ts",
   "exports": {
@@ -38,7 +38,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "echo 'Publishing @ooheynerds/alexandria-worker v2.0.0'"
+    "prepublishOnly": "echo 'Publishing alexandria-worker v2.1.0 - Combined search & pagination support'"
   },
   "keywords": [
     "cloudflare",

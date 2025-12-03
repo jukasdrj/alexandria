@@ -68,7 +68,60 @@ results.results.forEach((book: BookResult) => {
 
 ## API Endpoints
 
-### Search Books
+### Combined Search (New in v2.1.0) ⭐
+
+**Endpoint**: `GET /api/search/combined`
+
+**Query Parameters**:
+- `q` (string, required): Search query (ISBN or text)
+- `limit` (number): Max results (default: 10, max: 100)
+- `offset` (number): Pagination offset (default: 0)
+
+**Response Type**: `CombinedSearchResult`
+
+**Features**:
+- Intelligent ISBN vs text detection
+- Fast ISBN lookups (~60ms)
+- Parallel title + author search (~1-2s)
+- Automatic deduplication
+- Full pagination support
+
+```typescript
+interface CombinedSearchResult {
+  query: string;
+  search_type: 'isbn' | 'text';
+  query_duration_ms: number;
+  results: BookResult[];
+  pagination: PaginationMetadata;
+}
+
+interface PaginationMetadata {
+  limit: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
+  returnedCount: number;
+  totalEstimated?: boolean;  // true for text searches
+}
+```
+
+**Examples**:
+```typescript
+// Search by ISBN (auto-detected)
+const isbnResults = await client.searchCombined({ q: '9780439064873' });
+
+// Search by title or author (auto-detected)
+const textResults = await client.searchCombined({ q: 'Harry Potter', limit: 20 });
+
+// Pagination
+const page2 = await client.searchCombined({
+  q: 'Tolkien',
+  limit: 10,
+  offset: 10
+});
+```
+
+### Search Books (Legacy)
 
 **Endpoint**: `GET /api/search`
 
@@ -76,7 +129,8 @@ results.results.forEach((book: BookResult) => {
 - `isbn` (string): ISBN-10 or ISBN-13
 - `title` (string): Partial title match
 - `author` (string): Partial author name match
-- `limit` (number): Max results (default: 10, max: 50)
+- `limit` (number): Max results (default: 10, max: 100)
+- `offset` (number): Pagination offset (default: 0, **new in v2.1.0**)
 
 **Response Type**: `SearchResult`
 
@@ -88,11 +142,13 @@ interface SearchResult {
     author?: string;
   };
   query_duration_ms: number;
-  count: number;
+  count?: number;  // Deprecated - use pagination.total
   results: BookResult[];
+  pagination: PaginationMetadata;  // New in v2.1.0
 }
 
 interface BookResult {
+  type?: 'edition' | 'work' | 'author';  // New in v2.1.0
   title: string;
   author: string | null;
   isbn: string | null;
@@ -104,6 +160,16 @@ interface BookResult {
   work_title: string | null;
   openlibrary_edition: string | null;
   openlibrary_work: string | null;
+  openlibrary_author?: string | null;  // New in v2.1.0
+}
+
+interface PaginationMetadata {
+  limit: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
+  returnedCount: number;
+  totalEstimated?: boolean;
 }
 ```
 
@@ -601,13 +667,20 @@ GET https://alexandria.ooheynerds.com/openapi.json
 
 ## Change Log
 
-### v2.0.0 - TypeScript Migration (In Progress)
+### v2.1.0 - Combined Search & Pagination (December 3, 2025)
+- ✅ **New `/api/search/combined` endpoint** - Intelligent ISBN vs text search
+- ✅ **Pagination support** - All search endpoints now support `offset` parameter
+- ✅ **Enhanced response types** - Added `PaginationMetadata` with `hasMore` flag
+- ✅ **BookResult enhancements** - Added `type` and `openlibrary_author` fields
+- ✅ **Performance optimized** - Parallel COUNT queries for accurate totals
+- ⚠️ **Breaking change**: `SearchResult` now includes `pagination` object instead of just `count`
+
+### v2.0.0 - TypeScript Migration (November 2025)
 - ✅ Full TypeScript support with exported types
 - ✅ Zod runtime validation on all endpoints
 - ✅ Type-safe API client patterns
 - ✅ Comprehensive type definitions for external integration
 - ✅ Zero breaking changes to existing API
-- ⏳ npm package publication pending
 
 ### v1.6.0 - Enrichment API
 - Edition, work, and author enrichment endpoints

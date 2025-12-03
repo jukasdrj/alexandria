@@ -21,6 +21,19 @@ export const SearchQuerySchema = z.object({
   title: z.string().optional(),
   author: z.string().optional(),
   limit: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 10)),
+  offset: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 0)),
+});
+
+export const CombinedSearchQuerySchema = z.object({
+  q: z.string().min(1, 'Query parameter "q" is required'),
+  limit: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 10;
+    return Math.max(1, Math.min(100, parsed));
+  }),
+  offset: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 0;
+    return Math.max(0, parsed);
+  }),
 });
 
 export const CoverBatchSchema = z.object({
@@ -106,6 +119,7 @@ export const QueueEnrichmentSchema = z.object({
 // =================================================================================
 
 export type SearchQuery = z.infer<typeof SearchQuerySchema>;
+export type CombinedSearchQuery = z.infer<typeof CombinedSearchQuerySchema>;
 export type CoverBatch = z.infer<typeof CoverBatchSchema>;
 export type ProcessCover = z.infer<typeof ProcessCoverSchema>;
 export type EnrichEdition = z.infer<typeof EnrichEditionSchema>;
@@ -118,6 +132,7 @@ export type QueueEnrichment = z.infer<typeof QueueEnrichmentSchema>;
 // =================================================================================
 
 export interface BookResult {
+  type?: 'edition' | 'work' | 'author';  // Added for combined search
   title: string;
   author: string | null;
   isbn: string | null;
@@ -129,6 +144,16 @@ export interface BookResult {
   work_title: string | null;
   openlibrary_edition: string | null;
   openlibrary_work: string | null;
+  openlibrary_author?: string | null;  // Added for combined search
+}
+
+export interface PaginationMetadata {
+  limit: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
+  returnedCount: number;
+  totalEstimated?: boolean;  // For combined text searches
 }
 
 export interface SearchResult {
@@ -138,8 +163,17 @@ export interface SearchResult {
     author?: string;
   };
   query_duration_ms: number;
-  count: number;
+  count?: number;  // Deprecated - use pagination.total
   results: BookResult[];
+  pagination: PaginationMetadata;
+}
+
+export interface CombinedSearchResult {
+  query: string;
+  search_type: 'isbn' | 'text';
+  query_duration_ms: number;
+  results: BookResult[];
+  pagination: PaginationMetadata;
 }
 
 export interface HealthCheck {
@@ -255,6 +289,7 @@ export const ENDPOINTS = {
   HEALTH: '/health',
   STATS: '/api/stats',
   SEARCH: '/api/search',
+  SEARCH_COMBINED: '/api/search/combined',  // New in v2.1.0
   ENRICH_EDITION: '/api/enrich/edition',
   ENRICH_WORK: '/api/enrich/work',
   ENRICH_AUTHOR: '/api/enrich/author',
@@ -292,6 +327,12 @@ export const API_ROUTES = {
     path: ENDPOINTS.SEARCH,
     requestSchema: SearchQuerySchema,
   } as APIRoute<SearchQuery, SearchResult>,
+
+  searchCombined: {
+    method: 'GET',
+    path: ENDPOINTS.SEARCH_COMBINED,
+    requestSchema: CombinedSearchQuerySchema,
+  } as APIRoute<CombinedSearchQuery, CombinedSearchResult>,
 
   health: {
     method: 'GET',
