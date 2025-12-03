@@ -1,5 +1,5 @@
 {
-  "name": "@ooheynerds/alexandria-worker",
+  "name": "alexandria-worker",
   "version": "2.0.0",
   "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types and Zod validation",
   "main": "index.ts",
