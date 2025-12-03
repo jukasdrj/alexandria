@@ -175,6 +175,12 @@
         "binding": "ENRICHMENT_QUEUE",
         "queue": "alexandria-enrichment-queue",
         "delivery_delay": 0
+      },
+      {
+        "//": "Cover processing queue for async downloads from bendv3",
+        "binding": "COVER_QUEUE",
+        "queue": "alexandria-cover-queue",
+        "delivery_delay": 0
       }
     ],
     "consumers": [
@@ -185,6 +191,15 @@
         "max_retries": 3,
         "dead_letter_queue": "alexandria-enrichment-dlq",
         "max_concurrency": 5
+      },
+      {
+        "//": "Cover queue consumer - high throughput for image downloads",
+        "queue": "alexandria-cover-queue",
+        "max_batch_size": 20,
+        "max_batch_timeout": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "alexandria-cover-dlq",
+        "max_concurrency": 10
       }
     ]
   },

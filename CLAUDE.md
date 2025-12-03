@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 2 + Cover Processing COMPLETE! Worker live with Hyperdrive + Tunnel database access + R2 cover image storage.
+**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues.
 
 ## Architecture Flow
 
@@ -19,8 +19,15 @@ Internet → Cloudflare Access (IP bypass: 47.187.18.143/32)
 → Unraid (192.168.1.240:5432, SSL enabled)
 → PostgreSQL (54.8M editions)
 
+Queue-Based Processing (NEW - Dec 3, 2025):
+→ bendv3 produces → Cloudflare Queues → Alexandria consumes
+→ Cover Queue: Async cover downloads (2 producers, 1 consumer)
+→ Enrichment Queue: Async metadata enrichment (2 producers, 1 consumer)
+→ Both queues: max_retries=3, dead letter queues, analytics tracking
+
 Cover Images:
 → Worker receives provider URL (OpenLibrary, ISBNdb, Google Books)
+→ Fast-fail immediate processing (1 retry) OR queue for background
 → Downloads, validates, stores in R2 (bookstrack-covers-processed bucket)
 → Serves via /api/covers/:work_key/:size or /covers/:isbn/:size
 ```
@@ -98,6 +105,57 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 3. Deploy: `npm run deploy`
 4. Check logs: `npm run tail`
 5. Test live: https://alexandria.ooheynerds.com
+
+## Alexandria Search API (COMPLETE ✅)
+
+**Full Documentation**: `docs/API-SEARCH-ENDPOINTS.md`
+
+### Main Search Endpoint: GET /api/search
+
+**Supports 3 search modes**:
+1. **ISBN** - Exact match with Smart Resolution (auto-enrichment if not found)
+2. **Title** - Case-insensitive partial match (ILIKE)
+3. **Author** - Case-insensitive partial match with joins
+
+**Query Parameters**:
+- `isbn` - ISBN-10 or ISBN-13 (normalized automatically)
+- `title` - Book title (partial match)
+- `author` - Author name (partial match)
+- `limit` - Results per page (default: 20, max: 100)
+- `offset` - Pagination offset (default: 0)
+
+**Smart Resolution**: When ISBN not found in OpenLibrary, automatically queries ISBNdb → Google Books → OpenLibrary, enriches database, and returns result.
+
+**Performance**:
+- ISBN: ~10-50ms (indexed)
+- Title: ~50-200ms (ILIKE scan)
+- Author: ~100-300ms (multi-table join)
+
+**Example Queries**:
+```bash
+# ISBN search
+curl 'https://alexandria.ooheynerds.com/api/search?isbn=9780439064873'
+
+# Title search with pagination
+curl 'https://alexandria.ooheynerds.com/api/search?title=harry%20potter&limit=10'
+
+# Author search
+curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offset=40'
+```
+
+### Other Endpoints (All Verified Working ✅)
+- **GET /health** - Health check with DB latency
+- **GET /api/stats** - Database statistics (54.8M editions, 49.3M ISBNs, 40.1M works, 14.7M authors)
+- **GET /covers/:isbn/:size** - Cover images (large/medium/small)
+- **POST /api/covers/process** - Work-based cover processing
+- **POST /covers/:isbn/process** - ISBN-based cover processing
+- **POST /covers/batch** - Batch cover processing (max 10)
+- **GET /covers/:isbn/status** - Cover availability check
+- **POST /api/enrich/edition** - Store edition metadata
+- **POST /api/enrich/work** - Store work metadata
+- **POST /api/enrich/author** - Store author biographical data
+- **POST /api/enrich/queue** - Queue background enrichment
+- **GET /api/enrich/status/:id** - Check enrichment status
 
 ## ISBNdb API Integration (COMPLETE ✅)
 
@@ -221,6 +279,134 @@ export default app;
 ```
 
 **CRITICAL I/O Context Fix**: Connection must be request-scoped (`c.get('sql')`) not global. Global connections cause "Cannot perform I/O on behalf of a different request" errors.
+
+## Queue Architecture (COMPLETE ✅ - Dec 3, 2025)
+
+### Overview
+Alexandria implements a queue-based architecture for async processing of cover downloads and metadata enrichment. This enables non-blocking operations and better resource utilization.
+
+### Queue Configuration
+
+**File**: `worker/wrangler.jsonc`
+
+```jsonc
+"queues": {
+  "producers": [
+    { "binding": "ENRICHMENT_QUEUE", "queue": "alexandria-enrichment-queue" },
+    { "binding": "COVER_QUEUE", "queue": "alexandria-cover-queue" }
+  ],
+  "consumers": [
+    {
+      "queue": "alexandria-enrichment-queue",
+      "max_batch_size": 10,
+      "max_batch_timeout": 30,
+      "max_retries": 3,
+      "dead_letter_queue": "alexandria-enrichment-dlq",
+      "max_concurrency": 5
+    },
+    {
+      "queue": "alexandria-cover-queue",
+      "max_batch_size": 20,
+      "max_batch_timeout": 10,
+      "max_retries": 3,
+      "dead_letter_queue": "alexandria-cover-dlq",
+      "max_concurrency": 10
+    }
+  ]
+}
+```
+
+### Queue Handlers
+
+**File**: `worker/queue-handlers.js`
+
+Contains two queue processors:
+- **`processCoverQueue(batch, env)`**: Processes cover download requests
+  - Downloads images from provider URLs
+  - Validates and stores in R2
+  - Tracks analytics (source, latency, size)
+  - Auto-retries on failure (up to 3 times)
+
+- **`processEnrichmentQueue(batch, env)`**: Processes metadata enrichment requests
+  - Uses `smartResolveISBN()` for ISBNdb → Google Books → OpenLibrary chain
+  - Stores enriched data in PostgreSQL via Hyperdrive
+  - Tracks analytics (provider, cost estimates)
+  - Auto-retries on failure (up to 3 times)
+
+### Queue Routing
+
+**File**: `worker/index.ts`
+
+```typescript
+async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
+  switch (batch.queue) {
+    case 'alexandria-cover-queue':
+      return await processCoverQueue(batch, env);
+    case 'alexandria-enrichment-queue':
+      return await processEnrichmentQueue(batch, env);
+    default:
+      console.error(`Unknown queue: ${batch.queue}`);
+      batch.messages.forEach(msg => msg.ack());
+  }
+}
+```
+
+### Integration with bendv3
+
+bendv3 acts as a **producer** for both queues:
+
+**Cover Queue** (`bendv3/src/services/alexandria-cover-service.ts`):
+```typescript
+// Fast-fail immediate processing, queue on failure
+const result = await processBookCover(request, env, 1) // 1 retry max
+if (!result.success) {
+  await queueCoverProcessing(request, env, 'normal') // Queue for background
+}
+```
+
+**Enrichment Queue** (`bendv3/src/services/enrichment-queue.ts`):
+```typescript
+// Queue single ISBN
+await queueEnrichment({ isbn, priority: 'high', source: 'user_add' }, env)
+
+// Queue batch
+await queueEnrichmentBatch(isbns, { priority: 'low', source: 'import' }, env)
+```
+
+### Queue Statistics
+
+| Queue | Producers | Consumers | Purpose |
+|-------|-----------|-----------|---------|
+| **alexandria-cover-queue** | Alexandria, bendv3 | Alexandria | Async cover downloads |
+| **alexandria-enrichment-queue** | Alexandria, bendv3 | Alexandria | Async metadata enrichment |
+
+### Monitoring
+
+Check queue status:
+```bash
+npx wrangler queues list | grep alexandria
+```
+
+Monitor queue processing:
+```bash
+npx wrangler tail alexandria --format pretty | grep Queue
+```
+
+Expected logs:
+```
+[CoverQueue] Processing 5 cover requests
+[CoverQueue] Batch complete: processed=4, cached=1, failed=0
+[EnrichQueue] Processing 10 enrichment requests
+[EnrichQueue] Batch complete: enriched=8, cached=2, failed=0
+```
+
+### Dead Letter Queues
+
+Failed messages (after 3 retries) move to:
+- **alexandria-cover-dlq**: Failed cover downloads
+- **alexandria-enrichment-dlq**: Failed enrichment requests
+
+Use DLQs for debugging and manual reprocessing.
 
 ## Cover Image Processing (COMPLETE ✅)
 

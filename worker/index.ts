@@ -10,6 +10,7 @@ import { processCoverImage, processCoverBatch, coverExists, getCoverMetadata, ge
 import { resolveCoverUrl, extractOpenLibraryCover } from './services/cover-resolver.js';
 import { handleProcessCover, handleServeCover } from './cover-handlers.js';
 import { processEnrichmentQueue } from './queue-consumer.js';
+import { processCoverQueue, processEnrichmentQueue as processEnrichmentQueueBatch } from './queue-handlers.js';
 import { errorHandler } from './middleware/error-handler.js';
 import type { Env, Variables } from './env.d.js';
 import { openAPISpec } from './openapi.js';
@@ -1138,19 +1139,22 @@ export default {
     );
   },
 
-  // Queue consumer handler for enrichment queue
+  // Queue consumer handler - routes messages based on queue name
   async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
-    console.log(`Queue consumer triggered with ${batch.messages.length} messages`);
+    console.log(`Queue triggered: ${batch.queue} with ${batch.messages.length} messages`);
 
-    for (const message of batch.messages) {
-      try {
-        console.log(`Processing queue message:`, message.body);
-        // Add queue message processing logic here when needed
-        message.ack();
-      } catch (error) {
-        console.error(`Failed to process queue message:`, error);
-        message.retry();
-      }
+    // Route to appropriate handler based on queue name
+    switch (batch.queue) {
+      case 'alexandria-cover-queue':
+        return await processCoverQueue(batch, env);
+
+      case 'alexandria-enrichment-queue':
+        return await processEnrichmentQueueBatch(batch, env);
+
+      default:
+        console.error(`Unknown queue: ${batch.queue}`);
+        // Ack all messages to prevent infinite retry
+        batch.messages.forEach(msg => msg.ack());
     }
   }
 };
