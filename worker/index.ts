@@ -20,6 +20,11 @@ import type { Env, Variables } from './env.d.js';
 // =================================================================================
 // Zod Validation Schemas for RPC Type Safety
 // =================================================================================
+// NOTE: All schemas align with OpenAPI spec required fields (see openAPISpec below)
+// - EnrichEdition: required ['isbn', 'primary_provider']
+// - EnrichWork: required ['work_key', 'title', 'primary_provider']
+// - EnrichAuthor: required ['author_key', 'name', 'primary_provider']
+// - QueueEnrichment: required ['entity_type', 'entity_key', 'providers_to_try']
 
 // Search endpoint query parameters
 const SearchQuerySchema = z.object({

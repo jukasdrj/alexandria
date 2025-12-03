@@ -1,3 +1,5 @@
+import type { Sql } from 'postgres';
+
 // Cloudflare Worker Environment Bindings
 export interface Env {
   // Hyperdrive binding
@@ -55,6 +57,6 @@ export interface Env {
 
 // Extend Hono Context with custom variables
 export type Variables = {
-  sql: any; // postgres-js SQL instance
+  sql: Sql; // postgres-js SQL instance with full type safety
   startTime: number;
 };
