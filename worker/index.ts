@@ -28,12 +28,34 @@ import { getDashboardHTML } from './dashboard.js';
 // - EnrichAuthor: required ['author_key', 'name', 'primary_provider']
 // - QueueEnrichment: required ['entity_type', 'entity_key', 'providers_to_try']
 
-// Search endpoint query parameters
+// Search endpoint query parameters with pagination
 const SearchQuerySchema = z.object({
   isbn: z.string().optional(),
   title: z.string().optional(),
   author: z.string().optional(),
-  limit: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 10)),
+  limit: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 10;
+    // Default 10, min 1, max 100
+    return Math.max(1, Math.min(100, parsed));
+  }),
+  offset: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 0;
+    // Default 0, min 0
+    return Math.max(0, parsed);
+  }),
+});
+
+// Combined search query parameters (issue #41)
+const CombinedSearchQuerySchema = z.object({
+  q: z.string().min(1, 'Query parameter "q" is required'),
+  limit: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 10;
+    return Math.max(1, Math.min(100, parsed));
+  }),
+  offset: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 0;
+    return Math.max(0, parsed);
+  }),
 });
 
 // Cover batch processing
@@ -250,9 +272,8 @@ app.get('/api/search',
   zValidator('query', SearchQuerySchema),
   cache({ cacheName: 'alexandria-cache', cacheControl: 'public, max-age=86400' }),
   async (c) => {
-    const { isbn: rawIsbn, title, author, limit: validatedLimit } = c.req.valid('query');
+    const { isbn: rawIsbn, title, author, limit, offset } = c.req.valid('query');
     const isbn = rawIsbn?.replace(/[^0-9X]/gi, '').toUpperCase();
-    const limit = Math.min(validatedLimit || 10, 50);
 
     if (!isbn && !title && !author) {
       return c.json({
@@ -265,6 +286,7 @@ app.get('/api/search',
     const start = Date.now();
     try {
       let results: any[] = [];
+      let total = 0;
 
       if (isbn) {
         if (isbn.length !== 10 && isbn.length !== 13) {
@@ -273,79 +295,123 @@ app.get('/api/search',
             provided: c.req.query('isbn')
           }, 400);
         }
-        results = await sql`
-          SELECT
-            e.data->>'title' AS title,
-            a.data->>'name' AS author,
-            ei.isbn,
-            e.data->>'publish_date' AS publish_date,
-            e.data->>'publishers' AS publishers,
-            e.data->>'number_of_pages' AS pages,
-            w.data->>'title' AS work_title,
-            e.key AS edition_key,
-            w.key AS work_key,
-            (e.data->'covers'->0)::text AS cover_id
-          FROM editions e
-          JOIN edition_isbns ei ON ei.edition_key = e.key
-          LEFT JOIN works w ON w.key = e.work_key
-          LEFT JOIN author_works aw ON aw.work_key = w.key
-          LEFT JOIN authors a ON aw.author_key = a.key
-          WHERE ei.isbn = ${isbn}
-          LIMIT ${limit}
-        `;
+
+        // ISBN queries should be exact - count and fetch in parallel
+        const [countResult, dataResult] = await Promise.all([
+          sql`
+            SELECT COUNT(DISTINCT e.key)::int AS total
+            FROM editions e
+            JOIN edition_isbns ei ON ei.edition_key = e.key
+            WHERE ei.isbn = ${isbn}
+          `,
+          sql`
+            SELECT
+              e.data->>'title' AS title,
+              a.data->>'name' AS author,
+              ei.isbn,
+              e.data->>'publish_date' AS publish_date,
+              e.data->>'publishers' AS publishers,
+              e.data->>'number_of_pages' AS pages,
+              w.data->>'title' AS work_title,
+              e.key AS edition_key,
+              w.key AS work_key,
+              (e.data->'covers'->0)::text AS cover_id
+            FROM editions e
+            JOIN edition_isbns ei ON ei.edition_key = e.key
+            LEFT JOIN works w ON w.key = e.work_key
+            LEFT JOIN author_works aw ON aw.work_key = w.key
+            LEFT JOIN authors a ON aw.author_key = a.key
+            WHERE ei.isbn = ${isbn}
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `
+        ]);
+
+        total = countResult[0]?.total || 0;
+        results = dataResult;
+
       } else if (title) {
+        // For title searches, use a subquery with DISTINCT to get accurate counts
         // NOTE: ILIKE can be slow. For production, consider pg_trgm with GIN/GIST indexes.
-        results = await sql`
-          SELECT DISTINCT ON (e.key)
-            e.data->>'title' AS title,
-            a.data->>'name' AS author,
-            ei.isbn,
-            e.data->>'publish_date' AS publish_date,
-            e.data->>'publishers' AS publishers,
-            e.data->>'number_of_pages' AS pages,
-            w.data->>'title' AS work_title,
-            e.key AS edition_key,
-            w.key AS work_key,
-            (e.data->'covers'->0)::text AS cover_id
-          FROM editions e
-          LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
-          LEFT JOIN works w ON w.key = e.work_key
-          LEFT JOIN author_works aw ON aw.work_key = w.key
-          LEFT JOIN authors a ON aw.author_key = a.key
-          WHERE e.data->>'title' ILIKE ${'%' + title + '%'}
-          LIMIT ${limit}
-        `;
+        const [countResult, dataResult] = await Promise.all([
+          sql`
+            SELECT COUNT(*)::int AS total
+            FROM (
+              SELECT DISTINCT e.key
+              FROM editions e
+              WHERE e.data->>'title' ILIKE ${'%' + title + '%'}
+            ) AS unique_editions
+          `,
+          sql`
+            SELECT DISTINCT ON (e.key)
+              e.data->>'title' AS title,
+              a.data->>'name' AS author,
+              ei.isbn,
+              e.data->>'publish_date' AS publish_date,
+              e.data->>'publishers' AS publishers,
+              e.data->>'number_of_pages' AS pages,
+              w.data->>'title' AS work_title,
+              e.key AS edition_key,
+              w.key AS work_key,
+              (e.data->'covers'->0)::text AS cover_id
+            FROM editions e
+            LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
+            LEFT JOIN works w ON w.key = e.work_key
+            LEFT JOIN author_works aw ON aw.work_key = w.key
+            LEFT JOIN authors a ON aw.author_key = a.key
+            WHERE e.data->>'title' ILIKE ${'%' + title + '%'}
+            ORDER BY e.key
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `
+        ]);
+
+        total = countResult[0]?.total || 0;
+        results = dataResult;
+
       } else if (author) {
-        results = await sql`
-          SELECT DISTINCT ON (e.key)
-            e.data->>'title' AS title,
-            a.data->>'name' AS author,
-            ei.isbn,
-            e.data->>'publish_date' AS publish_date,
-            e.data->>'publishers' AS publishers,
-            e.data->>'number_of_pages' AS pages,
-            w.data->>'title' AS work_title,
-            e.key AS edition_key,
-            w.key AS work_key,
-            (e.data->'covers'->0)::text AS cover_id
-          FROM authors a
-          JOIN author_works aw ON aw.author_key = a.key
-          JOIN works w ON w.key = aw.work_key
-          JOIN editions e ON e.work_key = w.key
-          LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
-          WHERE a.data->>'name' ILIKE ${'%' + author + '%'}
-          LIMIT ${limit}
-        `;
+        // For author searches, count unique editions
+        const [countResult, dataResult] = await Promise.all([
+          sql`
+            SELECT COUNT(*)::int AS total
+            FROM (
+              SELECT DISTINCT e.key
+              FROM authors a
+              JOIN author_works aw ON aw.author_key = a.key
+              JOIN works w ON w.key = aw.work_key
+              JOIN editions e ON e.work_key = w.key
+              WHERE a.data->>'name' ILIKE ${'%' + author + '%'}
+            ) AS unique_editions
+          `,
+          sql`
+            SELECT DISTINCT ON (e.key)
+              e.data->>'title' AS title,
+              a.data->>'name' AS author,
+              ei.isbn,
+              e.data->>'publish_date' AS publish_date,
+              e.data->>'publishers' AS publishers,
+              e.data->>'number_of_pages' AS pages,
+              w.data->>'title' AS work_title,
+              e.key AS edition_key,
+              w.key AS work_key,
+              (e.data->'covers'->0)::text AS cover_id
+            FROM authors a
+            JOIN author_works aw ON aw.author_key = a.key
+            JOIN works w ON w.key = aw.work_key
+            JOIN editions e ON e.work_key = w.key
+            LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
+            WHERE a.data->>'name' ILIKE ${'%' + author + '%'}
+            ORDER BY e.key
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `
+        ]);
+
+        total = countResult[0]?.total || 0;
+        results = dataResult;
       }
 
       const queryDuration = Date.now() - start;
-
-      if (results.length === 0) {
-        return c.json({
-          error: 'Not Found',
-          query: { isbn, title, author }
-        }, 404);
-      }
 
       // Resolve cover URLs with lazy-loading (R2 cache or external)
       const formattedResults = await Promise.all(results.map(async (row) => {
@@ -388,17 +454,289 @@ app.get('/api/search',
         };
       }));
 
+      // Calculate pagination metadata
+      const hasMore = offset + results.length < total;
+
       return c.json({
         query: { isbn, title, author },
         query_duration_ms: queryDuration,
-        count: formattedResults.length,
-        results: formattedResults
+        results: formattedResults,
+        pagination: {
+          limit,
+          offset,
+          total,
+          hasMore,
+          returnedCount: formattedResults.length
+        }
       }, 200, {
         'cache-control': 'public, max-age=86400'
       });
 
     } catch (e) {
       console.error('Search query error:', e);
+      return c.json({
+        error: 'Database query failed',
+        message: e instanceof Error ? e.message : 'Unknown error'
+      }, 500);
+    }
+  }
+);
+
+// GET /api/search/combined -> Combined search endpoint (issue #41)
+// Intelligently searches across ISBN, title, and author based on query pattern
+app.get('/api/search/combined',
+  zValidator('query', CombinedSearchQuerySchema),
+  cache({ cacheName: 'alexandria-cache', cacheControl: 'public, max-age=86400' }),
+  async (c) => {
+    const { q: rawQuery, limit, offset } = c.req.valid('query');
+
+    // Sanitize and normalize query
+    const query = rawQuery.trim();
+
+    // Detect if query looks like an ISBN (10 or 13 digits, possibly with X)
+    const isbnPattern = /^[0-9X\-\s]{10,17}$/i;
+    const isISBNLike = isbnPattern.test(query);
+
+    const sql = c.get('sql');
+    const start = Date.now();
+
+    try {
+      let results: any[] = [];
+      let total = 0;
+      let searchType: string;
+
+      if (isISBNLike) {
+        // Normalize ISBN (remove hyphens, spaces, uppercase)
+        const isbn = query.replace(/[^0-9X]/gi, '').toUpperCase();
+
+        // Validate ISBN length
+        if (isbn.length !== 10 && isbn.length !== 13) {
+          return c.json({
+            error: 'Invalid ISBN format',
+            message: 'ISBN must be 10 or 13 characters',
+            provided: query
+          }, 400);
+        }
+
+        searchType = 'isbn';
+
+        // Search by ISBN with count (indexed, fast lookup)
+        const [countResult, dataResult] = await Promise.all([
+          sql`
+            SELECT COUNT(DISTINCT e.key)::int AS total
+            FROM editions e
+            JOIN edition_isbns ei ON ei.edition_key = e.key
+            WHERE ei.isbn = ${isbn}
+          `,
+          sql`
+            SELECT
+              e.data->>'title' AS title,
+              a.data->>'name' AS author,
+              ei.isbn,
+              e.data->>'publish_date' AS publish_date,
+              e.data->>'publishers' AS publishers,
+              e.data->>'number_of_pages' AS pages,
+              w.data->>'title' AS work_title,
+              e.key AS edition_key,
+              w.key AS work_key,
+              a.key AS author_key,
+              (e.data->'covers'->0)::text AS cover_id,
+              'edition' AS result_type
+            FROM editions e
+            JOIN edition_isbns ei ON ei.edition_key = e.key
+            LEFT JOIN works w ON w.key = e.work_key
+            LEFT JOIN author_works aw ON aw.work_key = w.key
+            LEFT JOIN authors a ON aw.author_key = a.key
+            WHERE ei.isbn = ${isbn}
+            LIMIT ${limit}
+            OFFSET ${offset}
+          `
+        ]);
+
+        total = countResult[0]?.total || 0;
+        results = dataResult;
+
+      } else {
+        // Text search: search both titles and authors simultaneously
+        searchType = 'text';
+
+        // Search pattern for ILIKE (uses GIN trigram indexes)
+        const searchPattern = `%${query}%`;
+
+        // For text searches, we need to get total count of unique editions
+        // across both title and author searches. This is complex, so we'll
+        // fetch more results and dedupe, then provide estimated total.
+        // Note: For exact totals, we'd need a UNION query with COUNT which is expensive.
+
+        // Parallel search: titles and authors
+        const [titleCountResult, authorCountResult, titleResults, authorResults] = await Promise.all([
+          // Count title matches
+          sql`
+            SELECT COUNT(*)::int AS total
+            FROM (
+              SELECT DISTINCT e.key
+              FROM editions e
+              WHERE e.data->>'title' ILIKE ${searchPattern}
+            ) AS unique_editions
+          `,
+          // Count author matches
+          sql`
+            SELECT COUNT(*)::int AS total
+            FROM (
+              SELECT DISTINCT e.key
+              FROM authors a
+              JOIN author_works aw ON aw.author_key = a.key
+              JOIN works w ON w.key = aw.work_key
+              JOIN editions e ON e.work_key = w.key
+              WHERE a.data->>'name' ILIKE ${searchPattern}
+            ) AS unique_editions
+          `,
+          // Search editions by title
+          sql`
+            SELECT DISTINCT ON (e.key)
+              e.data->>'title' AS title,
+              a.data->>'name' AS author,
+              ei.isbn,
+              e.data->>'publish_date' AS publish_date,
+              e.data->>'publishers' AS publishers,
+              e.data->>'number_of_pages' AS pages,
+              w.data->>'title' AS work_title,
+              e.key AS edition_key,
+              w.key AS work_key,
+              a.key AS author_key,
+              (e.data->'covers'->0)::text AS cover_id,
+              'edition' AS result_type
+            FROM editions e
+            LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
+            LEFT JOIN works w ON w.key = e.work_key
+            LEFT JOIN author_works aw ON aw.work_key = w.key
+            LEFT JOIN authors a ON aw.author_key = a.key
+            WHERE e.data->>'title' ILIKE ${searchPattern}
+            ORDER BY e.key
+            LIMIT ${limit + 50}
+            OFFSET ${offset}
+          `,
+          // Search authors by name
+          sql`
+            SELECT DISTINCT ON (e.key)
+              e.data->>'title' AS title,
+              a.data->>'name' AS author,
+              ei.isbn,
+              e.data->>'publish_date' AS publish_date,
+              e.data->>'publishers' AS publishers,
+              e.data->>'number_of_pages' AS pages,
+              w.data->>'title' AS work_title,
+              e.key AS edition_key,
+              w.key AS work_key,
+              a.key AS author_key,
+              (e.data->'covers'->0)::text AS cover_id,
+              'edition' AS result_type
+            FROM authors a
+            JOIN author_works aw ON aw.author_key = a.key
+            JOIN works w ON w.key = aw.work_key
+            JOIN editions e ON e.work_key = w.key
+            LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
+            WHERE a.data->>'name' ILIKE ${searchPattern}
+            ORDER BY e.key
+            LIMIT ${limit + 50}
+            OFFSET ${offset}
+          `
+        ]);
+
+        // Combine and deduplicate results (by edition_key)
+        const combinedMap = new Map();
+        [...titleResults, ...authorResults].forEach(row => {
+          if (row.edition_key && !combinedMap.has(row.edition_key)) {
+            combinedMap.set(row.edition_key, row);
+          }
+        });
+
+        results = Array.from(combinedMap.values()).slice(0, limit);
+
+        // Total is approximated as sum of both counts (may have overlap, but good estimate)
+        // For precise total, we'd need UNION which is more expensive
+        const titleTotal = titleCountResult[0]?.total || 0;
+        const authorTotal = authorCountResult[0]?.total || 0;
+        total = titleTotal + authorTotal; // Estimated (may count some editions twice)
+      }
+
+      const queryDuration = Date.now() - start;
+
+      if (results.length === 0) {
+        return c.json({
+          error: 'Not Found',
+          query: query,
+          search_type: searchType,
+          message: 'No results found'
+        }, 404);
+      }
+
+      // Resolve cover URLs with lazy-loading (R2 cache or external)
+      const formattedResults = await Promise.all(results.map(async (row) => {
+        // Build external OpenLibrary cover URL from cover_id
+        let externalCoverUrl = null;
+        if (row.cover_id) {
+          const coverId = row.cover_id.replace(/"/g, ''); // Remove JSON quotes
+          if (coverId && coverId !== 'null') {
+            externalCoverUrl = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+          }
+        }
+
+        // Resolve cover URL (Alexandria R2 if cached, external if not)
+        let coverUrl = null;
+        let coverSource = null;
+        if (row.isbn) {
+          try {
+            const coverResult = await resolveCoverUrl(row.isbn, externalCoverUrl, c.env, c.executionCtx);
+            coverUrl = coverResult.url;
+            coverSource = coverResult.source;
+          } catch (e) {
+            console.error(`Cover resolve failed for ${row.isbn}:`, e instanceof Error ? e.message : String(e));
+            coverUrl = externalCoverUrl; // Fallback
+            coverSource = 'external-fallback';
+          }
+        }
+
+        return {
+          type: row.result_type,
+          title: row.title,
+          author: row.author,
+          isbn: row.isbn,
+          coverUrl,
+          coverSource,
+          publish_date: row.publish_date,
+          publishers: row.publishers ? JSON.parse(row.publishers) : null,
+          pages: row.pages,
+          work_title: row.work_title,
+          openlibrary_edition: row.edition_key ? `https://openlibrary.org${row.edition_key}` : null,
+          openlibrary_work: row.work_key ? `https://openlibrary.org${row.work_key}` : null,
+          openlibrary_author: row.author_key ? `https://openlibrary.org${row.author_key}` : null,
+        };
+      }));
+
+      // Calculate pagination metadata
+      const hasMore = offset + results.length < total;
+
+      return c.json({
+        query: query,
+        search_type: searchType,
+        query_duration_ms: queryDuration,
+        results: formattedResults,
+        pagination: {
+          limit,
+          offset,
+          total,
+          hasMore,
+          returnedCount: formattedResults.length,
+          // Note for text searches: total is estimated (sum of title + author matches, may have overlap)
+          ...(searchType === 'text' && { totalEstimated: true })
+        }
+      }, 200, {
+        'cache-control': 'public, max-age=86400'
+      });
+
+    } catch (e) {
+      console.error('Combined search query error:', e);
       return c.json({
         error: 'Database query failed',
         message: e instanceof Error ? e.message : 'Unknown error'

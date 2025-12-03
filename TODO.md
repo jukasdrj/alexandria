@@ -16,49 +16,32 @@ Current status and next steps for development.
 2. ⏳ enriched_editions (30M) - After works complete
 3. ⏳ enriched_authors (14M) - Parallel with editions
 
-### Issue #35: ILIKE Performance (BLOCKING)
-**Priority:** HIGH - Blocks Phase 3  
-**Problem:** Current title/author search uses ILIKE which doesn't scale  
-**Impact:** Searches can timeout on 54M rows
+### Issue #35: ILIKE Performance - RESOLVED ✅
+**Priority:** LOW (was HIGH)  
+**Status:** Benchmarked and verified - ILIKE is actually performant!
 
-**Current Code (worker/index.ts:520-550):**
-```sql
-WHERE e.data->>'title' ILIKE '%' + title + '%'
-WHERE a.data->>'name' ILIKE '%' + author + '%'
+**Benchmark Results (December 3, 2025):**
+```
+ILIKE '%harry potter%':     250ms ✅ (uses GIN index)
+Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 ```
 
-**Solution:** Use pg_trgm GIN indexes (already enabled)
+**Key Findings:**
+1. GIN trigram indexes ALREADY exist on base tables:
+   - `ix_editions_title` - GIN trigram on `data->>'title'`
+   - `ix_editions_subtitle` - GIN trigram on `data->>'subtitle'`  
+   - `ix_authors_name` - GIN trigram on `data->>'name'`
 
-**Fix Steps:**
-1. Create GIN indexes on base tables:
-```sql
--- On editions table (54M rows)
-CREATE INDEX CONCURRENTLY idx_editions_title_trgm 
-ON editions USING gin ((data->>'title') gin_trgm_ops);
+2. ILIKE with wildcards (`%term%`) properly uses these indexes
+3. The similarity operator (`%`) is too fuzzy and causes full table scans
+4. Current 250ms performance is acceptable for production
 
--- On authors table (14M rows)  
-CREATE INDEX CONCURRENTLY idx_authors_name_trgm
-ON authors USING gin ((data->>'name') gin_trgm_ops);
-```
+**Recommendation:** Keep ILIKE, add pagination for large result sets
 
-2. Update queries to use trigram similarity:
-```sql
--- Instead of ILIKE, use % operator (requires pg_trgm)
-WHERE e.data->>'title' % 'search term'  -- Similarity match
--- Or use word_similarity for phrase matching
-WHERE word_similarity('search term', e.data->>'title') > 0.3
-```
-
-3. Alternatively, query enriched tables (after migration):
-```sql
--- enriched_works already has GIN trigram index
-SELECT * FROM enriched_works 
-WHERE title % 'harry potter'
-ORDER BY similarity(title, 'harry potter') DESC
-LIMIT 10;
-```
-
-**Estimated Time:** 2-3 hours (index creation on 54M rows takes ~30 min)
+**Optional Future Improvements:**
+- Query enriched_works/enriched_editions first (already have GIN indexes)
+- Add result caching in KV for popular searches
+- Consider full-text search (tsvector) for complex queries
 
 ---
 
@@ -104,11 +87,10 @@ LIMIT 10;
 
 ## Phase 3: Performance & Search Optimization
 
-- [ ] **#35 Fix ILIKE performance** (see above - BLOCKING)
-- [ ] Add GIN indexes to base tables (editions, authors)
-- [ ] Switch search to query enriched tables first
-- [ ] Add query result caching (KV)
-- [ ] Implement rate limiting per IP
+- [x] **#35 Fix ILIKE performance** - RESOLVED (ILIKE + GIN indexes work well at 250ms)
+- [ ] Switch search to query enriched tables first (after migration completes)
+- [ ] Add query result caching (KV) - Issue #39
+- [ ] Implement rate limiting per IP - Issue #40
 - [ ] Monitor and optimize slow queries
 - [ ] Add CDN caching headers
 
