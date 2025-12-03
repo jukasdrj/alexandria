@@ -3,19 +3,118 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { cache } from 'hono/cache';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
 import { handleEnrichEdition, handleEnrichWork, handleEnrichAuthor, handleQueueEnrichment, handleGetEnrichmentStatus } from './enrich-handlers.js';
 import { processCoverImage, processCoverBatch, coverExists, getCoverMetadata, getPlaceholderCover } from './services/image-processor.js';
 import { resolveCoverUrl, extractOpenLibraryCover } from './services/cover-resolver.js';
 import { handleProcessCover, handleServeCover } from './cover-handlers.js';
 import { processEnrichmentQueue } from './queue-consumer.js';
 import { errorHandler } from './middleware/error-handler.js';
+import type { Env, Variables } from './env.d.js';
 
 // =================================================================================
 // Configuration & Initialization
 // =================================================================================
 
-// Instantiate the Hono app
-const app = new Hono();
+// =================================================================================
+// Zod Validation Schemas for RPC Type Safety
+// =================================================================================
+
+// Search endpoint query parameters
+const SearchQuerySchema = z.object({
+  isbn: z.string().optional(),
+  title: z.string().optional(),
+  author: z.string().optional(),
+  limit: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 10)),
+});
+
+// Cover batch processing
+const CoverBatchSchema = z.object({
+  isbns: z.array(z.string()).min(1).max(10),
+});
+
+// Process cover from provider URL
+const ProcessCoverSchema = z.object({
+  work_key: z.string(),
+  provider_url: z.string().url(),
+  isbn: z.string().optional(),
+});
+
+// Enrich edition schema
+const EnrichEditionSchema = z.object({
+  isbn: z.string(),
+  title: z.string().optional(),
+  subtitle: z.string().optional(),
+  publisher: z.string().optional(),
+  publication_date: z.string().optional(),
+  page_count: z.number().optional(),
+  format: z.string().optional(),
+  language: z.string().optional(),
+  primary_provider: z.enum(['isbndb', 'google-books', 'openlibrary', 'user-correction']),
+  cover_urls: z.object({
+    large: z.string().optional(),
+    medium: z.string().optional(),
+    small: z.string().optional(),
+  }).optional(),
+  cover_source: z.string().optional(),
+  work_key: z.string().optional(),
+  openlibrary_edition_id: z.string().optional(),
+  amazon_asins: z.array(z.string()).optional(),
+  google_books_volume_ids: z.array(z.string()).optional(),
+  goodreads_edition_ids: z.array(z.string()).optional(),
+  alternate_isbns: z.array(z.string()).optional(),
+});
+
+// Enrich work schema
+const EnrichWorkSchema = z.object({
+  work_key: z.string(),
+  title: z.string(),
+  subtitle: z.string().optional(),
+  description: z.string().optional(),
+  original_language: z.string().optional(),
+  first_publication_year: z.number().optional(),
+  subject_tags: z.array(z.string()).optional(),
+  primary_provider: z.enum(['isbndb', 'google-books', 'openlibrary']),
+  cover_urls: z.object({
+    large: z.string().optional(),
+    medium: z.string().optional(),
+    small: z.string().optional(),
+  }).optional(),
+  cover_source: z.string().optional(),
+  openlibrary_work_id: z.string().optional(),
+  goodreads_work_ids: z.array(z.string()).optional(),
+  amazon_asins: z.array(z.string()).optional(),
+  google_books_volume_ids: z.array(z.string()).optional(),
+});
+
+// Enrich author schema
+const EnrichAuthorSchema = z.object({
+  author_key: z.string(),
+  name: z.string(),
+  gender: z.string().optional(),
+  nationality: z.string().optional(),
+  birth_year: z.number().optional(),
+  death_year: z.number().optional(),
+  bio: z.string().optional(),
+  bio_source: z.string().optional(),
+  author_photo_url: z.string().optional(),
+  primary_provider: z.enum(['isbndb', 'openlibrary', 'wikidata']),
+  openlibrary_author_id: z.string().optional(),
+  goodreads_author_ids: z.array(z.string()).optional(),
+  wikidata_id: z.string().optional(),
+});
+
+// Queue enrichment schema
+const QueueEnrichmentSchema = z.object({
+  entity_type: z.enum(['work', 'edition', 'author']),
+  entity_key: z.string(),
+  providers_to_try: z.array(z.string()),
+  priority: z.number().min(1).max(10).optional().default(5),
+});
+
+// Instantiate the Hono app with typed environment and variables
+const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // OpenAPI 3.0 Specification
 const openAPISpec = {
@@ -477,14 +576,14 @@ app.post('/api/enrich/queue', handleQueueEnrichment);
 // GET /api/enrich/status/:id -> Check enrichment job status
 app.get('/api/enrich/status/:id', handleGetEnrichmentStatus);
 
-// GET /api/search -> Main search endpoint
+// GET /api/search -> Main search endpoint (with Zod validation for RPC type safety)
 app.get('/api/search',
+  zValidator('query', SearchQuerySchema),
   cache({ cacheName: 'alexandria-cache', cacheControl: 'public, max-age=86400' }),
   async (c) => {
-    const isbn = c.req.query('isbn')?.replace(/[^0-9X]/gi, '').toUpperCase();
-    const title = c.req.query('title');
-    const author = c.req.query('author');
-    const limit = Math.min(parseInt(c.req.query('limit'), 10) || 10, 50);
+    const { isbn: rawIsbn, title, author, limit: validatedLimit } = c.req.valid('query');
+    const isbn = rawIsbn?.replace(/[^0-9X]/gi, '').toUpperCase();
+    const limit = Math.min(validatedLimit || 10, 50);
 
     if (!isbn && !title && !author) {
       return c.json({
@@ -774,48 +873,33 @@ app.post('/covers/:isbn/process', async (c) => {
   }
 });
 
-// POST /covers/batch - Process multiple covers
-app.post('/covers/batch', async (c) => {
-  let body;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+// POST /covers/batch - Process multiple covers (with Zod validation for RPC type safety)
+app.post('/covers/batch',
+  zValidator('json', CoverBatchSchema),
+  async (c) => {
+    const { isbns } = c.req.valid('json');
+
+    try {
+      const result = await processCoverBatch(isbns, c.env);
+      return c.json(result);
+
+    } catch (error) {
+      console.error('Batch processing error:', error);
+      return c.json({
+        error: 'Batch processing failed',
+        message: error.message
+      }, 500);
+    }
   }
-
-  const { isbns } = body;
-
-  if (!Array.isArray(isbns)) {
-    return c.json({ error: 'isbns must be an array' }, 400);
-  }
-
-  if (isbns.length === 0) {
-    return c.json({ error: 'isbns array cannot be empty' }, 400);
-  }
-
-  if (isbns.length > 10) {
-    return c.json({
-      error: 'Batch size exceeded',
-      message: 'Maximum 10 ISBNs per batch request'
-    }, 400);
-  }
-
-  try {
-    const result = await processCoverBatch(isbns, c.env);
-    return c.json(result);
-
-  } catch (error) {
-    console.error('Batch processing error:', error);
-    return c.json({
-      error: 'Batch processing failed',
-      message: error.message
-    }, 500);
-  }
-});
+);
 
 // =================================================================================
 // Worker Entrypoint
 // =================================================================================
+
+// Export the type for Hono RPC type safety (consumed by bendv3)
+// This allows strict type checking across service boundaries
+export type AlexandriaAppType = typeof app;
 
 export default {
   // HTTP request handler (Hono app)
