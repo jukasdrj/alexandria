@@ -25,110 +25,113 @@ import { resolveExternalISBN } from './external-apis.js';
 async function storeExternalBookData(sql: Sql, bookData: ExternalBookData): Promise<string> {
   console.log(`[Smart Enrich] Storing data for ISBN ${bookData.isbn} from ${bookData.provider}`);
 
-  // 1. Generate keys for new entities (using UUID for guaranteed uniqueness)
-  const editionKey = bookData.editionKey || `/books/${crypto.randomUUID()}`;
-  const workKey = bookData.workKey || `/works/${crypto.randomUUID()}`;
+  // Wrap all database operations in a transaction for atomicity
+  return await sql.begin(async (transaction) => {
+    // 1. Generate keys for new entities (using UUID for guaranteed uniqueness)
+    const editionKey = bookData.editionKey || `/books/${crypto.randomUUID()}`;
+    const workKey = bookData.workKey || `/works/${crypto.randomUUID()}`;
 
-  // 2. Create work record (if not exists)
-  const workData = {
-    title: bookData.title,
-    subtitle: bookData.subtitle,
-    description: bookData.description,
-    covers: bookData.coverUrls?.large ? [bookData.coverUrls.large] : [],
-  };
+    // 2. Create work record (if not exists)
+    const workData = {
+      title: bookData.title,
+      subtitle: bookData.subtitle,
+      description: bookData.description,
+      covers: bookData.coverUrls?.large ? [bookData.coverUrls.large] : [],
+    };
 
-  await sql`
-    INSERT INTO works (key, type, revision, data, last_modified)
-    VALUES (
-      ${workKey},
-      '/type/work',
-      1,
-      ${JSON.stringify(workData)}::jsonb,
-      NOW()
-    )
-    ON CONFLICT (key) DO UPDATE SET
-      data = works.data || ${JSON.stringify(workData)}::jsonb,
-      last_modified = NOW()
-  `;
+    await transaction`
+      INSERT INTO works (key, type, revision, data, last_modified)
+      VALUES (
+        ${workKey},
+        '/type/work',
+        1,
+        ${JSON.stringify(workData)}::jsonb,
+        NOW()
+      )
+      ON CONFLICT (key) DO UPDATE SET
+        data = works.data || ${JSON.stringify(workData)}::jsonb,
+        last_modified = NOW()
+    `;
 
-  // 3. Create edition record
-  const editionData = {
-    title: bookData.title,
-    subtitle: bookData.subtitle,
-    publishers: bookData.publisher ? [bookData.publisher] : [],
-    publish_date: bookData.publicationDate,
-    number_of_pages: bookData.pageCount,
-    languages: bookData.language ? [{ key: `/languages/${bookData.language}` }] : [],
-    description: bookData.description,
-    covers: bookData.coverUrls?.large ? [bookData.coverUrls.large] : [],
-    isbn_10: bookData.isbn.length === 10 ? [bookData.isbn] : [],
-    isbn_13: bookData.isbn.length === 13 ? [bookData.isbn] : [],
-    source_provider: bookData.provider,
-    fetched_at: new Date().toISOString(),
-  };
+    // 3. Create edition record
+    const editionData = {
+      title: bookData.title,
+      subtitle: bookData.subtitle,
+      publishers: bookData.publisher ? [bookData.publisher] : [],
+      publish_date: bookData.publicationDate,
+      number_of_pages: bookData.pageCount,
+      languages: bookData.language ? [{ key: `/languages/${bookData.language}` }] : [],
+      description: bookData.description,
+      covers: bookData.coverUrls?.large ? [bookData.coverUrls.large] : [],
+      isbn_10: bookData.isbn.length === 10 ? [bookData.isbn] : [],
+      isbn_13: bookData.isbn.length === 13 ? [bookData.isbn] : [],
+      source_provider: bookData.provider,
+      fetched_at: new Date().toISOString(),
+    };
 
-  await sql`
-    INSERT INTO editions (key, type, revision, work_key, data, last_modified)
-    VALUES (
-      ${editionKey},
-      '/type/edition',
-      1,
-      ${workKey},
-      ${JSON.stringify(editionData)}::jsonb,
-      NOW()
-    )
-    ON CONFLICT (key) DO UPDATE SET
-      data = editions.data || ${JSON.stringify(editionData)}::jsonb,
-      last_modified = NOW()
-  `;
+    await transaction`
+      INSERT INTO editions (key, type, revision, work_key, data, last_modified)
+      VALUES (
+        ${editionKey},
+        '/type/edition',
+        1,
+        ${workKey},
+        ${JSON.stringify(editionData)}::jsonb,
+        NOW()
+      )
+      ON CONFLICT (key) DO UPDATE SET
+        data = editions.data || ${JSON.stringify(editionData)}::jsonb,
+        last_modified = NOW()
+    `;
 
-  // 4. Store ISBN mapping
-  await sql`
-    INSERT INTO edition_isbns (edition_key, isbn)
-    VALUES (${editionKey}, ${bookData.isbn})
-    ON CONFLICT (edition_key, isbn) DO NOTHING
-  `;
+    // 4. Store ISBN mapping
+    await transaction`
+      INSERT INTO edition_isbns (edition_key, isbn)
+      VALUES (${editionKey}, ${bookData.isbn})
+      ON CONFLICT (edition_key, isbn) DO NOTHING
+    `;
 
-  // 5. Create author records (if any) - PARALLEL for better performance
-  if (bookData.authors && bookData.authors.length > 0) {
-    await Promise.all(bookData.authors.map(async (authorName) => {
-      // Generate author key (or use existing if it's a key)
-      const authorKey = authorName.startsWith('/authors/')
-        ? authorName
-        : `/authors/${crypto.randomUUID()}`;
+    // 5. Create author records (if any) - PARALLEL for better performance
+    if (bookData.authors && bookData.authors.length > 0) {
+      await Promise.all(bookData.authors.map(async (authorName) => {
+        // Generate author key (or use existing if it's a key)
+        const authorKey = authorName.startsWith('/authors/')
+          ? authorName
+          : `/authors/${crypto.randomUUID()}`;
 
-      const authorData = {
-        name: authorName,
-        source_provider: bookData.provider,
-        fetched_at: new Date().toISOString(),
-      };
+        const authorData = {
+          name: authorName,
+          source_provider: bookData.provider,
+          fetched_at: new Date().toISOString(),
+        };
 
-      // Insert author
-      await sql`
-        INSERT INTO authors (key, type, revision, data, last_modified)
-        VALUES (
-          ${authorKey},
-          '/type/author',
-          1,
-          ${JSON.stringify(authorData)}::jsonb,
-          NOW()
-        )
-        ON CONFLICT (key) DO UPDATE SET
-          data = authors.data || ${JSON.stringify(authorData)}::jsonb,
-          last_modified = NOW()
-      `;
+        // Insert author
+        await transaction`
+          INSERT INTO authors (key, type, revision, data, last_modified)
+          VALUES (
+            ${authorKey},
+            '/type/author',
+            1,
+            ${JSON.stringify(authorData)}::jsonb,
+            NOW()
+          )
+          ON CONFLICT (key) DO UPDATE SET
+            data = authors.data || ${JSON.stringify(authorData)}::jsonb,
+            last_modified = NOW()
+        `;
 
-      // Link author to work
-      await sql`
-        INSERT INTO author_works (author_key, work_key)
-        VALUES (${authorKey}, ${workKey})
-        ON CONFLICT (author_key, work_key) DO NOTHING
-      `;
-    }));
-  }
+        // Link author to work
+        await transaction`
+          INSERT INTO author_works (author_key, work_key)
+          VALUES (${authorKey}, ${workKey})
+          ON CONFLICT (author_key, work_key) DO NOTHING
+        `;
+      }));
+    }
 
-  console.log(`[Smart Enrich] ✓ Stored edition ${editionKey} with work ${workKey}`);
-  return editionKey;
+    console.log(`[Smart Enrich] ✓ Stored edition ${editionKey} with work ${workKey}`);
+    return editionKey;
+  });
 }
 
 // =================================================================================

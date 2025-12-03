@@ -13,6 +13,121 @@
 import type { Env } from '../env.d.js';
 
 // =================================================================================
+// Validation Utilities
+// =================================================================================
+
+/**
+ * Validates ISBN format (defense-in-depth validation).
+ * Primary validation happens at route level via Zod, but service-level
+ * validation prevents misuse if called from other modules.
+ *
+ * @param isbn - The ISBN to validate (should be pre-normalized: no hyphens/spaces)
+ * @returns True if ISBN is valid format (10 or 13 digits with optional X)
+ */
+function validateISBN(isbn: string): boolean {
+  // Remove any remaining hyphens or spaces
+  const cleaned = isbn.replace(/[-\s]/g, '').toUpperCase();
+
+  // Must be 10 or 13 digits (with optional X for ISBN-10 check digit)
+  if (!/^[0-9]{9}[0-9X]$|^[0-9]{13}$/.test(cleaned)) {
+    return false;
+  }
+
+  return cleaned.length === 10 || cleaned.length === 13;
+}
+
+// =================================================================================
+// Fetch Utilities (Timeout + Retry Logic)
+// =================================================================================
+
+/**
+ * Fetches a URL with timeout and exponential backoff retry logic.
+ * Retries on transient failures (5xx, 429, timeouts).
+ *
+ * @param url - The URL to fetch
+ * @param options - Fetch options (headers, etc.)
+ * @param config - Retry configuration
+ * @returns Response or null if all retries exhausted
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  config: {
+    maxRetries?: number;
+    timeoutMs?: number;
+    baseDelayMs?: number;
+  } = {}
+): Promise<Response | null> {
+  const {
+    maxRetries = 3,
+    timeoutMs = 10000, // 10s timeout
+    baseDelayMs = 1000 // 1s base delay
+  } = config;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // Add timeout via AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        // Retry on 5xx errors or 429 (rate limit)
+        if (response.status >= 500 || response.status === 429) {
+          if (attempt === maxRetries - 1) {
+            console.warn(`Max retries exhausted for ${url}, status: ${response.status}`);
+            return null;
+          }
+
+          const delay = baseDelayMs * Math.pow(2, attempt);
+          console.warn(`Retry ${attempt + 1}/${maxRetries} after ${delay}ms (status: ${response.status})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        return response;
+
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+
+        // Handle timeout separately
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          if (attempt === maxRetries - 1) {
+            console.warn(`Timeout after ${maxRetries} attempts for ${url}`);
+            return null;
+          }
+
+          const delay = baseDelayMs * Math.pow(2, attempt);
+          console.warn(`Retry ${attempt + 1}/${maxRetries} after ${delay}ms (timeout)`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        throw fetchError; // Re-throw non-timeout errors
+      }
+
+    } catch (error) {
+      // Non-retryable error
+      if (attempt === maxRetries - 1) {
+        console.error(`Fetch failed after ${maxRetries} attempts:`, error instanceof Error ? error.message : String(error));
+        return null;
+      }
+
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      console.warn(`Retry ${attempt + 1}/${maxRetries} after ${delay}ms (error: ${error})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  return null;
+}
+
+// =================================================================================
 // Types
 // =================================================================================
 
@@ -110,15 +225,15 @@ async function fetchFromISBNdb(isbn: string, env: Env): Promise<ExternalBookData
     }
 
     const url = `https://api2.isbndb.com/book/${isbn}`;
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         'Authorization': apiKey,
         'Content-Type': 'application/json',
       },
     });
 
-    if (!response.ok) {
-      console.warn(`ISBNdb returned ${response.status} for ${isbn}`);
+    if (!response || !response.ok) {
+      console.warn(`ISBNdb returned ${response?.status || 'no response'} for ${isbn}`);
       return null;
     }
 
@@ -165,10 +280,10 @@ async function fetchFromGoogleBooks(isbn: string, env: Env): Promise<ExternalBoo
     }
 
     const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${apiKey}`;
-    const response = await fetch(url);
+    const response = await fetchWithRetry(url);
 
-    if (!response.ok) {
-      console.warn(`Google Books returned ${response.status} for ${isbn}`);
+    if (!response || !response.ok) {
+      console.warn(`Google Books returned ${response?.status || 'no response'} for ${isbn}`);
       return null;
     }
 
@@ -225,14 +340,14 @@ async function fetchFromOpenLibrary(isbn: string, env: Env): Promise<ExternalBoo
     const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=details`;
     const userAgent = env.USER_AGENT || 'Alexandria/2.0 (nerd@ooheynerds.com)';
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         'User-Agent': userAgent,
       },
     });
 
-    if (!response.ok) {
-      console.warn(`OpenLibrary returned ${response.status} for ${isbn}`);
+    if (!response || !response.ok) {
+      console.warn(`OpenLibrary returned ${response?.status || 'no response'} for ${isbn}`);
       return null;
     }
 
@@ -303,6 +418,12 @@ async function fetchFromOpenLibrary(isbn: string, env: Env): Promise<ExternalBoo
  */
 export async function resolveExternalISBN(isbn: string, env: Env): Promise<ExternalBookData | null> {
   console.log(`[External APIs] Resolving ISBN: ${isbn}`);
+
+  // Validate ISBN format (defense-in-depth)
+  if (!validateISBN(isbn)) {
+    console.warn(`[External APIs] Invalid ISBN format: ${isbn}`);
+    return null;
+  }
 
   // Try ISBNdb first (paid, most reliable)
   const isbndbData = await fetchFromISBNdb(isbn, env);
