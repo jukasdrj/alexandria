@@ -7,7 +7,6 @@
 
 import postgres from 'postgres';
 import { enrichEdition, enrichWork, enrichAuthor } from './enrichment-service.js';
-import { formatPgArray } from './utils.js';
 import { fetchWithRetry, fetchJSON } from './lib/fetch-utils.js';
 
 // Configuration
@@ -206,8 +205,8 @@ async function processJob(sql, job, env) {
         SET
           status = 'completed',
           completed_at = NOW(),
-          providers_attempted = ${formatPgArray(providersAttempted)},
-          providers_succeeded = ${formatPgArray(providersSucceeded)}
+          providers_attempted = ${sql.array(providersAttempted)},
+          providers_succeeded = ${sql.array(providersSucceeded)}
         WHERE id = ${id}
       `;
     } else {
@@ -227,7 +226,7 @@ async function processJob(sql, job, env) {
         SET
           status = 'pending',
           retry_count = ${newRetryCount},
-          providers_attempted = ${formatPgArray(providersAttempted)},
+          providers_attempted = ${sql.array(providersAttempted)},
           error_message = ${error.message}
         WHERE id = ${id}
       `;
@@ -240,7 +239,7 @@ async function processJob(sql, job, env) {
           status = 'failed',
           completed_at = NOW(),
           retry_count = ${newRetryCount},
-          providers_attempted = ${formatPgArray(providersAttempted)},
+          providers_attempted = ${sql.array(providersAttempted)},
           error_message = ${error.message}
         WHERE id = ${id}
       `;
