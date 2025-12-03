@@ -24,7 +24,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/jukasdrj/alexandria.git",
+    "url": "git+https://github.com/jukasdrj/alexandria.git",
     "directory": "worker"
   },
   "bugs": {
