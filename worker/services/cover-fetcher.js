@@ -9,14 +9,13 @@
  * @module services/cover-fetcher
  */
 
+import { fetchWithRetry } from '../lib/fetch-utils.js';
+
 const PLACEHOLDER_COVER = 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover';
 
 // Rate limiting: ISBNdb allows 1 request/second on paid plan
 const ISBNDB_RATE_LIMIT_MS = 1000;
 const RATE_LIMIT_KV_KEY = 'cover_fetcher:isbndb_last_request';
-
-// Fetch timeout (10 seconds)
-const FETCH_TIMEOUT_MS = 10000;
 
 /**
  * Normalize ISBN to 13-digit format (remove hyphens, validate)
@@ -43,27 +42,6 @@ export function normalizeISBN(isbn) {
   return null;
 }
 
-/**
- * Create a fetch request with timeout using AbortController
- * @param {string} url - URL to fetch
- * @param {object} options - Fetch options
- * @param {number} timeoutMs - Timeout in milliseconds
- * @returns {Promise<Response>}
- */
-async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    return response;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
 
 /**
  * Enforce rate limit for ISBNdb API using KV storage
@@ -120,12 +98,12 @@ export async function fetchISBNdbCover(isbn, env) {
     // Enforce rate limit (uses KV if available)
     await enforceISBNdbRateLimit(env);
 
-    const response = await fetchWithTimeout(`https://api2.isbndb.com/book/${normalizedISBN}`, {
+    const response = await fetchWithRetry(`https://api2.isbndb.com/book/${normalizedISBN}`, {
       headers: {
         'Authorization': apiKey,
         'User-Agent': 'Alexandria/1.0 (covers)'
       }
-    });
+    }, { timeoutMs: 10000, maxRetries: 2 });
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -185,11 +163,11 @@ export async function fetchGoogleBooksCover(isbn, env) {
       url += `&key=${apiKey}`;
     }
 
-    const response = await fetchWithTimeout(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         'User-Agent': 'Alexandria/1.0 (covers)'
       }
-    });
+    }, { timeoutMs: 10000, maxRetries: 2 });
 
     if (!response.ok) {
       console.error(`Google Books: API error ${response.status}`);
@@ -253,12 +231,12 @@ export async function fetchOpenLibraryCover(isbn) {
     const coverUrl = `https://covers.openlibrary.org/b/isbn/${normalizedISBN}-L.jpg`;
 
     // Do a HEAD request to verify the image exists
-    const response = await fetchWithTimeout(coverUrl, {
+    const response = await fetchWithRetry(coverUrl, {
       method: 'HEAD',
       headers: {
         'User-Agent': 'Alexandria/1.0 (covers)'
       }
-    });
+    }, { timeoutMs: 10000, maxRetries: 2 });
 
     // OpenLibrary returns a 1x1 pixel placeholder for missing covers
     // Check content-length to detect this

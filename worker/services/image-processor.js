@@ -8,6 +8,7 @@
  */
 
 import { fetchBestCover, getPlaceholderCover } from './cover-fetcher.js';
+import { fetchWithRetry } from '../lib/fetch-utils.js';
 
 // Image size definitions (width x height for book covers - 2:3 aspect ratio)
 const SIZES = {
@@ -26,9 +27,6 @@ const ALLOWED_DOMAINS = new Set([
   'm.media-amazon.com'
 ]);
 
-// Fetch timeout for image downloads
-const FETCH_TIMEOUT_MS = 15000;
-
 // Max image size (10MB)
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
@@ -46,26 +44,6 @@ function isAllowedDomain(url) {
   }
 }
 
-/**
- * Create a fetch request with timeout
- * @param {string} url - URL to fetch
- * @param {object} options - Fetch options
- * @returns {Promise<Response>}
- */
-async function fetchWithTimeout(url, options = {}) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    return response;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
 
 /**
  * Generate SHA-256 hash of data for deduplication
@@ -89,12 +67,12 @@ async function downloadImage(url) {
     throw new Error(`Domain not allowed: ${new URL(url).hostname}`);
   }
 
-  const response = await fetchWithTimeout(url, {
+  const response = await fetchWithRetry(url, {
     headers: {
       'User-Agent': 'Alexandria/1.0 (cover-processor)',
       'Accept': 'image/*'
     }
-  });
+  }, { timeoutMs: 15000, maxRetries: 2 });
 
   if (!response.ok) {
     throw new Error(`Failed to download image: HTTP ${response.status}`);
