@@ -9,9 +9,9 @@ Once Alexandria exports its types, simply enable the feature flag for instant ac
 ### Installation
 
 ```bash
-npm install @ooheynerds/alexandria-worker
+npm install alexandria-worker
 # or
-yarn add @ooheynerds/alexandria-worker
+yarn add alexandria-worker
 ```
 
 ### Basic Usage
@@ -27,7 +27,7 @@ import type {
   EnrichmentResult,
   ENDPOINTS,
   API_ROUTES
-} from '@ooheynerds/alexandria-worker/types';
+} from 'alexandria-worker/types';
 
 // Type-safe API client
 const client = {
@@ -356,7 +356,7 @@ import {
   ProcessCoverSchema,
   EnrichEditionSchema,
   z
-} from '@ooheynerds/alexandria-worker/types';
+} from 'alexandria-worker/types';
 
 // Validate data before sending
 const searchQuery = SearchQuerySchema.parse({
@@ -434,7 +434,7 @@ import type {
   ProcessCover,
   CoverProcessResult,
   ENDPOINTS
-} from '@ooheynerds/alexandria-worker/types';
+} from 'alexandria-worker/types';
 
 export class AlexandriaService {
   private baseUrl = 'https://alexandria.ooheynerds.com';
@@ -546,7 +546,7 @@ export const features = {
 
 **Zero-downtime activation steps**:
 1. ✅ Alexandria exports TypeScript types (this PR)
-2. Install `@ooheynerds/alexandria-worker` in bendv3
+2. Install `alexandria-worker` in bendv3
 3. Import types and implement service
 4. Add feature flag to config
 5. Enable flag: `ENABLE_ALEXANDRIA=true`
