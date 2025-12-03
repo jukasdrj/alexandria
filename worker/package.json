@@ -1,8 +1,19 @@
 {
-  "name": "alexandria-worker",
+  "name": "@ooheynerds/alexandria-worker",
   "version": "2.0.0",
   "description": "Cloudflare Worker for Alexandria OpenLibrary database",
-  "main": "index.js",
+  "main": "index.ts",
+  "types": "types.ts",
+  "exports": {
+    ".": {
+      "types": "./types.ts",
+      "default": "./index.ts"
+    },
+    "./types": {
+      "types": "./types.ts",
+      "default": "./types.ts"
+    }
+  },
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
@@ -20,12 +31,17 @@
   "author": "juju",
   "license": "MIT",
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251202.0",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.14",
     "vitest-mock-extended": "^3.1.0",
     "wrangler": "^4.51.0"
   },
   "dependencies": {
+    "@hono/zod-validator": "^0.7.5",
     "hono": "^4.10.7",
-    "postgres": "^3.4.7"
+    "postgres": "^3.4.7",
+    "zod": "^4.1.13"
   }
 }

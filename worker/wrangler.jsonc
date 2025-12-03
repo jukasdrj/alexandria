@@ -23,7 +23,7 @@
   "//": "====================================================================================",
 
   "name": "alexandria",
-  "main": "index.js",
+  "main": "index.ts",
   "compatibility_date": "2025-11-20",
   "compatibility_flags": [
     "nodejs_compat_v2"

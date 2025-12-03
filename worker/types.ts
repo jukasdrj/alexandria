@@ -1,0 +1,347 @@
+/**
+ * Alexandria API Type Exports
+ *
+ * These types can be imported by other services (e.g., bendv3) for type-safe
+ * integration with the Alexandria API.
+ *
+ * @example
+ * ```typescript
+ * import type { SearchQuery, SearchResult, BookResult } from '@ooheynerds/alexandria-worker';
+ * ```
+ */
+
+import { z } from 'zod';
+
+// =================================================================================
+// Request Schemas (Zod)
+// =================================================================================
+
+export const SearchQuerySchema = z.object({
+  isbn: z.string().optional(),
+  title: z.string().optional(),
+  author: z.string().optional(),
+  limit: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 10)),
+});
+
+export const CoverBatchSchema = z.object({
+  isbns: z.array(z.string()).min(1).max(10),
+});
+
+export const ProcessCoverSchema = z.object({
+  work_key: z.string(),
+  provider_url: z.string().url(),
+  isbn: z.string().optional(),
+});
+
+export const EnrichEditionSchema = z.object({
+  isbn: z.string(),
+  title: z.string().optional(),
+  subtitle: z.string().optional(),
+  publisher: z.string().optional(),
+  publication_date: z.string().optional(),
+  page_count: z.number().optional(),
+  format: z.string().optional(),
+  language: z.string().optional(),
+  primary_provider: z.enum(['isbndb', 'google-books', 'openlibrary', 'user-correction']),
+  cover_urls: z.object({
+    large: z.string().optional(),
+    medium: z.string().optional(),
+    small: z.string().optional(),
+  }).optional(),
+  cover_source: z.string().optional(),
+  work_key: z.string().optional(),
+  openlibrary_edition_id: z.string().optional(),
+  amazon_asins: z.array(z.string()).optional(),
+  google_books_volume_ids: z.array(z.string()).optional(),
+  goodreads_edition_ids: z.array(z.string()).optional(),
+  alternate_isbns: z.array(z.string()).optional(),
+});
+
+export const EnrichWorkSchema = z.object({
+  work_key: z.string(),
+  title: z.string(),
+  subtitle: z.string().optional(),
+  description: z.string().optional(),
+  original_language: z.string().optional(),
+  first_publication_year: z.number().optional(),
+  subject_tags: z.array(z.string()).optional(),
+  primary_provider: z.enum(['isbndb', 'google-books', 'openlibrary']),
+  cover_urls: z.object({
+    large: z.string().optional(),
+    medium: z.string().optional(),
+    small: z.string().optional(),
+  }).optional(),
+  cover_source: z.string().optional(),
+  openlibrary_work_id: z.string().optional(),
+  goodreads_work_ids: z.array(z.string()).optional(),
+  amazon_asins: z.array(z.string()).optional(),
+  google_books_volume_ids: z.array(z.string()).optional(),
+});
+
+export const EnrichAuthorSchema = z.object({
+  author_key: z.string(),
+  name: z.string(),
+  gender: z.string().optional(),
+  nationality: z.string().optional(),
+  birth_year: z.number().optional(),
+  death_year: z.number().optional(),
+  bio: z.string().optional(),
+  bio_source: z.string().optional(),
+  author_photo_url: z.string().optional(),
+  primary_provider: z.enum(['isbndb', 'openlibrary', 'wikidata']),
+  openlibrary_author_id: z.string().optional(),
+  goodreads_author_ids: z.array(z.string()).optional(),
+  wikidata_id: z.string().optional(),
+});
+
+export const QueueEnrichmentSchema = z.object({
+  entity_type: z.enum(['work', 'edition', 'author']),
+  entity_key: z.string(),
+  providers_to_try: z.array(z.string()),
+  priority: z.number().min(1).max(10).default(5),
+});
+
+// =================================================================================
+// Inferred TypeScript Types from Zod Schemas
+// =================================================================================
+
+export type SearchQuery = z.infer<typeof SearchQuerySchema>;
+export type CoverBatch = z.infer<typeof CoverBatchSchema>;
+export type ProcessCover = z.infer<typeof ProcessCoverSchema>;
+export type EnrichEdition = z.infer<typeof EnrichEditionSchema>;
+export type EnrichWork = z.infer<typeof EnrichWorkSchema>;
+export type EnrichAuthor = z.infer<typeof EnrichAuthorSchema>;
+export type QueueEnrichment = z.infer<typeof QueueEnrichmentSchema>;
+
+// =================================================================================
+// Response Types
+// =================================================================================
+
+export interface BookResult {
+  title: string;
+  author: string | null;
+  isbn: string | null;
+  coverUrl: string | null;
+  coverSource: 'r2' | 'external' | 'external-fallback' | null;
+  publish_date: string | null;
+  publishers: string[] | null;
+  pages: string | null;
+  work_title: string | null;
+  openlibrary_edition: string | null;
+  openlibrary_work: string | null;
+}
+
+export interface SearchResult {
+  query: {
+    isbn?: string;
+    title?: string;
+    author?: string;
+  };
+  query_duration_ms: number;
+  count: number;
+  results: BookResult[];
+}
+
+export interface HealthCheck {
+  status: 'ok' | 'error';
+  database: 'connected' | 'disconnected';
+  r2_covers: 'bound' | 'not_configured';
+  hyperdrive_latency_ms?: number;
+  timestamp: string;
+  message?: string;
+}
+
+export interface DatabaseStats {
+  editions: number;
+  isbns: number;
+  works: number;
+  authors: number;
+  query_duration_ms: number;
+}
+
+export interface CoverMetadata {
+  format: string;
+  size: number;
+  uploaded: string;
+  provider?: string;
+  isbn?: string;
+}
+
+export interface CoverStatus {
+  exists: boolean;
+  isbn: string;
+  format?: string;
+  size?: number;
+  uploaded?: string;
+  provider?: string;
+  urls?: {
+    original: string;
+    large: string;
+    medium: string;
+    small: string;
+  };
+}
+
+export interface CoverProcessResult {
+  status: 'processed' | 'already_exists' | 'no_cover' | 'error';
+  isbn: string;
+  provider?: string;
+  metadata?: CoverMetadata;
+  message?: string;
+  error?: string;
+}
+
+export interface BatchCoverResult {
+  total: number;
+  successful: number;
+  failed: number;
+  results: Array<{
+    isbn: string;
+    status: 'success' | 'error';
+    message?: string;
+  }>;
+}
+
+export interface EnrichmentResult {
+  status: 'created' | 'updated';
+  entity_type: 'edition' | 'work' | 'author';
+  entity_key: string;
+  message?: string;
+}
+
+export interface EnrichmentQueueResult {
+  status: 'queued';
+  job_id: string;
+  entity_type: 'work' | 'edition' | 'author';
+  entity_key: string;
+  priority: number;
+  message: string;
+}
+
+export interface EnrichmentJobStatus {
+  job_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  entity_type: 'work' | 'edition' | 'author';
+  entity_key: string;
+  created_at: string;
+  updated_at: string;
+  result?: unknown;
+  error?: string;
+}
+
+export interface ErrorResponse {
+  error: string;
+  message?: string;
+  details?: unknown;
+}
+
+// =================================================================================
+// API Client Types (for consumers like bendv3)
+// =================================================================================
+
+/**
+ * Alexandria API client configuration
+ */
+export interface AlexandriaClientConfig {
+  baseUrl: string;
+  timeout?: number;
+  headers?: Record<string, string>;
+}
+
+/**
+ * Type-safe API endpoint paths
+ */
+export const ENDPOINTS = {
+  HEALTH: '/health',
+  STATS: '/api/stats',
+  SEARCH: '/api/search',
+  ENRICH_EDITION: '/api/enrich/edition',
+  ENRICH_WORK: '/api/enrich/work',
+  ENRICH_AUTHOR: '/api/enrich/author',
+  ENRICH_QUEUE: '/api/enrich/queue',
+  ENRICH_STATUS: '/api/enrich/status',
+  COVER_PROCESS: '/api/covers/process',
+  COVER_SERVE: '/api/covers',
+  COVER_ISBN_STATUS: '/covers/:isbn/status',
+  COVER_ISBN_PROCESS: '/covers/:isbn/process',
+  COVER_ISBN_SERVE: '/covers/:isbn/:size',
+  COVER_BATCH: '/covers/batch',
+} as const;
+
+/**
+ * HTTP methods used by Alexandria API
+ */
+export type HTTPMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+/**
+ * API route definitions with types
+ */
+export interface APIRoute<TRequest = unknown, TResponse = unknown> {
+  method: HTTPMethod;
+  path: string;
+  requestSchema?: z.ZodSchema<TRequest>;
+  responseType?: TResponse;
+}
+
+/**
+ * Complete API surface area for type-safe integration
+ */
+export const API_ROUTES = {
+  search: {
+    method: 'GET',
+    path: ENDPOINTS.SEARCH,
+    requestSchema: SearchQuerySchema,
+  } as APIRoute<SearchQuery, SearchResult>,
+
+  health: {
+    method: 'GET',
+    path: ENDPOINTS.HEALTH,
+  } as APIRoute<void, HealthCheck>,
+
+  stats: {
+    method: 'GET',
+    path: ENDPOINTS.STATS,
+  } as APIRoute<void, DatabaseStats>,
+
+  enrichEdition: {
+    method: 'POST',
+    path: ENDPOINTS.ENRICH_EDITION,
+    requestSchema: EnrichEditionSchema,
+  } as APIRoute<EnrichEdition, EnrichmentResult>,
+
+  enrichWork: {
+    method: 'POST',
+    path: ENDPOINTS.ENRICH_WORK,
+    requestSchema: EnrichWorkSchema,
+  } as APIRoute<EnrichWork, EnrichmentResult>,
+
+  enrichAuthor: {
+    method: 'POST',
+    path: ENDPOINTS.ENRICH_AUTHOR,
+    requestSchema: EnrichAuthorSchema,
+  } as APIRoute<EnrichAuthor, EnrichmentResult>,
+
+  queueEnrichment: {
+    method: 'POST',
+    path: ENDPOINTS.ENRICH_QUEUE,
+    requestSchema: QueueEnrichmentSchema,
+  } as APIRoute<QueueEnrichment, EnrichmentQueueResult>,
+
+  processCover: {
+    method: 'POST',
+    path: ENDPOINTS.COVER_PROCESS,
+    requestSchema: ProcessCoverSchema,
+  } as APIRoute<ProcessCover, CoverProcessResult>,
+
+  batchCovers: {
+    method: 'POST',
+    path: ENDPOINTS.COVER_BATCH,
+    requestSchema: CoverBatchSchema,
+  } as APIRoute<CoverBatch, BatchCoverResult>,
+} as const;
+
+// =================================================================================
+// Re-export Zod for consumers who want to use schemas directly
+// =================================================================================
+
+export { z };
