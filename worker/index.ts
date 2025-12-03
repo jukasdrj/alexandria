@@ -14,6 +14,7 @@ import { errorHandler } from './middleware/error-handler.js';
 import type { Env, Variables } from './env.d.js';
 import { openAPISpec } from './openapi.js';
 import { getDashboardHTML } from './dashboard.js';
+import { smartResolveISBN, shouldResolveExternally } from './services/smart-enrich.js';
 
 // =================================================================================
 // Configuration & Initialization
@@ -330,6 +331,25 @@ app.get('/api/search',
         total = countResult[0]?.total || 0;
         results = dataResult;
 
+        // =====================================================================
+        // 🧠 SMART RESOLUTION: Auto-fetch from external APIs on cache miss
+        // =====================================================================
+        // If ISBN search found nothing AND smart resolution is enabled,
+        // fetch from external providers and store in Alexandria DB
+        if (results.length === 0 && shouldResolveExternally(isbn, c.env)) {
+          console.log(`[Smart Resolve] Cache miss for ISBN ${isbn}, resolving externally...`);
+
+          const enrichedResult = await smartResolveISBN(isbn, sql, c.env);
+
+          if (enrichedResult) {
+            console.log(`[Smart Resolve] ✓ Successfully enriched ISBN ${isbn}`);
+            results = [enrichedResult];
+            total = 1;
+          } else {
+            console.log(`[Smart Resolve] ✗ No external data found for ISBN ${isbn}`);
+          }
+        }
+
       } else if (title) {
         // For title searches, use a subquery with DISTINCT to get accurate counts
         // NOTE: ILIKE can be slow. For production, consider pg_trgm with GIN/GIST indexes.
@@ -555,6 +575,29 @@ app.get('/api/search/combined',
 
         total = countResult[0]?.total || 0;
         results = dataResult;
+
+        // =====================================================================
+        // 🧠 SMART RESOLUTION: Auto-fetch from external APIs on cache miss
+        // =====================================================================
+        // If ISBN search found nothing, try external providers
+        if (results.length === 0 && shouldResolveExternally(isbn, c.env)) {
+          console.log(`[Smart Resolve] Cache miss for ISBN ${isbn}, resolving externally...`);
+
+          const enrichedResult = await smartResolveISBN(isbn, sql, c.env);
+
+          if (enrichedResult) {
+            console.log(`[Smart Resolve] ✓ Successfully enriched ISBN ${isbn}`);
+            // Add result_type and author_key for combined search format
+            results = [{
+              ...enrichedResult,
+              result_type: 'edition',
+              author_key: null,
+            }];
+            total = 1;
+          } else {
+            console.log(`[Smart Resolve] ✗ No external data found for ISBN ${isbn}`);
+          }
+        }
 
       } else {
         // Text search: search both titles and authors simultaneously
