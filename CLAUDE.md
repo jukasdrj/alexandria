@@ -99,6 +99,58 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 4. Check logs: `npm run tail`
 5. Test live: https://alexandria.ooheynerds.com
 
+## ISBNdb API Integration (COMPLETE ✅)
+
+### Plan: Basic (Paid)
+- **Rate Limit**: 1 request/second
+- **Batch Endpoint**: Up to 100 ISBNs per POST request
+- **Base URL**: api2.isbndb.com
+
+### Available Endpoints (All Verified Working ✅)
+1. **GET /book/{isbn}** - Single book lookup (includes pricing)
+2. **POST /books** - Batch lookup (up to 100 ISBNs) ⭐ **Most Efficient**
+3. **GET /books/{query}** - Search with pagination
+4. **GET /author/{name}** - Author details
+5. **GET /authors/{query}** - Author search
+6. **GET /publisher/{name}** - Publisher catalog
+7. **GET /publishers/{query}** - Publisher search
+8. **GET /subject/{name}** - Books by subject
+9. **GET /subjects/{query}** - Subject search
+
+### Enrichment Opportunities
+ISBNdb provides rich metadata beyond current usage:
+- **`image_original`** - High-quality covers (better than `image`)
+- **`subjects`** - Genre/topic tags for recommendations
+- **`dimensions_structured`** - Physical book dimensions (H×W×L, weight)
+- **`binding`** - Format (Hardcover, Paperback, etc.)
+- **`related`** - Related ISBNs (ePub, audiobook, etc.)
+- **`dewey_decimal`** - Library classification
+- **`msrp`** - Pricing (single lookups only)
+
+**See**: `docs/ISBNDB-ENRICHMENT.md` for implementation guide
+
+### Best Practices
+1. **Use batch endpoint** for multiple ISBNs (100x faster than sequential)
+2. **Extract `image_original`** for best cover quality
+3. **Rate limit**: 1 req/sec, use KV for distributed limiting
+4. **Chunk large lists**: 100 ISBNs per batch (Basic plan limit)
+
+### Test Endpoints
+```bash
+# Test all endpoints
+curl "https://alexandria.ooheynerds.com/api/test/isbndb" | jq
+
+# Test batch (most important)
+curl "https://alexandria.ooheynerds.com/api/test/isbndb/batch" \
+  -H "Content-Type: application/json" \
+  -X POST \
+  -d '{"isbns":["9780439064873","9781492666868"]}'
+```
+
+**Documentation**: `docs/ISBNDB-ENDPOINTS.md`
+
+---
+
 ## Phase 2: Database Integration (COMPLETE ✅)
 
 ### Hyperdrive Setup (Production)

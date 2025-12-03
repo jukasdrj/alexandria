@@ -15,6 +15,16 @@ import type { Env, Variables } from './env.d.js';
 import { openAPISpec } from './openapi.js';
 import { getDashboardHTML } from './dashboard.js';
 import { smartResolveISBN, shouldResolveExternally } from './services/smart-enrich.js';
+import {
+  testAllISBNdbEndpoints,
+  testISBNdbBook,
+  testISBNdbBooksSearch,
+  testISBNdbAuthor,
+  testISBNdbAuthorsSearch,
+  testISBNdbPublisher,
+  testISBNdbSubject,
+  testISBNdbBatchBooks
+} from './services/isbndb-test.js';
 
 // =================================================================================
 // Configuration & Initialization
@@ -947,6 +957,158 @@ app.post('/covers/batch',
     }
   }
 );
+
+// =================================================================================
+// ISBNdb API Testing Endpoints (Development/Verification)
+// =================================================================================
+
+// GET /api/test/isbndb - Test all ISBNdb endpoints
+app.get('/api/test/isbndb', async (c) => {
+  try {
+    const results = await testAllISBNdbEndpoints(c.env);
+    const summary = {
+      total: results.length,
+      passed: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      results
+    };
+    return c.json(summary);
+  } catch (error) {
+    console.error('ISBNdb test error:', error);
+    return c.json({
+      error: 'Test suite failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// GET /api/test/isbndb/book/:isbn - Test book lookup
+app.get('/api/test/isbndb/book/:isbn', async (c) => {
+  const isbn = c.req.param('isbn');
+  try {
+    const result = await testISBNdbBook(isbn, c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('ISBNdb book test error:', error);
+    return c.json({
+      error: 'Book test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// GET /api/test/isbndb/books - Test books search
+app.get('/api/test/isbndb/books', async (c) => {
+  const query = c.req.query('q') || 'harry potter';
+  const page = parseInt(c.req.query('page') || '1');
+  const pageSize = parseInt(c.req.query('pageSize') || '5');
+  const column = c.req.query('column');
+
+  try {
+    const result = await testISBNdbBooksSearch(query, { page, pageSize, column }, c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('ISBNdb books search test error:', error);
+    return c.json({
+      error: 'Books search test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// GET /api/test/isbndb/author/:name - Test author lookup
+app.get('/api/test/isbndb/author/:name', async (c) => {
+  const name = c.req.param('name');
+  try {
+    const result = await testISBNdbAuthor(name, c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('ISBNdb author test error:', error);
+    return c.json({
+      error: 'Author test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// GET /api/test/isbndb/authors - Test authors search
+app.get('/api/test/isbndb/authors', async (c) => {
+  const query = c.req.query('q') || 'rowling';
+  const page = parseInt(c.req.query('page') || '1');
+  const pageSize = parseInt(c.req.query('pageSize') || '5');
+
+  try {
+    const result = await testISBNdbAuthorsSearch(query, { page, pageSize }, c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('ISBNdb authors search test error:', error);
+    return c.json({
+      error: 'Authors search test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// GET /api/test/isbndb/publisher/:name - Test publisher lookup
+app.get('/api/test/isbndb/publisher/:name', async (c) => {
+  const name = c.req.param('name');
+  try {
+    const result = await testISBNdbPublisher(name, c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('ISBNdb publisher test error:', error);
+    return c.json({
+      error: 'Publisher test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// GET /api/test/isbndb/subject/:name - Test subject lookup
+app.get('/api/test/isbndb/subject/:name', async (c) => {
+  const name = c.req.param('name');
+  try {
+    const result = await testISBNdbSubject(name, c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('ISBNdb subject test error:', error);
+    return c.json({
+      error: 'Subject test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// POST /api/test/isbndb/batch - Test batch books lookup (POST /books)
+app.post('/api/test/isbndb/batch', async (c) => {
+  try {
+    const body = await c.req.json();
+    const isbns = body.isbns || [];
+
+    if (!Array.isArray(isbns) || isbns.length === 0) {
+      return c.json({
+        error: 'Invalid request',
+        message: 'Must provide array of ISBNs in request body'
+      }, 400);
+    }
+
+    if (isbns.length > 100) {
+      return c.json({
+        error: 'Too many ISBNs',
+        message: 'Basic plan allows up to 100 ISBNs per batch request'
+      }, 400);
+    }
+
+    const result = await testISBNdbBatchBooks(isbns, c.env);
+    return c.json(result);
+  } catch (error) {
+    console.error('ISBNdb batch test error:', error);
+    return c.json({
+      error: 'Batch test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
 
 // =================================================================================
 // Worker Entrypoint
