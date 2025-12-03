@@ -1,7 +1,7 @@
 {
   "name": "@ooheynerds/alexandria-worker",
   "version": "2.0.0",
-  "description": "Cloudflare Worker for Alexandria OpenLibrary database",
+  "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types and Zod validation",
   "main": "index.ts",
   "types": "types.ts",
   "exports": {
@@ -14,21 +14,45 @@
       "default": "./types.ts"
     }
   },
+  "files": [
+    "index.ts",
+    "types.ts",
+    "env.d.ts",
+    "*.js",
+    "*.d.ts",
+    "README-INTEGRATION.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jukasdrj/alexandria.git",
+    "directory": "worker"
+  },
+  "bugs": {
+    "url": "https://github.com/jukasdrj/alexandria/issues"
+  },
+  "homepage": "https://alexandria.ooheynerds.com",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "tail": "wrangler tail",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "echo 'Publishing @ooheynerds/alexandria-worker v2.0.0'"
   },
   "keywords": [
     "cloudflare",
     "workers",
     "openlibrary",
-    "database"
+    "database",
+    "typescript",
+    "zod",
+    "validation",
+    "api",
+    "books",
+    "isbn"
   ],
-  "author": "juju",
+  "author": "juju <nerd@ooheynerds.com>",
   "license": "MIT",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251202.0",
