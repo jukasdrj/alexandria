@@ -6,7 +6,10 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "cloudflare",
@@ -17,6 +20,8 @@
   "author": "juju",
   "license": "MIT",
   "devDependencies": {
+    "vitest": "^4.0.14",
+    "vitest-mock-extended": "^3.1.0",
     "wrangler": "^4.51.0"
   },
   "dependencies": {
