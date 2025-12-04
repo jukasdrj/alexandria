@@ -1,13 +1,14 @@
 /**
  * Cover URL Resolver
- * 
+ *
  * Determines whether to return Alexandria R2 URL or external URL.
  * Implements lazy-loading: external URL on first request, Alexandria URL after caching.
- * 
+ *
  * @module services/cover-resolver
  */
 
 import { coverExists, processCoverImage } from './image-processor.js';
+import { fetchBestCover } from './cover-fetcher.js';
 
 // Alexandria cover CDN base
 const ALEXANDRIA_COVER_BASE = 'https://alexandria.ooheynerds.com/covers';
@@ -49,8 +50,22 @@ export async function resolveCoverUrl(isbn, externalUrl, env, ctx) {
       };
     }
     
-    // 2. Not cached - return external URL and queue background processing
-    if (externalUrl) {
+    // 2. Not cached - fetch from external providers or use provided URL
+    let coverUrl = externalUrl;
+
+    // If no external URL provided, try to fetch from ISBNdb → Google Books → OpenLibrary
+    if (!coverUrl) {
+      console.log(`[CoverResolver] No cover_id in DB for ${normalizedISBN}, fetching from providers...`);
+      const coverResult = await fetchBestCover(normalizedISBN, env);
+      coverUrl = coverResult?.url || null;
+
+      if (coverUrl && coverUrl !== 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover') {
+        console.log(`[CoverResolver] Found cover via ${coverResult.source} for ${normalizedISBN}`);
+      }
+    }
+
+    // If we have a cover URL, queue background processing and return it
+    if (coverUrl && coverUrl !== 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover') {
       // Queue background cover processing (non-blocking)
       if (ctx?.waitUntil) {
         ctx.waitUntil(
@@ -65,15 +80,15 @@ export async function resolveCoverUrl(isbn, externalUrl, env, ctx) {
             })
         );
       }
-      
+
       return {
-        url: externalUrl,
+        url: coverUrl,
         source: 'external',
         queued: true
       };
     }
-    
-    // 3. No external URL available
+
+    // 3. No cover URL available from any source
     return { url: PLACEHOLDER_URL, source: 'placeholder', queued: false };
     
   } catch (error) {
