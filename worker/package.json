@@ -32,9 +32,9 @@
   },
   "homepage": "https://alexandria.ooheynerds.com",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "tail": "wrangler tail",
+    "deploy": "npx wrangler@latest deploy",
+    "dev": "npx wrangler@latest dev",
+    "tail": "npx wrangler@latest tail",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -60,7 +60,7 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.14",
     "vitest-mock-extended": "^3.1.0",
-    "wrangler": "^4.51.0"
+    "wrangler": "^4.53.0"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.5",
