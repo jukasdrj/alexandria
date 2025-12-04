@@ -1,14 +1,18 @@
 /**
  * Cover URL Resolver
  *
- * Determines whether to return Alexandria R2 URL or external URL.
- * Implements lazy-loading: external URL on first request, Alexandria URL after caching.
+ * ALWAYS returns Alexandria R2 URLs - never external URLs.
+ * Downloads and caches covers immediately on first request.
+ *
+ * Flow:
+ * 1. Check if cover exists in R2 → return Alexandria URL (fast)
+ * 2. Not cached → download from providers, store in R2, return Alexandria URL (slower first request)
+ * 3. No cover found → return placeholder
  *
  * @module services/cover-resolver
  */
 
 import { coverExists, processCoverImage } from './image-processor.js';
-import { fetchBestCover } from './cover-fetcher.js';
 
 // Alexandria cover CDN base
 const ALEXANDRIA_COVER_BASE = 'https://alexandria.ooheynerds.com/covers';
@@ -18,21 +22,23 @@ const PLACEHOLDER_URL = 'https://alexandria.ooheynerds.com/covers/placeholder.sv
 
 /**
  * Resolve cover URL for an ISBN
- * 
+ *
  * Logic:
  * 1. Check R2 for cached cover
  * 2. If cached → return Alexandria URL
- * 3. If not cached → return external URL + queue background caching
- * 
+ * 3. If not cached → download immediately, store in R2, return Alexandria URL
+ *
+ * CRITICAL: Alexandria NEVER returns external URLs. All covers are downloaded and served from R2.
+ *
  * @param {string} isbn - ISBN to resolve cover for
- * @param {string|null} externalUrl - External cover URL from provider
+ * @param {string|null} externalUrl - External cover URL from provider (unused, kept for compatibility)
  * @param {object} env - Worker environment
- * @param {object} ctx - Execution context (for waitUntil)
- * @returns {Promise<{url: string, source: 'alexandria'|'external'|'placeholder', queued: boolean}>}
+ * @param {object} ctx - Execution context (unused, kept for compatibility)
+ * @returns {Promise<{url: string, source: 'alexandria'|'placeholder', cached: boolean}>}
  */
 export async function resolveCoverUrl(isbn, externalUrl, env, ctx) {
   if (!isbn) {
-    return { url: PLACEHOLDER_URL, source: 'placeholder', queued: false };
+    return { url: PLACEHOLDER_URL, source: 'placeholder', cached: false };
   }
   
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
@@ -40,66 +46,37 @@ export async function resolveCoverUrl(isbn, externalUrl, env, ctx) {
   try {
     // 1. Check if cover exists in R2
     const cached = await coverExists(env, normalizedISBN);
-    
+
     if (cached) {
       // Return Alexandria CDN URL
       return {
         url: `${ALEXANDRIA_COVER_BASE}/${normalizedISBN}/large`,
         source: 'alexandria',
-        queued: false
+        cached: true
       };
     }
-    
-    // 2. Not cached - fetch from external providers or use provided URL
-    let coverUrl = externalUrl;
 
-    // If no external URL provided, try to fetch from ISBNdb → Google Books → OpenLibrary
-    if (!coverUrl) {
-      console.log(`[CoverResolver] No cover_id in DB for ${normalizedISBN}, fetching from providers...`);
-      const coverResult = await fetchBestCover(normalizedISBN, env);
-      coverUrl = coverResult?.url || null;
+    // 2. Not cached - download immediately and store in R2
+    console.log(`[CoverResolver] Cover not cached for ${normalizedISBN}, downloading now...`);
 
-      if (coverUrl && coverUrl !== 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover') {
-        console.log(`[CoverResolver] Found cover via ${coverResult.source} for ${normalizedISBN}`);
-      }
-    }
+    const result = await processCoverImage(normalizedISBN, env);
 
-    // If we have a cover URL, queue background processing and return it
-    if (coverUrl && coverUrl !== 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover') {
-      // Queue background cover processing (non-blocking)
-      if (ctx?.waitUntil) {
-        ctx.waitUntil(
-          processCoverImage(normalizedISBN, env)
-            .then(result => {
-              if (result.status === 'processed') {
-                console.log(`[CoverResolver] Cached cover for ${normalizedISBN}`);
-              }
-            })
-            .catch(err => {
-              console.error(`[CoverResolver] Failed to cache ${normalizedISBN}:`, err.message);
-            })
-        );
-      }
-
+    if (result.status === 'processed' || result.status === 'already_exists') {
+      console.log(`[CoverResolver] Successfully processed cover for ${normalizedISBN}`);
       return {
-        url: coverUrl,
-        source: 'external',
-        queued: true
+        url: `${ALEXANDRIA_COVER_BASE}/${normalizedISBN}/large`,
+        source: 'alexandria',
+        cached: false
       };
     }
 
-    // 3. No cover URL available from any source
-    return { url: PLACEHOLDER_URL, source: 'placeholder', queued: false };
-    
+    // 3. No cover available from any provider
+    console.log(`[CoverResolver] No cover found for ${normalizedISBN}`);
+    return { url: PLACEHOLDER_URL, source: 'placeholder', cached: false };
+
   } catch (error) {
     console.error(`[CoverResolver] Error resolving ${normalizedISBN}:`, error.message);
-    
-    // Fallback to external URL if available
-    if (externalUrl) {
-      return { url: externalUrl, source: 'external', queued: false };
-    }
-    
-    return { url: PLACEHOLDER_URL, source: 'placeholder', queued: false };
+    return { url: PLACEHOLDER_URL, source: 'placeholder', cached: false };
   }
 }
 
