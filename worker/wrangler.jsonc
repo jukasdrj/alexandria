@@ -1,26 +1,5 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "//": "====================================================================================",
-  "//": "Alexandria - OpenLibrary PostgreSQL Database Worker (Paid Plan Optimized)",
-  "//": "====================================================================================",
-  "//": "",
-  "//": "Architecture:",
-  "//": "  Internet → Cloudflare Access (IP: 47.187.18.143/32)",
-  "//": "  → Worker (alexandria.ooheynerds.com, Hono framework)",
-  "//": "  → Hyperdrive (connection pooling, ID: 00ff424776f4415d95245c3c4c36e854)",
-  "//": "  → Cloudflare Tunnel (alexandria-db.ooheynerds.com)",
-  "//": "  → Unraid (192.168.1.240:5432, SSL enabled)",
-  "//": "  → PostgreSQL (54.8M editions, 40.1M works, 14.7M authors)",
-  "//": "",
-  "//": "Paid Plan Optimizations:",
-  "//": "  - Extended CPU limits (300s = 5 minutes)",
-  "//": "  - Smart placement for optimal routing",
-  "//": "  - Full observability with logs/traces",
-  "//": "  - Analytics Engine for monitoring",
-  "//": "  - Queue-based background processing",
-  "//": "  - Cron triggers for scheduled enrichment",
-  "//": "",
-  "//": "====================================================================================",
 
   "name": "alexandria",
   "main": "index.ts",
@@ -29,7 +8,6 @@
     "nodejs_compat_v2"
   ],
 
-  "//": "Custom domain configuration",
   "routes": [
     {
       "pattern": "alexandria.ooheynerds.com",
@@ -37,57 +15,41 @@
     }
   ],
 
-  "//": "========================================================================",
-  "//": "Environment Variables",
-  "//": "========================================================================",
   "vars": {
-    "//": "Database configuration",
     "DB_MAX_CONNECTIONS": "20",
     "DB_CONNECTION_TIMEOUT_MS": "30000",
     "DB_IDLE_TIMEOUT_MS": "300000",
 
-    "//": "Cache configuration (optimized for paid plan)",
     "CACHE_TTL_SHORT": "300",
     "CACHE_TTL_MEDIUM": "3600",
     "CACHE_TTL_LONG": "86400",
     "ENABLE_QUERY_CACHE": "true",
 
-    "//": "Rate limiting",
     "RATE_LIMIT_REQUESTS": "100",
     "RATE_LIMIT_WINDOW_MS": "60000",
 
-    "//": "Cover processing configuration",
     "MAX_COVER_SIZE_MB": "10",
     "COVER_QUALITY": "85",
     "ENABLE_WEBP_CONVERSION": "true",
     "COVER_SIZES": "original,large,medium,small",
 
-    "//": "Enrichment queue configuration",
     "ENRICHMENT_BATCH_SIZE": "10",
     "ENRICHMENT_CONCURRENCY": "5",
     "MAX_RETRIES": "3",
 
-    "//": "External API configuration",
     "OPENLIBRARY_BASE_URL": "https://openlibrary.org",
     "USER_AGENT": "Alexandria/2.0 (nerd@ooheynerds.com) OpenLibraryWorker/2.0.0",
 
-    "//": "Logging configuration",
     "LOG_LEVEL": "info",
     "ENABLE_PERFORMANCE_LOGGING": "true",
     "ENABLE_QUERY_LOGGING": "false",
     "STRUCTURED_LOGGING": "true",
 
-    "//": "Feature flags",
     "ENABLE_ENRICHMENT_QUEUE": "true",
     "ENABLE_COVER_PROCESSING": "true",
     "ENABLE_ANALYTICS": "true"
   },
 
-  "//": "========================================================================",
-  "//": "Hyperdrive Configuration",
-  "//": "PostgreSQL connection pooling with Cloudflare Tunnel access",
-  "//": "Uses SSL with Cloudflare Access Service Token authentication",
-  "//": "========================================================================",
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
@@ -96,10 +58,6 @@
     }
   ],
 
-  "//": "========================================================================",
-  "//": "KV Namespace Bindings",
-  "//": "CACHE: General caching, rate limiting, and metadata storage",
-  "//": "========================================================================",
   "kv_namespaces": [
     {
       "binding": "CACHE",
@@ -107,13 +65,6 @@
     }
   ],
 
-  "//": "========================================================================",
-  "//": "R2 Storage Bindings",
-  "//": "COVER_IMAGES: Cover image storage",
-  "//": "Structure:",
-  "//": "  - covers/{work_key}/{hash}/[original|large|medium|small]",
-  "//": "  - isbn/{isbn13}/original.{ext}",
-  "//": "========================================================================",
   "r2_buckets": [
     {
       "binding": "COVER_IMAGES",
@@ -121,10 +72,6 @@
     }
   ],
 
-  "//": "========================================================================",
-  "//": "Analytics Engine Datasets",
-  "//": "Monitoring and performance tracking",
-  "//": "========================================================================",
   "analytics_engine_datasets": [
     {
       "binding": "ANALYTICS",
@@ -140,18 +87,6 @@
     }
   ],
 
-  "//": "========================================================================",
-  "//": "Secrets Store Bindings (Account-level secrets)",
-  "//": "Store ID: b0562ac16fde468c8af12717a6c88400 (default_secrets_store)",
-  "//": "",
-  "//": "IMPORTANT: Access pattern differs from regular env variables!",
-  "//": "  Regular secret:       env.SECRET_NAME (string)",
-  "//": "  Secrets Store:        await env.SECRET_NAME.get() (async)",
-  "//": "",
-  "//": "Usage in code:",
-  "//": "  const isbndbKey = await env.ISBNDB_API_KEY.get();",
-  "//": "  const googleBooksKey = await env.GOOGLE_BOOKS_API_KEY.get();",
-  "//": "========================================================================",
   "secrets_store_secrets": [
     {
       "binding": "ISBNDB_API_KEY",
@@ -165,10 +100,6 @@
     }
   ],
 
-  "//": "========================================================================",
-  "//": "Queue Configuration (Paid Plan Feature)",
-  "//": "Background processing for cover enrichment and metadata updates",
-  "//": "========================================================================",
   "queues": {
     "producers": [
       {
@@ -202,51 +133,25 @@
     ]
   },
 
-  "//": "========================================================================",
-  "//": "Cron Triggers - Scheduled Tasks",
-  "//": "Queue consumer runs every 5 minutes to process pending enrichment jobs",
-  "//": "",
-  "//": "The scheduled handler:",
-  "//": "  1. Fetches pending jobs (priority DESC, created_at ASC)",
-  "//": "  2. Marks jobs as 'processing'",
-  "//": "  3. Calls provider APIs (ISBNdb, Google Books, OpenLibrary)",
-  "//": "  4. Stores results via enrichment service",
-  "//": "  5. Updates job status to 'completed' or 'failed'",
-  "//": "========================================================================",
   "triggers": {
     "crons": [
       "*/5 * * * *"
     ]
   },
 
-  "//": "========================================================================",
-  "//": "Paid Plan Limits",
-  "//": "Extended CPU time for complex database queries and image processing",
-  "//": "========================================================================",
   "limits": {
     "cpu_ms": 300000
   },
 
-  "//": "========================================================================",
-  "//": "Smart Placement (Paid Plan Feature)",
-  "//": "Optimizes Worker placement for lowest latency to origin",
-  "//": "========================================================================",
   "placement": {
     "mode": "smart"
   },
 
-  "//": "========================================================================",
-  "//": "Observability Configuration (Paid Plan Feature)",
-  "//": "Full logging and tracing with 100% sampling",
-  "//": "========================================================================",
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1.0
   },
 
-  "//": "========================================================================",
-  "//": "Local Development Settings",
-  "//": "========================================================================",
   "dev": {
     "ip": "localhost",
     "port": 8787,
