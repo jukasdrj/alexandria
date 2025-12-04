@@ -177,7 +177,6 @@
         "delivery_delay": 0
       },
       {
-        "//": "Cover processing queue for async downloads from bendv3",
         "binding": "COVER_QUEUE",
         "queue": "alexandria-cover-queue",
         "delivery_delay": 0
@@ -193,7 +192,6 @@
         "max_concurrency": 5
       },
       {
-        "//": "Cover queue consumer - high throughput for image downloads",
         "queue": "alexandria-cover-queue",
         "max_batch_size": 20,
         "max_batch_timeout": 10,
