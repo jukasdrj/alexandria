@@ -960,6 +960,42 @@ app.post('/covers/batch',
 );
 
 // =================================================================================
+// Queue API Endpoints - Manual Pull-Based Consumers (Testing & Debugging)
+// =================================================================================
+
+// POST /api/queue/drain/enrichment - Manually pull and process enrichment queue
+app.post('/api/queue/drain/enrichment', async (c) => {
+  try {
+    const { pullAndProcessEnrichmentQueue } = await import('./queue-api-consumer.js');
+    const batchSize = parseInt(c.req.query('batch_size') || '10');
+    const result = await pullAndProcessEnrichmentQueue(c.env, batchSize);
+    return c.json(result);
+  } catch (error) {
+    console.error('Queue drain error:', error);
+    return c.json({
+      error: 'Queue drain failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// POST /api/queue/drain/covers - Manually pull and process cover queue
+app.post('/api/queue/drain/covers', async (c) => {
+  try {
+    const { pullAndProcessCoverQueue } = await import('./queue-api-consumer.js');
+    const batchSize = parseInt(c.req.query('batch_size') || '20');
+    const result = await pullAndProcessCoverQueue(c.env, batchSize);
+    return c.json(result);
+  } catch (error) {
+    console.error('Queue drain error:', error);
+    return c.json({
+      error: 'Queue drain failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// =================================================================================
 // ISBNdb API Testing Endpoints (Development/Verification)
 // =================================================================================
 

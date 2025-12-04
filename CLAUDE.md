@@ -60,6 +60,8 @@ Tables:
   - Queue-based background processing
   - Multiple Analytics Engine datasets
 
+**API vs Wrangler**: See `docs/CLOUDFLARE-API-VS-WRANGLER.md` for comprehensive comparison of what can be managed via Cloudflare API vs Wrangler CLI (tunnels, Access, workers, queues, AI Gateway, etc.)
+
 ## Essential Commands
 
 ### Worker Development

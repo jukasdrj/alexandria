@@ -23,7 +23,11 @@ import { smartResolveISBN } from './services/smart-enrich.js';
  * @returns {Promise<object>} Processing results summary
  */
 export async function processCoverQueue(batch, env) {
-  console.log(`[CoverQueue] Processing ${batch.messages.length} cover requests`);
+  console.log(`[CoverQueue] ========================================`);
+  console.log(`[CoverQueue] Queue triggered with ${batch.messages.length} messages`);
+  console.log(`[CoverQueue] Queue name: ${batch.queue}`);
+  console.log(`[CoverQueue] Timestamp: ${new Date().toISOString()}`);
+  console.log(`[CoverQueue] ========================================`);
 
   const results = {
     processed: 0,
