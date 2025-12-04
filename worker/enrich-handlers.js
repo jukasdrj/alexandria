@@ -170,12 +170,19 @@ export async function handleQueueEnrichment(c) {
       }, 400);
     }
 
-    if (body.priority && (body.priority < 1 || body.priority > 10)) {
-      return c.json({
-        success: false,
-        error: 'Invalid priority',
-        details: ['priority must be between 1 and 10']
-      }, 400);
+    // Validate priority if provided
+    if (body.priority) {
+      const validStrings = ['urgent', 'high', 'medium', 'normal', 'low', 'background'];
+      const isValidString = typeof body.priority === 'string' && validStrings.includes(body.priority.toLowerCase());
+      const isValidNumber = typeof body.priority === 'number' && body.priority >= 1 && body.priority <= 10;
+
+      if (!isValidString && !isValidNumber) {
+        return c.json({
+          success: false,
+          error: 'Invalid priority',
+          details: ['priority must be a number (1-10) or string (urgent, high, medium, normal, low, background)']
+        }, 400);
+      }
     }
 
     // Get SQL connection from context

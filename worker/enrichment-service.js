@@ -443,9 +443,36 @@ export async function enrichAuthor(sql, author) {
  * @param {number} [queueRequest.priority] - Priority (1-10, default 5)
  * @returns {Promise<{queue_id: string, position_in_queue: number, estimated_processing_time: string}>}
  */
+/**
+ * Convert priority from string or integer to integer (1-10)
+ * @param {string|number} priority - Priority value
+ * @returns {number} - Integer priority 1-10
+ */
+function normalizePriority(priority) {
+  if (!priority) return 5; // Default to medium
+
+  // If already a number, validate range
+  if (typeof priority === 'number') {
+    return Math.max(1, Math.min(10, priority));
+  }
+
+  // Convert string to integer
+  const priorityMap = {
+    'urgent': 1,
+    'high': 3,
+    'medium': 5,
+    'normal': 5,
+    'low': 7,
+    'background': 9
+  };
+
+  const normalized = priorityMap[priority.toLowerCase()];
+  return normalized || 5; // Default to medium if unknown string
+}
+
 export async function queueEnrichment(sql, queueRequest) {
   try {
-    const priority = queueRequest.priority || 5;
+    const priority = normalizePriority(queueRequest.priority);
 
     const result = await sql`
       INSERT INTO enrichment_queue (
