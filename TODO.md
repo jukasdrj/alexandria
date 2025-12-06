@@ -6,15 +6,20 @@ Current status and next steps for development.
 
 ## 🚨 CRITICAL: Active Work
 
-### Enrichment Migration (IN PROGRESS)
-**Status:** Phase 1 Running (Works Migration)  
-**Started:** December 3, 2025 at 10:46 AM CST  
-**See:** `MIGRATION_STATUS.md` for details
+### Post-Migration Optimization (NEXT)
+**Status:** Ready to begin
+**Priority:** HIGH
 
-**Order Required (FK Constraints):**
-1. ✅ enriched_works (40M) - Running now
-2. ⏳ enriched_editions (30M) - After works complete
-3. ⏳ enriched_authors (14M) - Parallel with editions
+**Completed Migrations (December 5, 2025):**
+1. ✅ enriched_works: 21.25M records (12:30 PM)
+2. ✅ enriched_editions: 28.58M records (4:08 PM)
+3. ✅ enriched_authors: 8.15M records (8:12 PM)
+
+**Next Steps:**
+1. Run ANALYZE on all enriched tables
+2. Switch search endpoints to query enriched tables
+3. Add KV caching for popular searches (#39)
+4. Implement rate limiting (#40)
 
 ### Issue #35: ILIKE Performance - RESOLVED ✅
 **Priority:** LOW (was HIGH)  
@@ -83,23 +88,39 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 - [x] 3 auto-update triggers
 - [x] FK constraints (editions→works)
 
+### Phase 2.8: Enrichment Data Migration (COMPLETE ✅)
+- [x] Works migration: 21.25M rows (Dec 5, 12:30 PM)
+- [x] Editions migration: 28.58M rows (Dec 5, 4:08 PM)
+- [x] Authors migration: 8.15M rows (Dec 5, 8:12 PM)
+- [x] All migrations filtered to ISBN-13 only
+
+**Migration Stats:**
+- Works: 83.6% basic, 11.8% with subjects, 2.6% with descriptions
+- Editions: 49.6% full metadata, 48.2% good, 1.8% minimal
+- Authors: 7.8% with birth years, 0.35% with bios
+
 ---
 
 ## Phase 3: Performance & Search Optimization
 
-- [x] **#35 Fix ILIKE performance** - RESOLVED (ILIKE + GIN indexes work well at 250ms)
-- [ ] Switch search to query enriched tables first (after migration completes)
-- [ ] Add query result caching (KV) - Issue #39
+- [x] **#35 Fix ILIKE performance** - RESOLVED (ILIKE + GIN indexes work well)
+- [x] Run ANALYZE on all enriched tables (Dec 6, 2025)
+- [x] Added missing GIN trigram indexes (works.title, works.subtitle)
+- [x] Switch search to query enriched tables (Dec 6, 2025)
+  - ISBN: Direct lookup on enriched_editions (sub-ms performance)
+  - Title: GIN trigram index on enriched_editions.title (~500ms with JOINs)
+  - Author: GIN trigram index on enriched_authors.name
+  - All queries now return pre-cached cover URLs from enriched tables
+- [x] **#39 Add query result caching (KV)** - COMPLETE (Dec 6, 2025)
+  - ISBN queries: 24h TTL (exact matches, static data)
+  - Title/Author queries: 1h TTL (fuzzy matches)
+  - Cache keys: Unique per query type + value + pagination
+  - Response includes `cache_hit`, `cached_at`, `cache_age_seconds`, `cache_ttl`
+  - Non-blocking cache writes using `waitUntil()`
+  - Verified working: Cache hits return instantly without DB query
 - [ ] Implement rate limiting per IP - Issue #40
 - [ ] Monitor and optimize slow queries
 - [ ] Add CDN caching headers
-
-## Phase 4: Enrichment Data Migration
-
-- [ ] Complete works migration (40M rows)
-- [ ] Complete editions migration (30M rows)
-- [ ] Complete authors migration (14M rows)
-- [ ] Run ANALYZE on all enriched tables
 - [ ] Verify bendv3 integration
 
 ## Phase 5: Advanced Features
@@ -178,4 +199,4 @@ FROM pg_stat_activity WHERE query LIKE '%INSERT INTO enriched%';
 
 ---
 
-**Last Updated:** December 3, 2025
+**Last Updated:** December 6, 2025

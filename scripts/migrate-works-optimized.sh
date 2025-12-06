@@ -8,8 +8,8 @@
 set -e
 
 echo "[$(date)] OPTIMIZED MIGRATION - Using JOIN instead of EXISTS"
-echo "Target: 1.34M+ modern ISBN-13 works"
-echo "Filter: ISBN-13 + (1980+ OR rich metadata)"
+echo "Target: 21.25M works with ISBN-13 editions"
+echo "Filter: ISBN-13 works with titles (NO date restriction)"
 
 ssh root@Tower.local 'nohup docker exec postgres psql -U openlibrary -d openlibrary -c "
 TRUNCATE enriched_works CASCADE;
@@ -76,17 +76,6 @@ INNER JOIN edition_isbns ei ON ei.edition_key = e.key
 WHERE w.key IS NOT NULL
   AND w.data->>'\'title\'' IS NOT NULL
   AND LENGTH(ei.isbn) = 13
-  AND (
-    -- Modern books (1980+)
-    (REGEXP_MATCH(w.data->>'\'first_publish_date\'', '\''\\d{4}'\''))[1]::integer >= 1980
-    OR
-    -- OR undated but high-quality metadata
-    (
-      w.data->>'\'first_publish_date\'' IS NULL
-      AND w.data->>'\'description\'' IS NOT NULL
-      AND jsonb_array_length(w.data->'\'subjects\'') > 3
-    )
-  )
 ON CONFLICT (work_key) DO NOTHING;
 " > /tmp/works_migration_optimized.log 2>&1 &'
 
