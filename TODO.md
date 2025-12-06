@@ -118,7 +118,10 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
   - Response includes `cache_hit`, `cached_at`, `cache_age_seconds`, `cache_ttl`
   - Non-blocking cache writes using `waitUntil()`
   - Verified working: Cache hits return instantly without DB query
-- [ ] Implement rate limiting per IP - Issue #40
+- [x] **#40 Rate limiting per IP** - CLOSED (Out of scope)
+  - API is behind Cloudflare Access (IP whitelist: 47.187.18.143/32)
+  - Only accessible from home IP - no public rate limiting needed
+  - Future: If opening to public, implement with KV-based rate limiter
 - [ ] Monitor and optimize slow queries
 - [ ] Add CDN caching headers
 - [ ] Verify bendv3 integration
