@@ -42,12 +42,28 @@ Cover Images:
 
 **YOU MUST use `edition_isbns` table for ISBN lookups** - it's indexed and optimized.
 
-Tables:
+**Core OpenLibrary Tables (Read-Only)**:
 - **authors** (14.7M): `key`, `type`, `revision`, `data` (JSONB: name, bio)
 - **works** (40.1M): `key`, `type`, `revision`, `data` (JSONB: title, description)
 - **editions** (54.8M): `key`, `type`, `revision`, `work_key`, `data` (JSONB: title, ISBN)
 - **edition_isbns** (49.3M): `edition_key`, `isbn` ← **USE THIS FOR ISBN QUERIES**
 - **author_works** (42.8M): `author_key`, `work_key` (relationships)
+
+**Enriched Tables (Alexandria-specific, optimized for search)**:
+- **enriched_works** (~28.6M estimated): Normalized work metadata, GIN trigram indexes on title for fuzzy search
+- **enriched_editions**: Normalized edition metadata, GIN indexes on related_isbns array, analyzed statistics
+- **enriched_authors**: Normalized author metadata, GIN trigram indexes on name for fuzzy search
+- These tables are populated via Smart Resolution enrichment pipeline (ISBNdb → Google Books → OpenLibrary)
+- Use enriched tables for better search performance vs JSONB queries on core tables
+
+**Fuzzy Text Search (pg_trgm)**:
+- PostgreSQL extension `pg_trgm` installed and enabled (v1.6)
+- GIN trigram indexes on all title and author columns for fuzzy matching
+- Use `%` operator for similarity matching: `WHERE title % 'search term'`
+- Use `similarity()` function to get match scores: `similarity(title, 'search term')`
+- Default similarity threshold: 0.3 (30% similarity)
+- Supports typo-tolerant searches (e.g., "hary poter" finds "Harry Potter")
+- All search endpoints use pg_trgm for improved search quality
 
 ## Configuration
 
@@ -590,8 +606,8 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 ```
 alex/
 ├── worker/                    # Cloudflare Worker code
-│   ├── index.js               # Main worker + Hono routes
-│   ├── wrangler.toml          # Wrangler config (Hyperdrive, R2, KV, Secrets)
+│   ├── index.ts               # Main worker + Hono routes (TypeScript)
+│   ├── wrangler.jsonc         # Wrangler config (Hyperdrive, R2, KV, Secrets, Queues)
 │   ├── cover-handlers.js      # Work-based cover processing (POST /api/covers/process)
 │   ├── image-utils.js         # Image download, validation, hashing utilities
 │   ├── enrich-handlers.js     # Enrichment API handlers
