@@ -145,7 +145,13 @@ export interface ExternalBookData {
     small?: string;
     medium?: string;
     large?: string;
+    original?: string;  // NEW: High-quality original cover (ISBNdb)
   };
+  // NEW: ISBNdb enrichment fields (Issue #53)
+  subjects?: string[];           // Subject tags for genre classification
+  deweyDecimal?: string[];       // Dewey Decimal classification
+  binding?: string;              // Format type (Hardcover, Paperback, etc.)
+  relatedISBNs?: Record<string, string>;  // Related format ISBNs (epub, audiobook, etc.)
   workKey?: string;
   editionKey?: string;
   provider: 'isbndb' | 'google-books' | 'openlibrary';
@@ -162,6 +168,18 @@ interface ISBNdbResponse {
     language?: string;
     synopsis?: string;
     image?: string;
+    // NEW: ISBNdb enrichment fields (Issue #53)
+    image_original?: string;                // High-quality original cover
+    subjects?: string[];                     // Subject tags
+    dewey_decimal?: string[];                // Dewey Decimal classification
+    binding?: string;                        // Format (Hardcover, Paperback, etc.)
+    related?: Record<string, string>;        // Related ISBNs (epub, audiobook, etc.)
+    dimensions_structured?: {
+      length?: { unit: string; value: number };
+      width?: { unit: string; value: number };
+      height?: { unit: string; value: number };
+      weight?: { unit: string; value: number };
+    };
   };
 }
 
@@ -244,6 +262,17 @@ async function fetchFromISBNdb(isbn: string, env: Env): Promise<ExternalBookData
       return null;
     }
 
+    // Extract cover URLs (prefer image_original for best quality)
+    let coverUrls: ExternalBookData['coverUrls'];
+    if (book.image_original || book.image) {
+      coverUrls = {
+        original: book.image_original,  // High-quality original (best for R2 processing)
+        large: book.image,
+        medium: book.image,
+        small: book.image,
+      };
+    }
+
     return {
       isbn,
       title: book.title_long || book.title,
@@ -253,11 +282,12 @@ async function fetchFromISBNdb(isbn: string, env: Env): Promise<ExternalBookData
       pageCount: book.pages,
       language: book.language,
       description: book.synopsis,
-      coverUrls: book.image ? {
-        large: book.image,
-        medium: book.image,
-        small: book.image,
-      } : undefined,
+      coverUrls,
+      // NEW: ISBNdb enrichment fields (Issue #53)
+      subjects: book.subjects || [],
+      deweyDecimal: book.dewey_decimal || [],
+      binding: book.binding,
+      relatedISBNs: book.related,
       provider: 'isbndb',
     };
 

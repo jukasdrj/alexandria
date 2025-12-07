@@ -47,7 +47,7 @@ export const openAPISpec = {
           { name: 'isbn', in: 'query', description: 'Search by ISBN-10 or ISBN-13', schema: { type: 'string' } },
           { name: 'title', in: 'query', description: 'Search by book title (partial match)', schema: { type: 'string' } },
           { name: 'author', in: 'query', description: 'Search by author name (partial match)', schema: { type: 'string' } },
-          { name: 'limit', in: 'query', description: 'Max results (default 10, max 50)', schema: { type: 'integer' } },
+          { name: 'limit', in: 'query', description: 'Max results (default 10, max 100)', schema: { type: 'integer', minimum: 1, maximum: 100 } },
         ],
         responses: {
           '200': { description: 'Search results' },

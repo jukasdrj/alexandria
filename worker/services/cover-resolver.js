@@ -31,7 +31,7 @@ const PLACEHOLDER_URL = 'https://alexandria.ooheynerds.com/covers/placeholder.sv
  * CRITICAL: Alexandria NEVER returns external URLs. All covers are downloaded and served from R2.
  *
  * @param {string} isbn - ISBN to resolve cover for
- * @param {string|null} externalUrl - External cover URL from provider (unused, kept for compatibility)
+ * @param {string|null} externalUrl - External cover URL from provider (used to avoid redundant API calls)
  * @param {object} env - Worker environment
  * @param {object} ctx - Execution context (unused, kept for compatibility)
  * @returns {Promise<{url: string, source: 'alexandria'|'placeholder', cached: boolean}>}
@@ -40,9 +40,9 @@ export async function resolveCoverUrl(isbn, externalUrl, env, ctx) {
   if (!isbn) {
     return { url: PLACEHOLDER_URL, source: 'placeholder', cached: false };
   }
-  
+
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
-  
+
   try {
     // 1. Check if cover exists in R2
     const cached = await coverExists(env, normalizedISBN);
@@ -59,7 +59,9 @@ export async function resolveCoverUrl(isbn, externalUrl, env, ctx) {
     // 2. Not cached - download immediately and store in R2
     console.log(`[CoverResolver] Cover not cached for ${normalizedISBN}, downloading now...`);
 
-    const result = await processCoverImage(normalizedISBN, env);
+    // Pass externalUrl if available to avoid redundant provider searches
+    const options = externalUrl ? { knownCoverUrl: externalUrl } : {};
+    const result = await processCoverImage(normalizedISBN, env, options);
 
     if (result.status === 'processed' || result.status === 'already_exists') {
       console.log(`[CoverResolver] Successfully processed cover for ${normalizedISBN}`);

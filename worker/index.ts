@@ -330,13 +330,7 @@ app.get('/api/search',
       let total = 0;
 
       if (isbn) {
-        if (isbn.length !== 10 && isbn.length !== 13) {
-          return c.json({
-            error: 'Invalid ISBN format',
-            provided: c.req.query('isbn')
-          }, 400);
-        }
-
+        // ISBN validation is now handled by SearchQuerySchema in types.ts
         // OPTIMIZED: Query enriched_editions table with indexed ISBN
         // Performance: Direct primary key lookup (sub-millisecond)
         const [countResult, dataResult] = await Promise.all([
@@ -392,13 +386,14 @@ app.get('/api/search',
         }
 
       } else if (title) {
-        // OPTIMIZED: Query enriched_editions table with GIN trigram index
+        // OPTIMIZED: Query enriched_editions table with GIN trigram index using pg_trgm similarity
         // Performance: ~44ms (vs ~250ms with base JSONB tables)
+        // Using similarity() function for fuzzy matching (threshold 0.3 = 30% similarity)
         const [countResult, dataResult] = await Promise.all([
           sql`
             SELECT COUNT(*)::int AS total
             FROM enriched_editions
-            WHERE title ILIKE ${'%' + title + '%'}
+            WHERE title % ${title}
           `,
           sql`
             SELECT
@@ -413,12 +408,14 @@ app.get('/api/search',
               ee.work_key,
               ee.cover_url_large,
               ee.cover_url_medium,
-              ee.cover_url_small
+              ee.cover_url_small,
+              similarity(ee.title, ${title}) AS match_score
             FROM enriched_editions ee
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
             LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
             LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
-            WHERE ee.title ILIKE ${'%' + title + '%'}
+            WHERE ee.title % ${title}
+            ORDER BY similarity(ee.title, ${title}) DESC
             LIMIT ${limit}
             OFFSET ${offset}
           `
@@ -428,15 +425,16 @@ app.get('/api/search',
         results = dataResult;
 
       } else if (author) {
-        // OPTIMIZED: Query enriched_authors with GIN trigram index
+        // OPTIMIZED: Query enriched_authors with GIN trigram index using pg_trgm similarity
         // Performance: Significant improvement over JSONB extraction
+        // Using similarity() function for fuzzy matching (threshold 0.3 = 30% similarity)
         const [countResult, dataResult] = await Promise.all([
           sql`
             SELECT COUNT(DISTINCT ee.isbn)::int AS total
             FROM enriched_authors ea
             JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
             JOIN enriched_editions ee ON ee.work_key = wae.work_key
-            WHERE ea.name ILIKE ${'%' + author + '%'}
+            WHERE ea.name % ${author}
           `,
           sql`
             SELECT DISTINCT ON (ee.isbn)
@@ -451,13 +449,14 @@ app.get('/api/search',
               ee.work_key,
               ee.cover_url_large,
               ee.cover_url_medium,
-              ee.cover_url_small
+              ee.cover_url_small,
+              similarity(ea.name, ${author}) AS match_score
             FROM enriched_authors ea
             JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
             JOIN enriched_editions ee ON ee.work_key = wae.work_key
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
-            WHERE ea.name ILIKE ${'%' + author + '%'}
-            ORDER BY ee.isbn
+            WHERE ea.name % ${author}
+            ORDER BY ee.isbn, similarity(ea.name, ${author}) DESC
             LIMIT ${limit}
             OFFSET ${offset}
           `
@@ -586,7 +585,7 @@ app.get('/api/search/combined',
               e.key AS edition_key,
               w.key AS work_key,
               a.key AS author_key,
-              (e.data->'covers'->0)::text AS cover_id,
+              (e.data->'covers'->>0) AS cover_id,
               'edition' AS result_type
             FROM editions e
             JOIN edition_isbns ei ON ei.edition_key = e.key
@@ -629,8 +628,8 @@ app.get('/api/search/combined',
         // Text search: search both titles and authors simultaneously
         searchType = 'text';
 
-        // Search pattern for ILIKE (uses GIN trigram indexes)
-        const searchPattern = `%${query}%`;
+        // Using pg_trgm similarity operator (%) for fuzzy matching (threshold 0.3 = 30% similarity)
+        // This provides better fuzzy matching than ILIKE pattern matching
 
         // For text searches, we need to get total count of unique editions
         // across both title and author searches. This is complex, so we'll
@@ -645,7 +644,7 @@ app.get('/api/search/combined',
             FROM (
               SELECT DISTINCT e.key
               FROM editions e
-              WHERE e.data->>'title' ILIKE ${searchPattern}
+              WHERE (e.data->>'title') % ${query}
             ) AS unique_editions
           `,
           // Count author matches
@@ -657,7 +656,7 @@ app.get('/api/search/combined',
               JOIN author_works aw ON aw.author_key = a.key
               JOIN works w ON w.key = aw.work_key
               JOIN editions e ON e.work_key = w.key
-              WHERE a.data->>'name' ILIKE ${searchPattern}
+              WHERE (a.data->>'name') % ${query}
             ) AS unique_editions
           `,
           // Search editions by title
@@ -673,15 +672,16 @@ app.get('/api/search/combined',
               e.key AS edition_key,
               w.key AS work_key,
               a.key AS author_key,
-              (e.data->'covers'->0)::text AS cover_id,
-              'edition' AS result_type
+              (e.data->'covers'->>0) AS cover_id,
+              'edition' AS result_type,
+              similarity(e.data->>'title', ${query}) AS match_score
             FROM editions e
             LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
             LEFT JOIN works w ON w.key = e.work_key
             LEFT JOIN author_works aw ON aw.work_key = w.key
             LEFT JOIN authors a ON aw.author_key = a.key
-            WHERE e.data->>'title' ILIKE ${searchPattern}
-            ORDER BY e.key
+            WHERE (e.data->>'title') % ${query}
+            ORDER BY e.key, similarity(e.data->>'title', ${query}) DESC
             LIMIT ${limit + 50}
             OFFSET ${offset}
           `,
@@ -698,15 +698,16 @@ app.get('/api/search/combined',
               e.key AS edition_key,
               w.key AS work_key,
               a.key AS author_key,
-              (e.data->'covers'->0)::text AS cover_id,
-              'edition' AS result_type
+              (e.data->'covers'->>0) AS cover_id,
+              'edition' AS result_type,
+              similarity(a.data->>'name', ${query}) AS match_score
             FROM authors a
             JOIN author_works aw ON aw.author_key = a.key
             JOIN works w ON w.key = aw.work_key
             JOIN editions e ON e.work_key = w.key
             LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
-            WHERE a.data->>'name' ILIKE ${searchPattern}
-            ORDER BY e.key
+            WHERE (a.data->>'name') % ${query}
+            ORDER BY e.key, similarity(a.data->>'name', ${query}) DESC
             LIMIT ${limit + 50}
             OFFSET ${offset}
           `
@@ -744,11 +745,8 @@ app.get('/api/search/combined',
       const formattedResults = await Promise.all(results.map(async (row) => {
         // Build external OpenLibrary cover URL from cover_id
         let externalCoverUrl = null;
-        if (row.cover_id) {
-          const coverId = row.cover_id.replace(/"/g, ''); // Remove JSON quotes
-          if (coverId && coverId !== 'null') {
-            externalCoverUrl = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
-          }
+        if (row.cover_id && row.cover_id !== 'null') {
+          externalCoverUrl = `https://covers.openlibrary.org/b/id/${row.cover_id}-L.jpg`;
         }
 
         // Resolve cover URL (Alexandria R2 if cached, external if not)

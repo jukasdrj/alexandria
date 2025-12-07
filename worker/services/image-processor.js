@@ -171,7 +171,7 @@ export async function getCoverMetadata(env, isbn) {
  *
  * Pipeline:
  * 1. Check if already processed (idempotency)
- * 2. Fetch best cover URL from providers
+ * 2. Fetch best cover URL from providers (or use provided URL)
  * 3. Download and validate image
  * 4. Store original in R2
  * 5. Return metadata
@@ -183,6 +183,7 @@ export async function getCoverMetadata(env, isbn) {
  * @param {object} env - Worker environment
  * @param {object} options - Processing options
  * @param {boolean} options.force - Force reprocessing even if exists
+ * @param {string} options.knownCoverUrl - Optional cover URL to use (skips provider search)
  * @returns {Promise<object>} Processing result
  */
 export async function processCoverImage(isbn, env, options = {}) {
@@ -203,9 +204,22 @@ export async function processCoverImage(isbn, env, options = {}) {
       }
     }
 
-    // 2. Fetch best cover URL from providers
-    console.log(`Fetching cover for ${normalizedISBN}...`);
-    const coverResult = await fetchBestCover(normalizedISBN, env);
+    // 2. Fetch best cover URL from providers (or use known URL)
+    let coverResult;
+
+    if (options.knownCoverUrl) {
+      // Use the provided cover URL directly (avoids redundant API calls)
+      console.log(`Using known cover URL for ${normalizedISBN}: ${options.knownCoverUrl}`);
+      coverResult = {
+        url: options.knownCoverUrl,
+        source: 'openlibrary',  // Assume OpenLibrary since that's typical source
+        quality: 'high'
+      };
+    } else {
+      // Search across providers
+      console.log(`Fetching cover for ${normalizedISBN}...`);
+      coverResult = await fetchBestCover(normalizedISBN, env);
+    }
 
     if (coverResult.source === 'placeholder') {
       console.log(`No cover found for ${normalizedISBN}`);

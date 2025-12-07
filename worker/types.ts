@@ -17,11 +17,26 @@ import { z } from 'zod';
 // =================================================================================
 
 export const SearchQuerySchema = z.object({
-  isbn: z.string().optional(),
+  isbn: z.string()
+    .transform((val) => {
+      if (!val) return undefined;
+      const clean = val.replace(/[^0-9X]/gi, '').toUpperCase();
+      if (clean.length !== 10 && clean.length !== 13) {
+        throw new Error("Invalid ISBN format. Must be 10 or 13 characters (digits and 'X' for ISBN-10 check digit)");
+      }
+      return val;
+    })
+    .optional(),
   title: z.string().optional(),
   author: z.string().optional(),
-  limit: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 10)),
-  offset: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 0)),
+  limit: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 10;
+    return Math.max(1, Math.min(100, parsed));
+  }),
+  offset: z.string().optional().transform((val) => {
+    const parsed = val ? parseInt(val, 10) : 0;
+    return Math.max(0, parsed);
+  }),
 });
 
 export const CombinedSearchQuerySchema = z.object({
