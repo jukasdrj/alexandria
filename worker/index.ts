@@ -386,14 +386,15 @@ app.get('/api/search',
         }
 
       } else if (title) {
-        // OPTIMIZED: Query enriched_editions table with GIN trigram index using pg_trgm similarity
-        // Performance: ~44ms (vs ~250ms with base JSONB tables)
-        // Using similarity() function for fuzzy matching (threshold 0.3 = 30% similarity)
+        // OPTIMIZED: Query enriched_editions with ILIKE for fast partial match
+        // Performance: ~60-75ms with GIN trigram index (vs 18+ seconds with similarity operator)
+        // ILIKE pattern matching is precise and leverages the GIN index efficiently
+        const titlePattern = `%${title}%`;
         const [countResult, dataResult] = await Promise.all([
           sql`
             SELECT COUNT(*)::int AS total
             FROM enriched_editions
-            WHERE title % ${title}
+            WHERE title ILIKE ${titlePattern}
           `,
           sql`
             SELECT
@@ -408,14 +409,13 @@ app.get('/api/search',
               ee.work_key,
               ee.cover_url_large,
               ee.cover_url_medium,
-              ee.cover_url_small,
-              similarity(ee.title, ${title}) AS match_score
+              ee.cover_url_small
             FROM enriched_editions ee
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
             LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
             LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
-            WHERE ee.title % ${title}
-            ORDER BY similarity(ee.title, ${title}) DESC
+            WHERE ee.title ILIKE ${titlePattern}
+            ORDER BY ee.title
             LIMIT ${limit}
             OFFSET ${offset}
           `
@@ -425,16 +425,17 @@ app.get('/api/search',
         results = dataResult;
 
       } else if (author) {
-        // OPTIMIZED: Query enriched_authors with GIN trigram index using pg_trgm similarity
-        // Performance: Significant improvement over JSONB extraction
-        // Using similarity() function for fuzzy matching (threshold 0.3 = 30% similarity)
+        // OPTIMIZED: Query enriched_authors with ILIKE for fast partial match
+        // Performance: Sub-second with GIN trigram index (vs slower similarity operator)
+        // ILIKE pattern matching is precise and efficient
+        const authorPattern = `%${author}%`;
         const [countResult, dataResult] = await Promise.all([
           sql`
             SELECT COUNT(DISTINCT ee.isbn)::int AS total
             FROM enriched_authors ea
             JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
             JOIN enriched_editions ee ON ee.work_key = wae.work_key
-            WHERE ea.name % ${author}
+            WHERE ea.name ILIKE ${authorPattern}
           `,
           sql`
             SELECT DISTINCT ON (ee.isbn)
@@ -449,14 +450,13 @@ app.get('/api/search',
               ee.work_key,
               ee.cover_url_large,
               ee.cover_url_medium,
-              ee.cover_url_small,
-              similarity(ea.name, ${author}) AS match_score
+              ee.cover_url_small
             FROM enriched_authors ea
             JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
             JOIN enriched_editions ee ON ee.work_key = wae.work_key
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
-            WHERE ea.name % ${author}
-            ORDER BY ee.isbn, similarity(ea.name, ${author}) DESC
+            WHERE ea.name ILIKE ${authorPattern}
+            ORDER BY ee.isbn, ea.name
             LIMIT ${limit}
             OFFSET ${offset}
           `
@@ -513,8 +513,12 @@ app.get('/api/search',
         );
       }
 
+      // Enhanced CDN caching with stale-while-revalidate for better performance
+      const ttl = getCacheTTL(queryType, c.env);
       return c.json(response, 200, {
-        'cache-control': `public, max-age=${getCacheTTL(queryType, c.env)}`
+        'Cache-Control': `public, max-age=${ttl}`,
+        'CDN-Cache-Control': `public, max-age=${ttl}, stale-while-revalidate=600`,
+        'Vary': 'Accept-Encoding'
       });
 
     } catch (e) {
@@ -565,34 +569,32 @@ app.get('/api/search/combined',
 
         searchType = 'isbn';
 
-        // Search by ISBN with count (indexed, fast lookup)
+        // OPTIMIZED: Use enriched_editions for faster ISBN lookup
         const [countResult, dataResult] = await Promise.all([
           sql`
-            SELECT COUNT(DISTINCT e.key)::int AS total
-            FROM editions e
-            JOIN edition_isbns ei ON ei.edition_key = e.key
-            WHERE ei.isbn = ${isbn}
+            SELECT COUNT(*)::int AS total
+            FROM enriched_editions
+            WHERE isbn = ${isbn}
           `,
           sql`
             SELECT
-              e.data->>'title' AS title,
-              a.data->>'name' AS author,
-              ei.isbn,
-              e.data->>'publish_date' AS publish_date,
-              e.data->>'publishers' AS publishers,
-              e.data->>'number_of_pages' AS pages,
-              w.data->>'title' AS work_title,
-              e.key AS edition_key,
-              w.key AS work_key,
-              a.key AS author_key,
-              (e.data->'covers'->>0) AS cover_id,
+              ee.title,
+              ea.name AS author,
+              ee.isbn,
+              ee.publication_date AS publish_date,
+              ee.publisher AS publishers,
+              ee.page_count AS pages,
+              ew.title AS work_title,
+              ee.edition_key,
+              ee.work_key,
+              ea.author_key,
+              ee.cover_url_large AS cover_url,
               'edition' AS result_type
-            FROM editions e
-            JOIN edition_isbns ei ON ei.edition_key = e.key
-            LEFT JOIN works w ON w.key = e.work_key
-            LEFT JOIN author_works aw ON aw.work_key = w.key
-            LEFT JOIN authors a ON aw.author_key = a.key
-            WHERE ei.isbn = ${isbn}
+            FROM enriched_editions ee
+            LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
+            LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
+            LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
+            WHERE ee.isbn = ${isbn}
             LIMIT ${limit}
             OFFSET ${offset}
           `
@@ -628,103 +630,87 @@ app.get('/api/search/combined',
         // Text search: search both titles and authors simultaneously
         searchType = 'text';
 
-        // Using pg_trgm similarity operator (%) for fuzzy matching (threshold 0.3 = 30% similarity)
-        // This provides better fuzzy matching than ILIKE pattern matching
-
-        // For text searches, we need to get total count of unique editions
-        // across both title and author searches. This is complex, so we'll
-        // fetch more results and dedupe, then provide estimated total.
-        // Note: For exact totals, we'd need a UNION query with COUNT which is expensive.
+        // OPTIMIZED: Use enriched tables with ILIKE for fast partial matching
+        // ILIKE is much faster than similarity operator (60ms vs 18s) and still uses GIN trigram index
+        const queryPattern = `%${query}%`;
 
         // Parallel search: titles and authors
         const [titleCountResult, authorCountResult, titleResults, authorResults] = await Promise.all([
-          // Count title matches
+          // Count title matches (enriched_editions with GIN index)
           sql`
             SELECT COUNT(*)::int AS total
-            FROM (
-              SELECT DISTINCT e.key
-              FROM editions e
-              WHERE (e.data->>'title') % ${query}
-            ) AS unique_editions
+            FROM enriched_editions
+            WHERE title ILIKE ${queryPattern}
           `,
-          // Count author matches
+          // Count author matches (enriched_authors with GIN index)
           sql`
-            SELECT COUNT(*)::int AS total
-            FROM (
-              SELECT DISTINCT e.key
-              FROM authors a
-              JOIN author_works aw ON aw.author_key = a.key
-              JOIN works w ON w.key = aw.work_key
-              JOIN editions e ON e.work_key = w.key
-              WHERE (a.data->>'name') % ${query}
-            ) AS unique_editions
+            SELECT COUNT(DISTINCT ee.isbn)::int AS total
+            FROM enriched_authors ea
+            JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
+            JOIN enriched_editions ee ON ee.work_key = wae.work_key
+            WHERE ea.name ILIKE ${queryPattern}
           `,
-          // Search editions by title
+          // Search editions by title (using enriched tables)
           sql`
-            SELECT DISTINCT ON (e.key)
-              e.data->>'title' AS title,
-              a.data->>'name' AS author,
-              ei.isbn,
-              e.data->>'publish_date' AS publish_date,
-              e.data->>'publishers' AS publishers,
-              e.data->>'number_of_pages' AS pages,
-              w.data->>'title' AS work_title,
-              e.key AS edition_key,
-              w.key AS work_key,
-              a.key AS author_key,
-              (e.data->'covers'->>0) AS cover_id,
-              'edition' AS result_type,
-              similarity(e.data->>'title', ${query}) AS match_score
-            FROM editions e
-            LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
-            LEFT JOIN works w ON w.key = e.work_key
-            LEFT JOIN author_works aw ON aw.work_key = w.key
-            LEFT JOIN authors a ON aw.author_key = a.key
-            WHERE (e.data->>'title') % ${query}
-            ORDER BY e.key, similarity(e.data->>'title', ${query}) DESC
+            SELECT DISTINCT ON (ee.isbn)
+              ee.title,
+              ea.name AS author,
+              ee.isbn,
+              ee.publication_date AS publish_date,
+              ee.publisher AS publishers,
+              ee.page_count AS pages,
+              ew.title AS work_title,
+              ee.edition_key,
+              ee.work_key,
+              ea.author_key,
+              ee.cover_url_large AS cover_url,
+              'edition' AS result_type
+            FROM enriched_editions ee
+            LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
+            LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
+            LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
+            WHERE ee.title ILIKE ${queryPattern}
+            ORDER BY ee.isbn, ee.title
             LIMIT ${limit + 50}
             OFFSET ${offset}
           `,
-          // Search authors by name
+          // Search authors by name (using enriched tables)
           sql`
-            SELECT DISTINCT ON (e.key)
-              e.data->>'title' AS title,
-              a.data->>'name' AS author,
-              ei.isbn,
-              e.data->>'publish_date' AS publish_date,
-              e.data->>'publishers' AS publishers,
-              e.data->>'number_of_pages' AS pages,
-              w.data->>'title' AS work_title,
-              e.key AS edition_key,
-              w.key AS work_key,
-              a.key AS author_key,
-              (e.data->'covers'->>0) AS cover_id,
-              'edition' AS result_type,
-              similarity(a.data->>'name', ${query}) AS match_score
-            FROM authors a
-            JOIN author_works aw ON aw.author_key = a.key
-            JOIN works w ON w.key = aw.work_key
-            JOIN editions e ON e.work_key = w.key
-            LEFT JOIN edition_isbns ei ON ei.edition_key = e.key
-            WHERE (a.data->>'name') % ${query}
-            ORDER BY e.key, similarity(a.data->>'name', ${query}) DESC
+            SELECT DISTINCT ON (ee.isbn)
+              ee.title,
+              ea.name AS author,
+              ee.isbn,
+              ee.publication_date AS publish_date,
+              ee.publisher AS publishers,
+              ee.page_count AS pages,
+              ew.title AS work_title,
+              ee.edition_key,
+              ee.work_key,
+              ea.author_key,
+              ee.cover_url_large AS cover_url,
+              'edition' AS result_type
+            FROM enriched_authors ea
+            JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
+            JOIN enriched_editions ee ON ee.work_key = wae.work_key
+            LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
+            WHERE ea.name ILIKE ${queryPattern}
+            ORDER BY ee.isbn, ea.name
             LIMIT ${limit + 50}
             OFFSET ${offset}
           `
         ]);
 
-        // Combine and deduplicate results (by edition_key)
+        // Combine and deduplicate results (by ISBN)
         const combinedMap = new Map();
         [...titleResults, ...authorResults].forEach(row => {
-          if (row.edition_key && !combinedMap.has(row.edition_key)) {
-            combinedMap.set(row.edition_key, row);
+          if (row.isbn && !combinedMap.has(row.isbn)) {
+            combinedMap.set(row.isbn, row);
           }
         });
 
         results = Array.from(combinedMap.values()).slice(0, limit);
 
         // Total is approximated as sum of both counts (may have overlap, but good estimate)
-        // For precise total, we'd need UNION which is more expensive
         const titleTotal = titleCountResult[0]?.total || 0;
         const authorTotal = authorCountResult[0]?.total || 0;
         total = titleTotal + authorTotal; // Estimated (may count some editions twice)
@@ -741,28 +727,10 @@ app.get('/api/search/combined',
         }, 404);
       }
 
-      // Resolve cover URLs with lazy-loading (R2 cache or external)
-      const formattedResults = await Promise.all(results.map(async (row) => {
-        // Build external OpenLibrary cover URL from cover_id
-        let externalCoverUrl = null;
-        if (row.cover_id && row.cover_id !== 'null') {
-          externalCoverUrl = `https://covers.openlibrary.org/b/id/${row.cover_id}-L.jpg`;
-        }
-
-        // Resolve cover URL (Alexandria R2 if cached, external if not)
-        let coverUrl = null;
-        let coverSource = null;
-        if (row.isbn) {
-          try {
-            const coverResult = await resolveCoverUrl(row.isbn, externalCoverUrl, c.env, c.executionCtx);
-            coverUrl = coverResult.url;
-            coverSource = coverResult.source;
-          } catch (e) {
-            console.error(`Cover resolve failed for ${row.isbn}:`, e instanceof Error ? e.message : String(e));
-            coverUrl = externalCoverUrl; // Fallback
-            coverSource = 'external-fallback';
-          }
-        }
+      // Format results - enriched tables already have cover URLs pre-cached
+      const formattedResults = results.map((row) => {
+        // Use pre-cached cover URL from enriched_editions (faster, no async resolution needed)
+        const coverUrl = row.cover_url || null;
 
         return {
           type: row.result_type,
@@ -770,20 +738,21 @@ app.get('/api/search/combined',
           author: row.author,
           isbn: row.isbn,
           coverUrl,
-          coverSource,
+          coverSource: coverUrl ? 'enriched-cached' : null,
           publish_date: row.publish_date,
-          publishers: row.publishers ? JSON.parse(row.publishers) : null,
+          publishers: row.publishers,
           pages: row.pages,
           work_title: row.work_title,
           openlibrary_edition: row.edition_key ? `https://openlibrary.org${row.edition_key}` : null,
           openlibrary_work: row.work_key ? `https://openlibrary.org${row.work_key}` : null,
           openlibrary_author: row.author_key ? `https://openlibrary.org${row.author_key}` : null,
         };
-      }));
+      });
 
       // Calculate pagination metadata
       const hasMore = offset + results.length < total;
 
+      // Enhanced CDN caching headers for combined search
       return c.json({
         query: query,
         search_type: searchType,
@@ -799,7 +768,9 @@ app.get('/api/search/combined',
           ...(searchType === 'text' && { totalEstimated: true })
         }
       }, 200, {
-        'cache-control': 'public, max-age=86400'
+        'Cache-Control': 'public, max-age=3600',
+        'CDN-Cache-Control': 'public, max-age=3600, stale-while-revalidate=600',
+        'Vary': 'Accept-Encoding'
       });
 
     } catch (e) {

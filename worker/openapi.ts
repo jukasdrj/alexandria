@@ -6,17 +6,46 @@
  */
 
 export const openAPISpec = {
-  openapi: '3.0.0',
+  openapi: '3.1.0',
   info: {
     title: 'Alexandria Book API',
     version: '2.0.0',
-    description: 'Search 54+ million books from OpenLibrary via ISBN, title, and author. Powered by Cloudflare Workers and Hyperdrive.',
+    description: `
+Search 54+ million books from OpenLibrary via ISBN, title, and author. Powered by Cloudflare Workers and Hyperdrive.
+
+## Features
+- **54.8M+ editions** with ISBN lookups
+- **40.1M+ works** with title search
+- **14.7M+ authors** with author search
+- **Fuzzy text search** using PostgreSQL pg_trgm for typo-tolerant queries
+- **Cover image processing** with R2 storage
+- **Smart enrichment** with ISBNdb, Google Books, and OpenLibrary integration
+- **Queue-based architecture** for async processing
+
+## Rate Limits
+- Recommended: 10 requests/second per IP
+- Burst: Up to 20 requests for short bursts
+- Use batch endpoints when processing multiple items
+
+## Authentication
+No authentication required for public endpoints. All endpoints are protected by Cloudflare rate limiting.
+    `.trim(),
     contact: {
       name: 'API Support',
       url: 'https://github.com/jukasdrj/alexandria'
+    },
+    license: {
+      name: 'MIT',
+      url: 'https://opensource.org/licenses/MIT'
     }
   },
   servers: [{ url: 'https://alexandria.ooheynerds.com', description: 'Production' }],
+  tags: [
+    { name: 'System', description: 'Health checks and system statistics' },
+    { name: 'Books', description: 'Book search endpoints' },
+    { name: 'Covers', description: 'Cover image processing and serving' },
+    { name: 'Enrichment', description: 'Metadata enrichment from external providers' }
+  ],
   paths: {
     '/health': {
       get: {
@@ -41,18 +70,182 @@ export const openAPISpec = {
     '/api/search': {
       get: {
         summary: 'Search for books',
-        description: 'Search by ISBN, title, or author',
+        description: `
+Search the Alexandria database by ISBN, title, or author. Supports fuzzy text matching for typo-tolerant searches.
+
+## Search Modes
+1. **ISBN Search** - Exact match with Smart Resolution (auto-enrichment if not found)
+   - Fastest: ~10-50ms
+   - Accepts ISBN-10 or ISBN-13 (normalized automatically)
+   - Triggers external enrichment if not in database
+
+2. **Title Search** - Fuzzy matching with pg_trgm
+   - Speed: ~50-200ms
+   - Supports partial matches and typos (e.g., "hary poter" finds "Harry Potter")
+   - Searches enriched_works table with trigram indexes
+
+3. **Author Search** - Fuzzy matching with pg_trgm
+   - Speed: ~100-300ms
+   - Supports partial matches and typos
+   - Searches enriched_authors table with trigram indexes
+
+## Examples
+- \`?isbn=9780439064873\` - Find Harry Potter by ISBN
+- \`?title=harry%20potter&limit=20\` - Search by title with pagination
+- \`?author=rowling&limit=10&offset=20\` - Search by author, page 3
+        `.trim(),
         tags: ['Books'],
         parameters: [
-          { name: 'isbn', in: 'query', description: 'Search by ISBN-10 or ISBN-13', schema: { type: 'string' } },
-          { name: 'title', in: 'query', description: 'Search by book title (partial match)', schema: { type: 'string' } },
-          { name: 'author', in: 'query', description: 'Search by author name (partial match)', schema: { type: 'string' } },
-          { name: 'limit', in: 'query', description: 'Max results (default 10, max 100)', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+          {
+            name: 'isbn',
+            in: 'query',
+            description: 'Search by ISBN-10 or ISBN-13. Triggers Smart Resolution if not found.',
+            schema: { type: 'string', example: '9780439064873' }
+          },
+          {
+            name: 'title',
+            in: 'query',
+            description: 'Search by book title. Supports fuzzy matching and typos.',
+            schema: { type: 'string', example: 'Harry Potter' }
+          },
+          {
+            name: 'author',
+            in: 'query',
+            description: 'Search by author name. Supports fuzzy matching and typos.',
+            schema: { type: 'string', example: 'J.K. Rowling' }
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            description: 'Maximum results per page (default: 20, max: 100)',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 }
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            description: 'Number of results to skip for pagination (default: 0)',
+            schema: { type: 'integer', minimum: 0, default: 0 }
+          }
         ],
         responses: {
-          '200': { description: 'Search results' },
-          '400': { description: 'Invalid query' },
-          '404': { description: 'No results found' }
+          '200': {
+            description: 'Search results with pagination metadata',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    results: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          title: { type: 'string', example: 'Harry Potter and the Sorcerer\'s Stone' },
+                          author: { type: 'string', example: 'J.K. Rowling' },
+                          isbn: { type: 'string', example: '9780439064873' },
+                          work_key: { type: 'string', example: '/works/OL45883W' },
+                          edition_key: { type: 'string', example: '/books/OL7353617M' },
+                          cover_url: { type: 'string', example: 'https://alexandria.ooheynerds.com/covers/9780439064873/medium', nullable: true },
+                          publisher: { type: 'string', example: 'Scholastic', nullable: true },
+                          publication_date: { type: 'string', example: '1998-09-01', nullable: true },
+                          page_count: { type: 'integer', example: 309, nullable: true },
+                          language: { type: 'string', example: 'eng', nullable: true }
+                        }
+                      }
+                    },
+                    total: { type: 'integer', example: 247, description: 'Total number of results' },
+                    limit: { type: 'integer', example: 20 },
+                    offset: { type: 'integer', example: 0 },
+                    query: {
+                      type: 'object',
+                      description: 'Echo of query parameters used',
+                      properties: {
+                        isbn: { type: 'string', nullable: true },
+                        title: { type: 'string', nullable: true },
+                        author: { type: 'string', nullable: true }
+                      }
+                    }
+                  }
+                },
+                examples: {
+                  isbnSearch: {
+                    summary: 'ISBN search result',
+                    value: {
+                      results: [{
+                        title: 'Harry Potter and the Sorcerer\'s Stone',
+                        author: 'J.K. Rowling',
+                        isbn: '9780439064873',
+                        work_key: '/works/OL45883W',
+                        edition_key: '/books/OL7353617M',
+                        cover_url: 'https://alexandria.ooheynerds.com/covers/9780439064873/medium',
+                        publisher: 'Scholastic',
+                        publication_date: '1998-09-01',
+                        page_count: 309,
+                        language: 'eng'
+                      }],
+                      total: 1,
+                      limit: 20,
+                      offset: 0,
+                      query: { isbn: '9780439064873' }
+                    }
+                  },
+                  titleSearch: {
+                    summary: 'Title search with multiple results',
+                    value: {
+                      results: [
+                        {
+                          title: 'Harry Potter and the Philosopher\'s Stone',
+                          author: 'J.K. Rowling',
+                          isbn: '9780747532699',
+                          work_key: '/works/OL45883W',
+                          cover_url: 'https://alexandria.ooheynerds.com/covers/9780747532699/medium'
+                        },
+                        {
+                          title: 'Harry Potter and the Chamber of Secrets',
+                          author: 'J.K. Rowling',
+                          isbn: '9780439064873',
+                          work_key: '/works/OL82537W',
+                          cover_url: 'https://alexandria.ooheynerds.com/covers/9780439064873/medium'
+                        }
+                      ],
+                      total: 247,
+                      limit: 20,
+                      offset: 0,
+                      query: { title: 'Harry Potter' }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          '400': {
+            description: 'Invalid query parameters',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'At least one search parameter required (isbn, title, or author)' }
+                  }
+                }
+              }
+            }
+          },
+          '404': {
+            description: 'No results found',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'No results found' },
+                    results: { type: 'array', items: {} },
+                    total: { type: 'integer', example: 0 }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

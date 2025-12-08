@@ -92,7 +92,75 @@ npm run tail             # Live logs
 - `GET /health` - Health check
 - `GET /openapi.json` - OpenAPI 3.0 spec
 
-## TypeScript Integration
+## Using the API
+
+### Quick Examples
+
+```bash
+# Search by ISBN
+curl "https://alexandria.ooheynerds.com/api/search?isbn=9780439064873"
+
+# Search by title (fuzzy matching)
+curl "https://alexandria.ooheynerds.com/api/search?title=harry%20potter&limit=10"
+
+# Search by author
+curl "https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offset=40"
+
+# Get cover image
+curl "https://alexandria.ooheynerds.com/covers/9780439064873/medium" -o cover.jpg
+```
+
+### Type-Safe Client Generation
+
+Generate typed clients from the OpenAPI spec for full type safety:
+
+**TypeScript (openapi-fetch):**
+```bash
+# Generate types
+npx openapi-typescript https://alexandria.ooheynerds.com/openapi.json -o alexandria-types.ts
+
+# Install client
+npm install openapi-fetch
+```
+
+```typescript
+import createClient from "openapi-fetch";
+import type { paths } from "./alexandria-types";
+
+const client = createClient<paths>({
+  baseUrl: "https://alexandria.ooheynerds.com"
+});
+
+// Fully typed with IntelliSense!
+const { data } = await client.GET("/api/search", {
+  params: { query: { isbn: "9780439064873" } }
+});
+```
+
+**Python (httpx + pydantic):**
+```bash
+# Generate models
+pip install datamodel-code-generator
+datamodel-codegen \
+  --url https://alexandria.ooheynerds.com/openapi.json \
+  --output alexandria_models.py
+```
+
+**Go (oapi-codegen):**
+```bash
+# Generate client
+oapi-codegen -package alexandria -generate types,client openapi.json > alexandria/client.go
+```
+
+**Rust (openapi-generator):**
+```bash
+# Generate client
+openapi-generator generate -i openapi.json -g rust -o ./alexandria-client
+```
+
+See [docs/CLIENT-USAGE.md](./docs/CLIENT-USAGE.md) for complete examples in all languages.
+
+### Legacy TypeScript Integration
 
 ```bash
 # Install package (when published)

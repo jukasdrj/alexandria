@@ -122,8 +122,26 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
   - API is behind Cloudflare Access (IP whitelist: 47.187.18.143/32)
   - Only accessible from home IP - no public rate limiting needed
   - Future: If opening to public, implement with KV-based rate limiter
-- [ ] Monitor and optimize slow queries
-- [ ] Add CDN caching headers
+- [x] **Enhanced CDN caching headers** (Dec 8, 2025)
+  - Added CDN-Cache-Control with stale-while-revalidate=600
+  - Added Vary: Accept-Encoding for proper cache separation
+  - Applied to /api/search and /api/search/combined endpoints
+- [x] **Optimized combined search endpoint** (Dec 8, 2025)
+  - Migrated from base JSONB tables to enriched tables
+  - ISBN: ~530ms (down from base table queries)
+  - Author: ~12s with GIN trigram indexes
+  - Pre-cached cover URLs, no async resolution needed
+  - See: docs/PERFORMANCE-OPTIMIZATION-DEC8.md
+- [x] **CRITICAL FIX: ILIKE vs pg_trgm similarity** (Dec 8, 2025)
+  - Identified pg_trgm `%` operator causing 18-36s queries (6.5M rows removed by recheck)
+  - Switched all title/author searches to ILIKE pattern matching
+  - Performance improvements:
+    - Title search: **37x faster** (27.5s → 741ms)
+    - Author search: **2.4x faster** (1.5s → 602ms)
+    - Combined search: **28x faster** (36s → 1.3s)
+  - ILIKE still uses GIN trigram indexes efficiently
+  - See: docs/QUERY-OPTIMIZATION-ILIKE-FIX.md
+- [ ] Add KV caching for combined search endpoint
 - [ ] Verify bendv3 integration
 
 ## Phase 5: Advanced Features
@@ -202,4 +220,4 @@ FROM pg_stat_activity WHERE query LIKE '%INSERT INTO enriched%';
 
 ---
 
-**Last Updated:** December 6, 2025
+**Last Updated:** December 8, 2025
