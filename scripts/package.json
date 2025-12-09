@@ -1,0 +1,12 @@
+{
+  "name": "alexandria-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Queue seeding scripts for Alexandria",
+  "type": "module",
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "cli-progress": "^3.12.0",
+    "postgres": "^3.4.4"
+  }
+}

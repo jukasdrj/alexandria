@@ -9,6 +9,7 @@ import type { Sql } from 'postgres';
 import type { Env } from '../env.d.js';
 import type { ExternalBookData } from './external-apis.js';
 import { resolveExternalISBN } from './external-apis.js';
+import { enrichEdition, enrichWork, enrichAuthor } from '../enrichment-service.js';
 
 // =================================================================================
 // Database Storage Logic
@@ -92,12 +93,15 @@ async function storeExternalBookData(sql: Sql, bookData: ExternalBookData): Prom
     `;
 
     // 5. Create author records (if any) - PARALLEL for better performance
+    const authorKeys: string[] = [];
     if (bookData.authors && bookData.authors.length > 0) {
       await Promise.all(bookData.authors.map(async (authorName) => {
         // Generate author key (or use existing if it's a key)
         const authorKey = authorName.startsWith('/authors/')
           ? authorName
           : `/authors/${crypto.randomUUID()}`;
+
+        authorKeys.push(authorKey);
 
         const authorData = {
           name: authorName,
@@ -130,6 +134,74 @@ async function storeExternalBookData(sql: Sql, bookData: ExternalBookData): Prom
     }
 
     console.log(`[Smart Enrich] ✓ Stored edition ${editionKey} with work ${workKey}`);
+
+    // 6. ENRICHMENT: Populate enriched tables with cover URLs and metadata
+    // This is critical for cover image capture from ISBNdb/Google Books
+    console.log(`[Smart Enrich] Enriching tables for ISBN ${bookData.isbn}...`);
+
+    try {
+      // Enrich edition (most important - contains cover URLs!)
+      await enrichEdition(transaction, {
+        isbn: bookData.isbn,
+        title: bookData.title,
+        subtitle: bookData.subtitle,
+        publisher: bookData.publisher,
+        publication_date: bookData.publicationDate,
+        page_count: bookData.pageCount,
+        format: bookData.binding,
+        language: bookData.language,
+        primary_provider: bookData.provider,
+        cover_urls: {
+          large: bookData.coverUrls?.large,
+          medium: bookData.coverUrls?.medium,
+          small: bookData.coverUrls?.small,
+          original: bookData.coverUrls?.original, // ISBNdb high-quality original
+        },
+        cover_source: bookData.provider,
+        work_key: workKey,
+        openlibrary_edition_id: editionKey,
+        subjects: bookData.subjects,
+        dewey_decimal: bookData.deweyDecimal,
+        binding: bookData.binding,
+        related_isbns: bookData.relatedISBNs,
+      });
+      console.log(`[Smart Enrich] ✓ Enriched edition ${bookData.isbn}`);
+
+      // Enrich work
+      await enrichWork(transaction, {
+        work_key: workKey,
+        title: bookData.title,
+        subtitle: bookData.subtitle,
+        description: bookData.description,
+        subject_tags: bookData.subjects,
+        primary_provider: bookData.provider,
+        cover_urls: {
+          large: bookData.coverUrls?.large,
+          medium: bookData.coverUrls?.medium,
+          small: bookData.coverUrls?.small,
+        },
+        cover_source: bookData.provider,
+        openlibrary_work_id: workKey,
+      });
+      console.log(`[Smart Enrich] ✓ Enriched work ${workKey}`);
+
+      // Enrich authors
+      if (bookData.authors && bookData.authors.length > 0) {
+        for (let i = 0; i < bookData.authors.length; i++) {
+          await enrichAuthor(transaction, {
+            author_key: authorKeys[i],
+            name: bookData.authors[i],
+            primary_provider: bookData.provider,
+            openlibrary_author_id: authorKeys[i],
+          });
+        }
+        console.log(`[Smart Enrich] ✓ Enriched ${bookData.authors.length} author(s)`);
+      }
+    } catch (enrichError) {
+      // Log but don't fail - core data is already stored
+      console.error('[Smart Enrich] Enrichment failed (core data still saved):', enrichError);
+    }
+
     return editionKey;
   });
 }

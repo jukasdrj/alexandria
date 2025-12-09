@@ -280,11 +280,218 @@ app.post('/api/enrich/work', handleEnrichWork);
 // POST /api/enrich/author -> Store or update author biographical data
 app.post('/api/enrich/author', handleEnrichAuthor);
 
-// POST /api/enrich/queue -> Queue background enrichment job
+// POST /api/enrich/queue -> Queue background enrichment job (single item)
 app.post('/api/enrich/queue', handleQueueEnrichment);
+
+// POST /api/enrich/queue/batch -> Queue batch enrichment jobs
+app.post('/api/enrich/queue/batch', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { books } = body;
+
+    // Validate input
+    if (!Array.isArray(books) || books.length === 0) {
+      return c.json({ error: 'books array required' }, 400);
+    }
+
+    if (books.length > 100) {
+      return c.json({ error: 'Max 100 books per request' }, 400);
+    }
+
+    const queued: string[] = [];
+    const failed: Array<{ isbn: string; error: string }> = [];
+
+    for (const book of books) {
+      const { isbn, priority = 'normal', source = 'unknown', title, author } = book;
+
+      // Validate ISBN
+      const normalizedISBN = isbn?.replace(/[^0-9X]/gi, '').toUpperCase();
+      if (!normalizedISBN || (normalizedISBN.length !== 10 && normalizedISBN.length !== 13)) {
+        failed.push({ isbn: isbn || 'undefined', error: 'Invalid ISBN format' });
+        continue;
+      }
+
+      try {
+        // Queue enrichment processing
+        await c.env.ENRICHMENT_QUEUE.send({
+          isbn: normalizedISBN,
+          entity_type: 'edition',
+          entity_key: normalizedISBN,  // Use ISBN as entity key for editions
+          providers_to_try: ['isbndb', 'google-books', 'openlibrary'],
+          priority,
+          source,
+          title,
+          author,
+          queued_at: new Date().toISOString()
+        });
+
+        queued.push(normalizedISBN);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        failed.push({ isbn: normalizedISBN, error: message });
+      }
+    }
+
+    return c.json({
+      queued: queued.length,
+      failed: failed.length,
+      errors: failed
+    });
+  } catch (error) {
+    console.error('Enrichment queue error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({
+      error: 'Queue operation failed',
+      message
+    }, 500);
+  }
+});
 
 // GET /api/enrich/status/:id -> Check enrichment job status
 app.get('/api/enrich/status/:id', handleGetEnrichmentStatus);
+
+// POST /api/authors/bibliography -> Get author bibliography from ISBNdb
+app.post('/api/authors/bibliography', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { author_name, max_pages = 10 } = body;
+
+    if (!author_name || typeof author_name !== 'string') {
+      return c.json({ error: 'author_name required' }, 400);
+    }
+
+    const apiKey = await c.env.ISBNDB_API_KEY.get();
+    if (!apiKey) {
+      return c.json({ error: 'ISBNdb API key not configured' }, 500);
+    }
+
+    const pageSize = 100;
+    const books: Array<{isbn: string; title: string; author: string; publisher?: string; date_published?: string}> = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && page <= max_pages) {
+      const response = await fetch(
+        `https://api2.isbndb.com/author/${encodeURIComponent(author_name)}?page=${page}&pageSize=${pageSize}`,
+        {
+          headers: {
+            'Authorization': apiKey,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (response.status === 404) {
+        // Author not found
+        break;
+      }
+
+      if (response.status === 429) {
+        return c.json({ error: 'Rate limited by ISBNdb' }, 429);
+      }
+
+      if (!response.ok) {
+        return c.json({ error: `ISBNdb API error: ${response.status}` }, response.status);
+      }
+
+      const data = await response.json();
+
+      if (data.books && Array.isArray(data.books)) {
+        for (const book of data.books) {
+          const isbn = book.isbn13 || book.isbn;
+          if (isbn) {
+            books.push({
+              isbn,
+              title: book.title || 'Unknown',
+              author: book.authors?.[0] || author_name,
+              publisher: book.publisher,
+              date_published: book.date_published
+            });
+          }
+        }
+      }
+
+      const total = data.total || 0;
+      const currentCount = page * pageSize;
+      hasMore = currentCount < total;
+
+      page++;
+    }
+
+    return c.json({
+      author: author_name,
+      books_found: books.length,
+      pages_fetched: page - 1,
+      books
+    });
+  } catch (error) {
+    console.error('Author bibliography error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: 'Failed to fetch author bibliography', message }, 500);
+  }
+});
+
+// POST /api/covers/queue -> Queue cover processing jobs (batch)
+app.post('/api/covers/queue', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { books } = body;
+
+    // Validate input
+    if (!Array.isArray(books) || books.length === 0) {
+      return c.json({ error: 'books array required' }, 400);
+    }
+
+    if (books.length > 100) {
+      return c.json({ error: 'Max 100 books per request' }, 400);
+    }
+
+    const queued: string[] = [];
+    const failed: Array<{ isbn: string; error: string }> = [];
+
+    for (const book of books) {
+      const { isbn, work_key, priority = 'normal', source = 'unknown', title, author } = book;
+
+      // Validate ISBN
+      const normalizedISBN = isbn?.replace(/[^0-9X]/gi, '').toUpperCase();
+      if (!normalizedISBN || (normalizedISBN.length !== 10 && normalizedISBN.length !== 13)) {
+        failed.push({ isbn: isbn || 'undefined', error: 'Invalid ISBN format' });
+        continue;
+      }
+
+      try {
+        // Queue cover processing
+        await c.env.COVER_QUEUE.send({
+          isbn: normalizedISBN,
+          work_key,
+          priority,
+          source,
+          title,
+          author,
+          queued_at: new Date().toISOString()
+        });
+
+        queued.push(normalizedISBN);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        failed.push({ isbn: normalizedISBN, error: message });
+      }
+    }
+
+    return c.json({
+      queued: queued.length,
+      failed: failed.length,
+      errors: failed
+    });
+  } catch (error) {
+    console.error('Cover queue error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({
+      error: 'Queue operation failed',
+      message
+    }, 500);
+  }
+});
 
 // GET /api/search -> Main search endpoint (with Zod validation for RPC type safety)
 app.get('/api/search',
