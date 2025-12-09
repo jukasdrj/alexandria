@@ -39,7 +39,7 @@ export async function handleEnrichEdition(c) {
     const sql = c.get('sql');
 
     // Enrich edition
-    const result = await enrichEdition(sql, body);
+    const result = await enrichEdition(sql, body, c.env);
 
     // Log successful enrichment
     console.log(`✅ Enriched edition ${result.isbn} (${result.action}, quality +${result.quality_improvement})`);

@@ -21,9 +21,10 @@ import { enrichEdition, enrichWork, enrichAuthor } from '../enrichment-service.j
  *
  * @param sql - PostgreSQL client
  * @param bookData - External book data to store
+ * @param env - Worker environment with COVER_QUEUE binding
  * @returns The stored edition key
  */
-async function storeExternalBookData(sql: Sql, bookData: ExternalBookData): Promise<string> {
+async function storeExternalBookData(sql: Sql, bookData: ExternalBookData, env: Env): Promise<string> {
   console.log(`[Smart Enrich] Storing data for ISBN ${bookData.isbn} from ${bookData.provider}`);
 
   // Wrap all database operations in a transaction for atomicity
@@ -164,7 +165,7 @@ async function storeExternalBookData(sql: Sql, bookData: ExternalBookData): Prom
         dewey_decimal: bookData.deweyDecimal,
         binding: bookData.binding,
         related_isbns: bookData.relatedISBNs,
-      });
+      }, env);
       console.log(`[Smart Enrich] ✓ Enriched edition ${bookData.isbn}`);
 
       // Enrich work
@@ -274,7 +275,7 @@ export async function smartResolveISBN(
 
   // 2. Store in Alexandria's database
   try {
-    const editionKey = await storeExternalBookData(sql, externalData);
+    const editionKey = await storeExternalBookData(sql, externalData, env);
 
     // 3. Return the formatted result (matching /api/search response format)
     return {

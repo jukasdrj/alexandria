@@ -307,7 +307,7 @@ async function enrichEditionFromProvider(sql, isbn, provider, env) {
     isbn,
     primary_provider: provider,
     ...data
-  });
+  }, env);
 
   return true;
 }

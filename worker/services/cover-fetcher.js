@@ -139,6 +139,69 @@ export async function fetchISBNdbCover(isbn, env) {
 }
 
 /**
+ * Fetch cover URLs from ISBNdb in batch (up to 100 ISBNs)
+ * @param {string[]} isbns - ISBNs to lookup (max 100)
+ * @param {object} env - Worker environment with ISBNDB_API_KEY
+ * @returns {Promise<Map<string, {url: string, source: string, quality: string}>>}
+ */
+export async function fetchISBNdbCoversBatch(isbns, env) {
+  if (!isbns || isbns.length === 0) return new Map();
+
+  // Enforce batch limit (ISBNdb Basic plan: 100 ISBNs max)
+  if (isbns.length > 100) {
+    console.warn(`ISBNdb batch limit exceeded: ${isbns.length} ISBNs (max 100)`);
+    isbns = isbns.slice(0, 100);
+  }
+
+  try {
+    const apiKey = await env.ISBNDB_API_KEY.get();
+    if (!apiKey) {
+      console.error('ISBNdb API key not configured');
+      return new Map();
+    }
+
+    // Enforce rate limit (1 req/sec)
+    await enforceISBNdbRateLimit(env);
+
+    const response = await fetchWithRetry('https://api2.isbndb.com/books', {
+      method: 'POST',
+      headers: {
+        'Authorization': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `isbns=${isbns.join(',')}`,
+    }, { timeoutMs: 15000, maxRetries: 2 });
+
+    if (!response || !response.ok) {
+      console.error(`ISBNdb batch fetch failed: ${response?.status}`);
+      return new Map();
+    }
+
+    const { books } = await response.json();
+    const results = new Map();
+
+    if (books && Array.isArray(books)) {
+      books.forEach(book => {
+        const isbn = book.isbn13 || book.isbn;
+        if (isbn && (book.image_original || book.image)) {
+          results.set(isbn, {
+            url: book.image_original || book.image,
+            source: 'isbndb',
+            quality: book.image_original ? 'original' : 'high',
+          });
+        }
+      });
+    }
+
+    console.log(`[ISBNdb Batch] Fetched ${results.size}/${isbns.length} cover URLs`);
+    return results;
+  } catch (error) {
+    console.error('ISBNdb batch fetch error:', error.message);
+    return new Map();
+  }
+}
+
+/**
  * Fetch cover URL from Google Books API
  * @param {string} isbn - ISBN to lookup
  * @param {object} env - Worker environment with GOOGLE_BOOKS_API_KEY

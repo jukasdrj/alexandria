@@ -40,12 +40,19 @@ export async function processCoverQueue(batch, env) {
     try {
       const { isbn, work_key, provider_url, priority } = message.body;
 
-      console.log(`[CoverQueue] Processing ISBN ${isbn} (priority: ${priority})`);
+      console.log(`[CoverQueue] Processing ISBN ${isbn} (priority: ${priority || 'normal'})`);
 
-      // Process cover with Alexandria's battle-tested processor
-      const result = await processCoverImage(isbn, env, {
-        force: priority === 'high'  // Force reprocess for high-priority
-      });
+      // Build options with provider URL if available (avoids redundant API lookups)
+      const options = {
+        force: priority === 'high'
+      };
+
+      if (provider_url) {
+        options.knownCoverUrl = provider_url;  // ✅ Use provider URL from enrichment
+        console.log(`[CoverQueue] Using provider URL: ${provider_url}`);
+      }
+
+      const result = await processCoverImage(isbn, env, options);
 
       if (result.status === 'processed') {
         results.processed++;
@@ -149,8 +156,12 @@ export async function processEnrichmentQueue(batch, env) {
             }
           }
         } else {
-          // Might be already in DB (cached)
-          results.cached++;
+          // No data found - treat as failure and retry
+          results.failed++;
+          results.errors.push({ isbn, error: 'No external data found' });
+          message.retry();  // ✅ RETRY instead of ack
+          console.warn(`[EnrichQueue] No data found for ${isbn}, will retry`);
+          continue;  // Skip ack() below
         }
 
         // Ack message on success

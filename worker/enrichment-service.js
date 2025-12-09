@@ -8,9 +8,10 @@ import { calculateEditionQuality, calculateWorkQuality, calculateCompleteness, f
  * Enrich an edition in the database
  * @param {import('postgres').Sql} sql - postgres connection
  * @param {import('./types').EnrichEditionRequest} edition - Edition data
+ * @param {import('./env').Env} env - Worker environment with COVER_QUEUE binding
  * @returns {Promise<{isbn: string, action: 'created'|'updated', quality_improvement: number, stored_at: string}>}
  */
-export async function enrichEdition(sql, edition) {
+export async function enrichEdition(sql, edition, env) {
   const startTime = Date.now();
   const qualityScore = calculateEditionQuality(edition);
   const completenessScore = calculateCompleteness(edition, [
@@ -179,6 +180,31 @@ export async function enrichEdition(sql, edition) {
     const wasInsert = row.was_insert;
     const previousQuality = wasInsert ? 0 : (existing?.isbndb_quality || 0);
     const qualityImprovement = row.isbndb_quality - previousQuality;
+
+    // ✅ NEW: Queue cover download if URLs exist
+    if (env?.COVER_QUEUE && edition.cover_urls) {
+      const coverUrl = edition.cover_urls.original ||
+                       edition.cover_urls.large ||
+                       edition.cover_urls.medium ||
+                       edition.cover_urls.small;
+
+      if (coverUrl) {
+        try {
+          await env.COVER_QUEUE.send({
+            isbn: row.isbn,
+            work_key: edition.work_key,
+            provider_url: coverUrl,
+            priority: 'normal',
+            source: `enrichment-${edition.primary_provider}`,
+            queued_at: new Date().toISOString()
+          });
+          console.log(`[Enrichment] ✓ Queued cover download for ${row.isbn} from ${edition.primary_provider}`);
+        } catch (queueError) {
+          // Log but don't fail enrichment
+          console.error(`[Enrichment] Cover queue failed for ${row.isbn}:`, queueError);
+        }
+      }
+    }
 
     // Log the enrichment operation
     await logEnrichmentOperation(sql, {
