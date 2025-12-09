@@ -50,7 +50,7 @@ async function main() {
   const tracker = new ProgressTracker();
   const checkpoint = new CheckpointManager(args.checkpoint);
   const isbndbClient = new ISBNdbClient('https://alexandria.ooheynerds.com');
-  const dbClient = new DatabaseClient(process.env.DATABASE_URL || 'postgres://openlibrary:tommyboy@alexandria-db.ooheynerds.com:5432/openlibrary?sslmode=require');
+  const dbClient = new DatabaseClient('https://alexandria.ooheynerds.com');
   const queueClient = new QueueClient('https://alexandria.ooheynerds.com');
 
   tracker.start('Alexandria Author Bibliography Expansion');

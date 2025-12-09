@@ -271,6 +271,72 @@ app.get('/api/stats',
   }
 );
 
+// POST /api/isbns/check -> Check which ISBNs exist in enriched_editions
+app.post('/api/isbns/check', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { isbns } = body;
+
+    if (!Array.isArray(isbns) || isbns.length === 0) {
+      return c.json({ error: 'Invalid request: isbns array required' }, 400);
+    }
+
+    if (isbns.length > 1000) {
+      return c.json({ error: 'Too many ISBNs (max 1000)' }, 400);
+    }
+
+    const sql = c.get('sql');
+    const start = Date.now();
+
+    // Query enriched_editions for ISBNs
+    // Check both primary ISBN and alternate_isbns array
+    const results = await sql`
+      SELECT isbn, alternate_isbns
+      FROM enriched_editions
+      WHERE isbn IN ${sql(isbns)}
+         OR EXISTS (
+           SELECT 1 FROM unnest(alternate_isbns) AS alt_isbn
+           WHERE alt_isbn IN ${sql(isbns)}
+         )
+    `;
+
+    // Collect all matching ISBNs
+    const existingSet = new Set();
+    const requestedSet = new Set(isbns);
+
+    for (const row of results) {
+      // Check primary ISBN
+      if (requestedSet.has(row.isbn)) {
+        existingSet.add(row.isbn);
+      }
+      // Check alternate ISBNs
+      if (row.alternate_isbns) {
+        for (const isbn of row.alternate_isbns) {
+          if (requestedSet.has(isbn)) {
+            existingSet.add(isbn);
+          }
+        }
+      }
+    }
+
+    const existingISBNs = Array.from(existingSet);
+    const queryDuration = Date.now() - start;
+
+    return c.json({
+      existing: existingISBNs,
+      count: existingISBNs.length,
+      total_checked: isbns.length,
+      query_duration_ms: queryDuration
+    });
+  } catch (error) {
+    console.error('ISBN check error:', error);
+    return c.json({
+      error: 'ISBN check failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
 // POST /api/enrich/edition -> Store or update edition metadata
 app.post('/api/enrich/edition', handleEnrichEdition);
 

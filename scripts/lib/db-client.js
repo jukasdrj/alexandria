@@ -1,17 +1,11 @@
 /**
  * Database Client for ISBN Deduplication
- * Queries enriched_editions table to check which ISBNs already exist
+ * Uses Alexandria Worker API to check which ISBNs already exist
  */
 
-import postgres from 'postgres';
-
 export class DatabaseClient {
-  constructor(connectionString) {
-    this.sql = postgres(connectionString, {
-      max: 10,
-      idle_timeout: 20,
-      connect_timeout: 10
-    });
+  constructor(apiBaseUrl) {
+    this.apiBaseUrl = apiBaseUrl || 'https://alexandria.ooheynerds.com';
   }
 
   /**
@@ -25,16 +19,21 @@ export class DatabaseClient {
     }
 
     try {
-      // Query enriched_editions for ISBNs
-      const results = await this.sql`
-        SELECT DISTINCT unnest(related_isbns) as isbn
-        FROM enriched_editions
-        WHERE related_isbns && ${isbns}
-      `;
+      // Use Worker API to check ISBNs (max 1000 per request)
+      const response = await fetch(`${this.apiBaseUrl}/api/isbns/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isbns })
+      });
 
-      return new Set(results.map(row => row.isbn));
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return new Set(data.existing || []);
     } catch (error) {
-      console.error('Database query error:', error.message);
+      console.error('ISBN check error:', error.message);
       return new Set();
     }
   }
@@ -61,17 +60,16 @@ export class DatabaseClient {
    */
   async getStats() {
     try {
-      const [enrichedCount] = await this.sql`
-        SELECT COUNT(*) as count FROM enriched_editions
-      `;
+      const response = await fetch(`${this.apiBaseUrl}/api/stats`);
 
-      const [totalISBNs] = await this.sql`
-        SELECT COUNT(*) as count FROM edition_isbns
-      `;
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
 
+      const data = await response.json();
       return {
-        enriched_editions: parseInt(enrichedCount.count),
-        total_isbns: parseInt(totalISBNs.count)
+        enriched_editions: data.editions || 0,
+        total_isbns: data.isbns || 0
       };
     } catch (error) {
       console.error('Stats query error:', error.message);
@@ -85,24 +83,14 @@ export class DatabaseClient {
    * @returns {Promise<boolean>}
    */
   async isbnExists(isbn) {
-    try {
-      const result = await this.sql`
-        SELECT 1 FROM enriched_editions
-        WHERE ${isbn} = ANY(related_isbns)
-        LIMIT 1
-      `;
-
-      return result.length > 0;
-    } catch (error) {
-      console.error('ISBN check error:', error.message);
-      return false;
-    }
+    const existingISBNs = await this.getExistingISBNs([isbn]);
+    return existingISBNs.has(isbn);
   }
 
   /**
-   * Close database connection
+   * Close database connection (no-op for API client)
    */
   async close() {
-    await this.sql.end();
+    // No database connection to close when using API
   }
 }
