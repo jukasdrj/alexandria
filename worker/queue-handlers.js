@@ -190,75 +190,39 @@ export async function processEnrichmentQueue(batch, env) {
       if (!message) continue;
 
       try {
-        // Store in database via transaction
-        await sql.begin(async (transaction) => {
-          // Generate keys for entities
-          const editionKey = `/books/${crypto.randomUUID()}`;
-          const workKey = `/works/${crypto.randomUUID()}`;
+        // Generate a work key for grouping editions
+        const workKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
 
-          // Store work (simplified - full implementation in smart-enrich.ts)
-          await transaction`
-            INSERT INTO works (key, type, revision, data, last_modified)
-            VALUES (
-              ${workKey},
-              '/type/work',
-              1,
-              ${JSON.stringify({ title: externalData.title, description: externalData.description })}::jsonb,
-              NOW()
-            )
-            ON CONFLICT (key) DO NOTHING
-          `;
-
-          // Store edition
-          await transaction`
-            INSERT INTO editions (key, type, revision, work_key, data, last_modified)
-            VALUES (
-              ${editionKey},
-              '/type/edition',
-              1,
-              ${workKey},
-              ${JSON.stringify({
-                title: externalData.title,
-                publishers: externalData.publisher ? [externalData.publisher] : [],
-                publish_date: externalData.publicationDate,
-                number_of_pages: externalData.pageCount,
-                isbn_13: [isbn]
-              })}::jsonb,
-              NOW()
-            )
-            ON CONFLICT (key) DO NOTHING
-          `;
-
-          // Store ISBN mapping
-          await transaction`
-            INSERT INTO edition_isbns (edition_key, isbn)
-            VALUES (${editionKey}, ${isbn})
-            ON CONFLICT DO NOTHING
-          `;
-
-          // Enrich edition (stores metadata + cover URLs)
-          await enrichEdition(transaction, {
-            isbn,
-            title: externalData.title,
-            subtitle: externalData.subtitle,
-            publisher: externalData.publisher,
-            publication_date: externalData.publicationDate,
-            page_count: externalData.pageCount,
-            format: externalData.binding,
-            language: externalData.language,
-            primary_provider: 'isbndb',
-            cover_urls: externalData.coverUrls,
-            cover_source: 'isbndb',
-            work_key: workKey,
-            openlibrary_edition_id: editionKey,
-            subjects: externalData.subjects,
-            dewey_decimal: externalData.deweyDecimal,
-            binding: externalData.binding,
-            related_isbns: externalData.relatedISBNs,
-          }, env);
-
-          console.log(`[EnrichQueue] ✓ Enriched ${isbn} from batch`);
+        // First, create the enriched_work so FK constraint is satisfied
+        await enrichWork(sql, {
+          work_key: workKey,
+          title: externalData.title,
+          description: externalData.description,
+          subject_tags: externalData.subjects,
+          primary_provider: 'isbndb',
         });
+
+        // Then enrich the edition (stores metadata + cover URLs)
+        await enrichEdition(sql, {
+          isbn,
+          title: externalData.title,
+          subtitle: externalData.subtitle,
+          publisher: externalData.publisher,
+          publication_date: externalData.publicationDate,
+          page_count: externalData.pageCount,
+          format: externalData.binding,
+          language: externalData.language,
+          primary_provider: 'isbndb',
+          cover_urls: externalData.coverUrls,
+          cover_source: 'isbndb',
+          work_key: workKey,
+          subjects: externalData.subjects,
+          dewey_decimal: externalData.deweyDecimal,
+          binding: externalData.binding,
+          related_isbns: externalData.relatedISBNs,
+        }, env);
+
+        console.log(`[EnrichQueue] ✓ Enriched ${isbn} from batch`);
 
         results.enriched++;
         message.ack();

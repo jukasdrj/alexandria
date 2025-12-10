@@ -100,6 +100,8 @@
     }
   ],
 
+  // Queue configuration (Premium ISBNdb: 1000 ISBNs/API call, 3 req/sec)
+  // Note: Cloudflare Queue max_batch_size limit is 100, ISBNdb batching happens at API call level
   "queues": {
     "producers": [
       {
@@ -117,20 +119,18 @@
       {
         "queue": "alexandria-enrichment-queue",
         "max_batch_size": 100,
-        "max_batch_timeout": 30,
+        "max_batch_timeout": 60,
         "max_retries": 3,
         "dead_letter_queue": "alexandria-enrichment-dlq",
-        "max_concurrency": 1,
-        "comment": "BATCHED: Single worker processes 100 ISBNs in ONE ISBNdb API call (100x efficiency)"
+        "max_concurrency": 1
       },
       {
         "queue": "alexandria-cover-queue",
-        "max_batch_size": 20,
-        "max_batch_timeout": 10,
+        "max_batch_size": 50,
+        "max_batch_timeout": 15,
         "max_retries": 3,
         "dead_letter_queue": "alexandria-cover-dlq",
-        "max_concurrency": 2,
-        "comment": "REDUCED: Lower concurrency to prevent 429 rate limit cascade"
+        "max_concurrency": 3
       }
     ]
   },

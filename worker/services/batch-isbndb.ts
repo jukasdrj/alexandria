@@ -1,8 +1,14 @@
 /**
- * Batched ISBNdb Service
+ * Batched ISBNdb Service (Premium Plan)
  *
  * Provides efficient batch processing of ISBN enrichment requests.
- * Uses ISBNdb's POST /books endpoint to fetch up to 100 ISBNs in a single API call.
+ * Uses ISBNdb's Premium POST /books endpoint to fetch up to 1000 ISBNs in a single API call.
+ *
+ * Premium Plan Benefits:
+ * - 1000 results per call (10x increase from Basic's 100)
+ * - 3 requests per second (3x throughput from Basic's 1/sec)
+ * - 15,000 daily searches
+ * - Premium endpoint: api.premium.isbndb.com
  *
  * This reduces API call waste from 7.1x to near 1.0x efficiency.
  *
@@ -14,10 +20,13 @@ import type { ExternalBookData } from './external-apis.js';
 import { shouldQueryISBNdb, deduplicateISBNs, normalizeISBN, getISBNBatchStats } from '../lib/isbn-utils.js';
 
 /**
- * ISBNdb batch response structure
+ * ISBNdb batch response structure (Premium API format)
+ * Response: { total: N, requested: N, data: [...books] }
  */
 interface ISBNdbBatchResponse {
-  books: Array<{
+  total: number;
+  requested: number;
+  data: Array<{
     isbn: string;
     isbn13?: string;
     title: string;
@@ -78,10 +87,10 @@ export async function fetchISBNdbBatch(
     querying: filteredISBNs.length
   });
 
-  // Enforce ISBNdb batch limit (100 ISBNs max)
-  if (filteredISBNs.length > 100) {
-    console.warn(`[ISBNdb Batch] Batch size ${filteredISBNs.length} exceeds limit, truncating to 100`);
-    filteredISBNs.splice(100);
+  // Enforce ISBNdb Premium batch limit (1000 ISBNs max)
+  if (filteredISBNs.length > 1000) {
+    console.warn(`[ISBNdb Batch] Batch size ${filteredISBNs.length} exceeds Premium limit, truncating to 1000`);
+    filteredISBNs.splice(1000);
   }
 
   try {
@@ -94,15 +103,16 @@ export async function fetchISBNdbBatch(
 
     console.log(`[ISBNdb Batch] Fetching ${filteredISBNs.length} ISBNs in single API call`);
 
-    // Call ISBNdb batch endpoint
+    // Call ISBNdb Premium batch endpoint (1000 ISBNs/call, 3 req/sec)
     const startTime = Date.now();
-    const response = await fetch('https://api2.isbndb.com/books', {
+    const response = await fetch('https://api.premium.isbndb.com/books', {
       method: 'POST',
       headers: {
         'Authorization': apiKey,
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Alexandria/2.0 (Batch Processing)',
       },
-      body: `isbns=${filteredISBNs.join(',')}`,
+      body: JSON.stringify({ isbns: filteredISBNs }),
     });
 
     const fetchDuration = Date.now() - startTime;
@@ -127,15 +137,15 @@ export async function fetchISBNdbBatch(
     // Parse response
     const data: ISBNdbBatchResponse = await response.json();
 
-    if (!data.books || !Array.isArray(data.books)) {
+    if (!data.data || !Array.isArray(data.data)) {
       console.warn('[ISBNdb Batch] Invalid response format');
       return results;
     }
 
-    console.log(`[ISBNdb Batch] Received ${data.books.length}/${filteredISBNs.length} books in ${fetchDuration}ms`);
+    console.log(`[ISBNdb Batch] Received ${data.data.length}/${filteredISBNs.length} books in ${fetchDuration}ms`);
 
     // Transform ISBNdb response to ExternalBookData format
-    for (const book of data.books) {
+    for (const book of data.data) {
       const isbn = book.isbn13 || book.isbn;
       if (!isbn || !book.title) continue;
 
@@ -212,8 +222,8 @@ export async function fetchISBNdbBatches(
   } = {}
 ): Promise<Map<string, ExternalBookData>> {
   const {
-    batchSize = 100,
-    delayBetweenBatches = 1000  // 1s delay to respect 1 req/sec rate limit
+    batchSize = 1000,           // Premium: 1000 ISBNs per call (10x increase!)
+    delayBetweenBatches = 333   // Premium: 3 req/sec = 333ms delay (3x throughput!)
   } = options;
 
   const allResults = new Map<string, ExternalBookData>();
@@ -238,9 +248,9 @@ export async function fetchISBNdbBatches(
       allResults.set(isbn, data);
     }
 
-    // Wait before next batch (rate limit: 1 req/sec)
+    // Wait before next batch (Premium rate limit: 3 req/sec = 333ms)
     if (i < batches.length - 1) {
-      console.log(`[ISBNdb Batches] Waiting ${delayBetweenBatches}ms before next batch`);
+      console.log(`[ISBNdb Batches] Waiting ${delayBetweenBatches}ms before next batch (Premium: 3 req/sec)`);
       await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
     }
   }
