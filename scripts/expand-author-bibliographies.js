@@ -22,6 +22,9 @@ import { processBatches } from './lib/batch-processor.js';
 import { QueueClient } from './lib/queue-client.js';
 import { ProgressTracker } from './lib/progress-tracker.js';
 
+// Sleep utility for rate limiting
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function main() {
   // Parse CLI arguments
   const { values: args } = parseArgs({
@@ -30,6 +33,7 @@ async function main() {
       checkpoint: { type: 'string', default: 'data/author-expansion-checkpoint.json' },
       resume: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      'skip-dedup': { type: 'boolean', default: false }, // Skip ISBN deduplication, queue all
       author: { type: 'string' }, // Process single author
       'max-pages': { type: 'string', default: '10' },
       priority: { type: 'string', default: 'low' }
@@ -131,8 +135,13 @@ async function main() {
       // 3b. Validate and normalize ISBNs
       const { valid } = validateISBNs(books);
 
-      // 3c. Filter out books that already exist in database
-      const newBooks = args['dry-run'] ? valid : await dbClient.filterNewBooks(valid);
+      // 3c. Filter out books that already exist in database (or skip if --skip-dedup)
+      let newBooks;
+      if (args['dry-run'] || args['skip-dedup']) {
+        newBooks = valid;
+      } else {
+        newBooks = await dbClient.filterNewBooks(valid);
+      }
       totalNewBooks += newBooks.length;
 
       // 3d. Queue new books for enrichment and covers
@@ -164,10 +173,18 @@ async function main() {
       checkpoint.markProcessed(authorName, books.length, newBooks.length, queued);
 
       authorBar.increment();
+
+      // Rate limit: Wait between authors to prevent overwhelming ISBNdb
+      // Each author request can trigger up to max_pages pagination requests
+      // ISBNdb limit is 1 req/sec, so 2s delay gives margin for safety
+      await sleep(2000);
     } catch (error) {
       console.error(`Error processing ${authorName}:`, error.message);
       checkpoint.markFailed(authorName, error.message);
       authorBar.increment();
+
+      // Still wait after errors to avoid rapid retries
+      await sleep(2000);
     }
   }
 

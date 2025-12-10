@@ -252,16 +252,32 @@ app.get('/health', async (c) => {
 
 // GET /api/stats -> Get database statistics
 app.get('/api/stats',
-  cache({ cacheName: 'alexandria-cache', cacheControl: 'public, max-age=86400' }),
+  cache({ cacheName: 'alexandria-cache', cacheControl: 'public, max-age=300' }), // 5 min cache for fresher stats
   async (c) => {
     try {
       const sql = c.get('sql');
       const start = Date.now();
-      const [editions, isbns, works, authors] = await Promise.all([
+
+      // OpenLibrary core tables + enriched tables in parallel
+      const [editions, isbns, works, authors, enrichedStats] = await Promise.all([
         sql`SELECT count(*) FROM editions`.then(r => r[0].count),
         sql`SELECT count(*) FROM edition_isbns`.then(r => r[0].count),
         sql`SELECT count(*) FROM works`.then(r => r[0].count),
         sql`SELECT count(*) FROM authors`.then(r => r[0].count),
+        // Enriched tables with recent activity counts
+        // Note: enriched_editions uses updated_at (upsert behavior), others use created_at
+        sql`
+          SELECT
+            (SELECT COUNT(*) FROM enriched_editions) as enriched_editions,
+            (SELECT COUNT(*) FROM enriched_editions WHERE updated_at > NOW() - INTERVAL '1 hour') as enriched_editions_1h,
+            (SELECT COUNT(*) FROM enriched_editions WHERE updated_at > NOW() - INTERVAL '24 hours') as enriched_editions_24h,
+            (SELECT COUNT(*) FROM enriched_works) as enriched_works,
+            (SELECT COUNT(*) FROM enriched_works WHERE created_at > NOW() - INTERVAL '1 hour') as enriched_works_1h,
+            (SELECT COUNT(*) FROM enriched_works WHERE created_at > NOW() - INTERVAL '24 hours') as enriched_works_24h,
+            (SELECT COUNT(*) FROM enriched_authors) as enriched_authors,
+            (SELECT COUNT(*) FROM enriched_authors WHERE created_at > NOW() - INTERVAL '1 hour') as enriched_authors_1h,
+            (SELECT COUNT(*) FROM enriched_authors WHERE created_at > NOW() - INTERVAL '24 hours') as enriched_authors_24h
+        `.then(r => r[0]),
       ]);
       const queryDuration = Date.now() - start;
 
@@ -280,16 +296,35 @@ app.get('/api/stats',
       }
 
       const stats = {
+        // OpenLibrary core tables
         editions: parseInt(editions, 10),
         isbns: parseInt(isbns, 10),
         works: parseInt(works, 10),
         authors: parseInt(authors, 10),
         covers: coverCount,
+        // Enriched tables with recent activity
+        enriched: {
+          editions: {
+            total: parseInt(enrichedStats.enriched_editions, 10),
+            last_1h: parseInt(enrichedStats.enriched_editions_1h, 10),
+            last_24h: parseInt(enrichedStats.enriched_editions_24h, 10),
+          },
+          works: {
+            total: parseInt(enrichedStats.enriched_works, 10),
+            last_1h: parseInt(enrichedStats.enriched_works_1h, 10),
+            last_24h: parseInt(enrichedStats.enriched_works_24h, 10),
+          },
+          authors: {
+            total: parseInt(enrichedStats.enriched_authors, 10),
+            last_1h: parseInt(enrichedStats.enriched_authors_1h, 10),
+            last_24h: parseInt(enrichedStats.enriched_authors_24h, 10),
+          },
+        },
         query_duration_ms: queryDuration,
       };
 
       return c.json(stats, 200, {
-        'cache-control': 'public, max-age=86400'
+        'cache-control': 'public, max-age=300'
       });
     } catch (e) {
       console.error('Stats query error:', e);
@@ -512,6 +547,11 @@ app.post('/api/authors/bibliography', async (c) => {
       hasMore = currentCount < total;
 
       page++;
+
+      // Rate limit between pagination requests (ISBNdb limit: 1 req/sec)
+      if (hasMore && page <= max_pages) {
+        await new Promise(resolve => setTimeout(resolve, 1100)); // 1.1s delay
+      }
     }
 
     return c.json({
@@ -524,6 +564,69 @@ app.post('/api/authors/bibliography', async (c) => {
     console.error('Author bibliography error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: 'Failed to fetch author bibliography', message }, 500);
+  }
+});
+
+// POST /api/isbns/check -> Check which ISBNs already exist in database
+// Used for deduplication before queueing enrichment
+app.post('/api/isbns/check', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { isbns } = body;
+
+    // Validate input
+    if (!Array.isArray(isbns) || isbns.length === 0) {
+      return c.json({ error: 'isbns array required' }, 400);
+    }
+
+    if (isbns.length > 1000) {
+      return c.json({ error: 'Max 1000 ISBNs per request' }, 400);
+    }
+
+    // Normalize ISBNs
+    const normalizedISBNs = isbns
+      .map((isbn: string) => isbn?.replace(/[^0-9X]/gi, '').toUpperCase())
+      .filter((isbn: string) => isbn && (isbn.length === 10 || isbn.length === 13));
+
+    if (normalizedISBNs.length === 0) {
+      return c.json({ existing: [], checked: 0 });
+    }
+
+    // Check enriched_editions table for existing ISBNs
+    const sql = c.get('sql');
+    const result = await sql`
+      SELECT DISTINCT unnest(related_isbns) AS isbn
+      FROM enriched_editions
+      WHERE related_isbns && ${normalizedISBNs}::text[]
+    `;
+
+    // Also check edition_isbns table (OpenLibrary data)
+    const olResult = await sql`
+      SELECT isbn FROM edition_isbns
+      WHERE isbn = ANY(${normalizedISBNs}::text[])
+      LIMIT 1000
+    `;
+
+    // Combine results
+    const existingSet = new Set<string>();
+    for (const row of result) {
+      if (normalizedISBNs.includes(row.isbn)) {
+        existingSet.add(row.isbn);
+      }
+    }
+    for (const row of olResult) {
+      existingSet.add(row.isbn);
+    }
+
+    return c.json({
+      existing: Array.from(existingSet),
+      checked: normalizedISBNs.length,
+      found: existingSet.size
+    });
+  } catch (error) {
+    console.error('ISBN check error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: 'Failed to check ISBNs', message }, 500);
   }
 });
 
