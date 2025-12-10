@@ -752,7 +752,6 @@ app.get('/api/search',
           sql`
             SELECT
               ee.title,
-              ea.name AS author,
               ee.isbn,
               ee.publication_date AS publish_date,
               ee.publisher AS publishers,
@@ -762,12 +761,25 @@ app.get('/api/search',
               ee.work_key,
               ee.cover_url_large,
               ee.cover_url_medium,
-              ee.cover_url_small
+              ee.cover_url_small,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'name', ea.name,
+                    'key', ea.author_key
+                  )
+                  ORDER BY wae.author_order
+                ) FILTER (WHERE ea.author_key IS NOT NULL),
+                '[]'::json
+              ) AS authors
             FROM enriched_editions ee
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
             LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
             LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
             WHERE ee.isbn = ${isbn}
+            GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
+                     ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
+                     ee.cover_url_medium, ee.cover_url_small
             LIMIT ${limit}
             OFFSET ${offset}
           `
@@ -809,7 +821,6 @@ app.get('/api/search',
           sql`
             SELECT
               ee.title,
-              ea.name AS author,
               ee.isbn,
               ee.publication_date AS publish_date,
               ee.publisher AS publishers,
@@ -819,12 +830,25 @@ app.get('/api/search',
               ee.work_key,
               ee.cover_url_large,
               ee.cover_url_medium,
-              ee.cover_url_small
+              ee.cover_url_small,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'name', ea.name,
+                    'key', ea.author_key
+                  )
+                  ORDER BY wae.author_order
+                ) FILTER (WHERE ea.author_key IS NOT NULL),
+                '[]'::json
+              ) AS authors
             FROM enriched_editions ee
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
             LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
             LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
             WHERE ee.title ILIKE ${titlePattern}
+            GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
+                     ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
+                     ee.cover_url_medium, ee.cover_url_small
             ORDER BY ee.title
             LIMIT ${limit}
             OFFSET ${offset}
@@ -848,9 +872,17 @@ app.get('/api/search',
             WHERE ea.name ILIKE ${authorPattern}
           `,
           sql`
-            SELECT DISTINCT ON (ee.isbn)
+            WITH matching_editions AS (
+              SELECT DISTINCT ee.isbn
+              FROM enriched_authors ea
+              JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
+              JOIN enriched_editions ee ON ee.work_key = wae.work_key
+              WHERE ea.name ILIKE ${authorPattern}
+              LIMIT ${limit}
+              OFFSET ${offset}
+            )
+            SELECT
               ee.title,
-              ea.name AS author,
               ee.isbn,
               ee.publication_date AS publish_date,
               ee.publisher AS publishers,
@@ -860,15 +892,26 @@ app.get('/api/search',
               ee.work_key,
               ee.cover_url_large,
               ee.cover_url_medium,
-              ee.cover_url_small
-            FROM enriched_authors ea
-            JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
-            JOIN enriched_editions ee ON ee.work_key = wae.work_key
+              ee.cover_url_small,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'name', all_authors.name,
+                    'key', all_authors.author_key
+                  )
+                  ORDER BY all_wae.author_order
+                ) FILTER (WHERE all_authors.author_key IS NOT NULL),
+                '[]'::json
+              ) AS authors
+            FROM matching_editions me
+            JOIN enriched_editions ee ON ee.isbn = me.isbn
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
-            WHERE ea.name ILIKE ${authorPattern}
-            ORDER BY ee.isbn, ea.name
-            LIMIT ${limit}
-            OFFSET ${offset}
+            LEFT JOIN work_authors_enriched all_wae ON all_wae.work_key = ee.work_key
+            LEFT JOIN enriched_authors all_authors ON all_authors.author_key = all_wae.author_key
+            GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
+                     ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
+                     ee.cover_url_medium, ee.cover_url_small
+            ORDER BY ee.title
           `
         ]);
 
@@ -889,9 +932,17 @@ app.get('/api/search',
         // Use pre-cached cover URLs from enriched_editions (already in R2 or external)
         const coverUrl = row.cover_url_large || row.cover_url_medium || row.cover_url_small || null;
 
+        // Parse authors array from JSON aggregation (handles both JSON objects and pre-parsed arrays)
+        const authorsRaw = row.authors || [];
+        const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: { name: string; key: string }) => ({
+          name: a.name,
+          key: a.key,
+          openlibrary: a.key ? `https://openlibrary.org${a.key}` : null,
+        }));
+
         return {
           title: row.title,
-          author: row.author,
+          authors,
           isbn: row.isbn,
           coverUrl,
           coverSource: coverUrl ? 'enriched-cached' : null,
@@ -1001,7 +1052,6 @@ app.get('/api/search/combined',
           sql`
             SELECT
               ee.title,
-              ea.name AS author,
               ee.isbn,
               ee.publication_date AS publish_date,
               ee.publisher AS publishers,
@@ -1009,14 +1059,25 @@ app.get('/api/search/combined',
               ew.title AS work_title,
               ee.edition_key,
               ee.work_key,
-              ea.author_key,
               ee.cover_url_large AS cover_url,
-              'edition' AS result_type
+              'edition' AS result_type,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'name', ea.name,
+                    'key', ea.author_key
+                  )
+                  ORDER BY wae.author_order
+                ) FILTER (WHERE ea.author_key IS NOT NULL),
+                '[]'::json
+              ) AS authors
             FROM enriched_editions ee
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
             LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
             LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
             WHERE ee.isbn = ${isbn}
+            GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
+                     ew.title, ee.edition_key, ee.work_key, ee.cover_url_large
             LIMIT ${limit}
             OFFSET ${offset}
           `
@@ -1036,11 +1097,11 @@ app.get('/api/search/combined',
 
           if (enrichedResult) {
             console.log(`[Smart Resolve] ✓ Successfully enriched ISBN ${isbn}`);
-            // Add result_type and author_key for combined search format
+            // Add result_type and authors array for combined search format
             results = [{
               ...enrichedResult,
               result_type: 'edition',
-              author_key: null,
+              authors: enrichedResult.author ? [{ name: enrichedResult.author, key: null }] : [],
             }];
             total = 1;
           } else {
@@ -1072,11 +1133,10 @@ app.get('/api/search/combined',
             JOIN enriched_editions ee ON ee.work_key = wae.work_key
             WHERE ea.name ILIKE ${queryPattern}
           `,
-          // Search editions by title (using enriched tables)
+          // Search editions by title (using enriched tables) with all authors per work
           sql`
-            SELECT DISTINCT ON (ee.isbn)
+            SELECT
               ee.title,
-              ea.name AS author,
               ee.isbn,
               ee.publication_date AS publish_date,
               ee.publisher AS publishers,
@@ -1084,23 +1144,42 @@ app.get('/api/search/combined',
               ew.title AS work_title,
               ee.edition_key,
               ee.work_key,
-              ea.author_key,
               ee.cover_url_large AS cover_url,
-              'edition' AS result_type
+              'edition' AS result_type,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'name', ea.name,
+                    'key', ea.author_key
+                  )
+                  ORDER BY wae.author_order
+                ) FILTER (WHERE ea.author_key IS NOT NULL),
+                '[]'::json
+              ) AS authors
             FROM enriched_editions ee
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
             LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
             LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
             WHERE ee.title ILIKE ${queryPattern}
-            ORDER BY ee.isbn, ee.title
+            GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
+                     ew.title, ee.edition_key, ee.work_key, ee.cover_url_large
+            ORDER BY ee.title
             LIMIT ${limit + 50}
             OFFSET ${offset}
           `,
-          // Search authors by name (using enriched tables)
+          // Search authors by name (using enriched tables) with all authors per work
           sql`
-            SELECT DISTINCT ON (ee.isbn)
+            WITH matching_editions AS (
+              SELECT DISTINCT ee.isbn
+              FROM enriched_authors ea
+              JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
+              JOIN enriched_editions ee ON ee.work_key = wae.work_key
+              WHERE ea.name ILIKE ${queryPattern}
+              LIMIT ${limit + 50}
+              OFFSET ${offset}
+            )
+            SELECT
               ee.title,
-              ea.name AS author,
               ee.isbn,
               ee.publication_date AS publish_date,
               ee.publisher AS publishers,
@@ -1108,17 +1187,26 @@ app.get('/api/search/combined',
               ew.title AS work_title,
               ee.edition_key,
               ee.work_key,
-              ea.author_key,
               ee.cover_url_large AS cover_url,
-              'edition' AS result_type
-            FROM enriched_authors ea
-            JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
-            JOIN enriched_editions ee ON ee.work_key = wae.work_key
+              'edition' AS result_type,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'name', all_authors.name,
+                    'key', all_authors.author_key
+                  )
+                  ORDER BY all_wae.author_order
+                ) FILTER (WHERE all_authors.author_key IS NOT NULL),
+                '[]'::json
+              ) AS authors
+            FROM matching_editions me
+            JOIN enriched_editions ee ON ee.isbn = me.isbn
             LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
-            WHERE ea.name ILIKE ${queryPattern}
-            ORDER BY ee.isbn, ea.name
-            LIMIT ${limit + 50}
-            OFFSET ${offset}
+            LEFT JOIN work_authors_enriched all_wae ON all_wae.work_key = ee.work_key
+            LEFT JOIN enriched_authors all_authors ON all_authors.author_key = all_wae.author_key
+            GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
+                     ew.title, ee.edition_key, ee.work_key, ee.cover_url_large
+            ORDER BY ee.title
           `
         ]);
 
@@ -1154,10 +1242,18 @@ app.get('/api/search/combined',
         // Use pre-cached cover URL from enriched_editions (faster, no async resolution needed)
         const coverUrl = row.cover_url || null;
 
+        // Parse authors array from JSON aggregation (handles both JSON objects and pre-parsed arrays)
+        const authorsRaw = row.authors || [];
+        const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: { name: string; key: string }) => ({
+          name: a.name,
+          key: a.key,
+          openlibrary: a.key ? `https://openlibrary.org${a.key}` : null,
+        }));
+
         return {
           type: row.result_type,
           title: row.title,
-          author: row.author,
+          authors,
           isbn: row.isbn,
           coverUrl,
           coverSource: coverUrl ? 'enriched-cached' : null,
@@ -1167,7 +1263,6 @@ app.get('/api/search/combined',
           work_title: row.work_title,
           openlibrary_edition: row.edition_key ? `https://openlibrary.org${row.edition_key}` : null,
           openlibrary_work: row.work_key ? `https://openlibrary.org${row.work_key}` : null,
-          openlibrary_author: row.author_key ? `https://openlibrary.org${row.author_key}` : null,
         };
       });
 

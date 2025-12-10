@@ -1,6 +1,6 @@
 # Alexandria Search API Endpoints Documentation
 
-Last Updated: 2025-12-03
+Last Updated: 2025-12-10
 
 ## Overview
 
@@ -72,10 +72,16 @@ Alexandria provides comprehensive search capabilities across 54.8M book editions
   "results": [
     {
       "title": "Harry Potter and the Chamber of Secrets",
-      "author": "J. K. Rowling",
+      "authors": [
+        {
+          "name": "J. K. Rowling",
+          "key": "/authors/OL23919A",
+          "openlibrary": "https://openlibrary.org/authors/OL23919A"
+        }
+      ],
       "isbn": "9780439064873",
       "coverUrl": "https://alexandria.ooheynerds.com/covers/9780439064873/large",
-      "coverSource": "alexandria",
+      "coverSource": "enriched-cached",
       "publish_date": "2000-09",
       "publishers": ["Scholastic"],
       "pages": "341",
@@ -93,6 +99,11 @@ Alexandria provides comprehensive search capabilities across 54.8M book editions
   }
 }
 ```
+
+**Note on Authors Field**: The `authors` field is an array of author objects, supporting books with multiple authors. Each author object includes:
+- `name`: The author's display name
+- `key`: OpenLibrary author key (e.g., `/authors/OL23919A`)
+- `openlibrary`: Full OpenLibrary URL for the author
 
 **Examples**:
 
