@@ -242,7 +242,8 @@ async function fetchFromISBNdb(isbn: string, env: Env): Promise<ExternalBookData
       return null;
     }
 
-    const url = `https://api2.isbndb.com/book/${isbn}`;
+    // Premium endpoint: 3 req/sec, 15K daily searches
+    const url = `https://api.premium.isbndb.com/book/${isbn}`;
     const response = await fetchWithRetry(url, {
       headers: {
         'Authorization': apiKey,

@@ -250,11 +250,26 @@ app.get('/api/stats',
       ]);
       const queryDuration = Date.now() - start;
 
+      // Count covers in R2 bucket
+      let coverCount = 0;
+      try {
+        const bucket = c.env.COVER_IMAGES;
+        let cursor: string | undefined;
+        do {
+          const list = await bucket.list({ cursor, limit: 1000 });
+          coverCount += list.objects.length;
+          cursor = list.truncated ? list.cursor : undefined;
+        } while (cursor);
+      } catch (e) {
+        console.error('Error counting covers:', e);
+      }
+
       const stats = {
         editions: parseInt(editions, 10),
         isbns: parseInt(isbns, 10),
         works: parseInt(works, 10),
         authors: parseInt(authors, 10),
+        covers: coverCount,
         query_duration_ms: queryDuration,
       };
 
@@ -1090,7 +1105,8 @@ app.get('/covers/:isbn/:size', async (c) => {
 
   // Normalize ISBN
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
-  if (!/^[0-9]{10,13}X?$/i.test(normalizedISBN)) {
+  // ISBN-10: 9 digits + optional X, or ISBN-13: 13 digits
+  if (!/^(?:[0-9]{9}X|[0-9]{10,13})$/i.test(normalizedISBN)) {
     return c.json({ error: 'Invalid ISBN format' }, 400);
   }
 
@@ -1131,7 +1147,8 @@ app.get('/covers/:isbn/status', async (c) => {
   const { isbn } = c.req.param();
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
 
-  if (!/^[0-9]{10,13}X?$/i.test(normalizedISBN)) {
+  // ISBN-10: 9 digits + optional X, or ISBN-13: 13 digits
+  if (!/^(?:[0-9]{9}X|[0-9]{10,13})$/i.test(normalizedISBN)) {
     return c.json({ error: 'Invalid ISBN format' }, 400);
   }
 
@@ -1168,7 +1185,8 @@ app.post('/covers/:isbn/process', async (c) => {
   const { isbn } = c.req.param();
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
 
-  if (!/^[0-9]{10,13}X?$/i.test(normalizedISBN)) {
+  // ISBN-10: 9 digits + optional X, or ISBN-13: 13 digits
+  if (!/^(?:[0-9]{9}X|[0-9]{10,13})$/i.test(normalizedISBN)) {
     return c.json({ error: 'Invalid ISBN format' }, 400);
   }
 
@@ -1255,6 +1273,82 @@ app.post('/api/queue/drain/covers', async (c) => {
 // =================================================================================
 // ISBNdb API Testing Endpoints (Development/Verification)
 // =================================================================================
+
+// GET /api/covers/inspect - Inspect R2 cover objects with metadata
+app.get('/api/covers/inspect', async (c) => {
+  try {
+    const bucket = c.env.COVER_IMAGES;
+    const requestedLimit = parseInt(c.req.query('limit') || '20', 10);
+    const includeDetails = c.req.query('details') === 'true';
+
+    // If details requested, fetch limited set with metadata
+    if (includeDetails) {
+      const list = await bucket.list({ limit: requestedLimit });
+      const objects = await Promise.all(
+        list.objects.map(async (obj) => {
+          const head = await bucket.head(obj.key);
+          return {
+            key: obj.key,
+            size: obj.size,
+            uploaded: obj.uploaded,
+            customMetadata: head?.customMetadata,
+            httpMetadata: head?.httpMetadata,
+          };
+        })
+      );
+
+      return c.json({
+        total_count: objects.length,
+        truncated: list.truncated,
+        objects: objects.sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime())
+      });
+    }
+
+    // Otherwise, just count and return summary
+    let totalCount = 0;
+    let cursor: string | undefined;
+    const sample: any[] = [];
+    let oldestDate: Date | null = null;
+    let newestDate: Date | null = null;
+
+    do {
+      const list = await bucket.list({ cursor, limit: 1000 });
+      totalCount += list.objects.length;
+
+      // Collect first 10 for sample
+      if (sample.length < 10) {
+        sample.push(...list.objects.slice(0, 10 - sample.length).map(o => ({
+          key: o.key,
+          size: o.size,
+          uploaded: o.uploaded
+        })));
+      }
+
+      // Track date range
+      list.objects.forEach(obj => {
+        if (!oldestDate || obj.uploaded < oldestDate) oldestDate = obj.uploaded;
+        if (!newestDate || obj.uploaded > newestDate) newestDate = obj.uploaded;
+      });
+
+      cursor = list.truncated ? list.cursor : undefined;
+    } while (cursor);
+
+    return c.json({
+      total_count: totalCount,
+      date_range: {
+        oldest: oldestDate,
+        newest: newestDate
+      },
+      sample_objects: sample
+    });
+  } catch (error) {
+    console.error('R2 inspect error:', error);
+    return c.json({
+      error: 'Failed to inspect R2 objects',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
 
 // GET /api/test/isbndb - Test all ISBNdb endpoints
 app.get('/api/test/isbndb', async (c) => {

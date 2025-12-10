@@ -158,8 +158,6 @@ oapi-codegen -package alexandria -generate types,client openapi.json > alexandri
 openapi-generator generate -i openapi.json -g rust -o ./alexandria-client
 ```
 
-See [docs/CLIENT-USAGE.md](./docs/CLIENT-USAGE.md) for complete examples in all languages.
-
 ### Legacy TypeScript Integration
 
 ```bash
