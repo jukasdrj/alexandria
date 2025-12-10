@@ -17,6 +17,8 @@ import { openAPISpec } from './openapi.js';
 import { Logger } from './lib/logger.js';
 import { getDashboardHTML } from './dashboard.js';
 import { smartResolveISBN, shouldResolveExternally } from './services/smart-enrich.js';
+import { fetchISBNdbBatch } from './services/batch-isbndb.js';
+import { enrichEdition, enrichWork } from './enrichment-service.js';
 import {
   testAllISBNdbEndpoints,
   testISBNdbBook,
@@ -481,6 +483,135 @@ app.post('/api/enrich/queue/batch', async (c) => {
 // GET /api/enrich/status/:id -> Check enrichment job status
 app.get('/api/enrich/status/:id', handleGetEnrichmentStatus);
 
+// POST /api/enrich/batch-direct -> Direct batch enrichment (bypasses queue for 10x efficiency)
+// Accepts up to 1000 ISBNs, calls ISBNdb Premium batch API directly
+app.post('/api/enrich/batch-direct', async (c) => {
+  const startTime = Date.now();
+
+  try {
+    const body = await c.req.json();
+    const { isbns, source = 'batch-direct' } = body;
+
+    // Validate input
+    if (!Array.isArray(isbns) || isbns.length === 0) {
+      return c.json({ error: 'isbns array required' }, 400);
+    }
+
+    if (isbns.length > 1000) {
+      return c.json({ error: 'Max 1000 ISBNs per request (ISBNdb Premium limit)' }, 400);
+    }
+
+    // Normalize ISBNs
+    const normalizedISBNs = isbns
+      .map((isbn: string) => isbn?.replace(/[^0-9X]/gi, '').toUpperCase())
+      .filter((isbn: string) => isbn && (isbn.length === 10 || isbn.length === 13));
+
+    if (normalizedISBNs.length === 0) {
+      return c.json({ error: 'No valid ISBNs provided' }, 400);
+    }
+
+    console.log(`[Batch Direct] Processing ${normalizedISBNs.length} ISBNs (source: ${source})`);
+
+    // Fetch all ISBNs in a single ISBNdb API call (10x efficiency!)
+    const batchStartTime = Date.now();
+    const enrichmentData = await fetchISBNdbBatch(normalizedISBNs, c.env);
+    const batchDuration = Date.now() - batchStartTime;
+
+    console.log(`[Batch Direct] ISBNdb returned ${enrichmentData.size}/${normalizedISBNs.length} books in ${batchDuration}ms`);
+
+    // Get database connection
+    const sql = c.get('sql');
+
+    // Store results in enriched tables
+    const results = {
+      requested: normalizedISBNs.length,
+      found: enrichmentData.size,
+      enriched: 0,
+      failed: 0,
+      not_found: normalizedISBNs.length - enrichmentData.size,
+      covers_queued: 0,
+      errors: [] as Array<{ isbn: string; error: string }>,
+      api_calls: 1, // Single batch call!
+      duration_ms: 0
+    };
+
+    for (const [isbn, externalData] of enrichmentData) {
+      try {
+        // Generate a work key for grouping editions
+        const workKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
+
+        // First, create the enriched_work so FK constraint is satisfied
+        await enrichWork(sql, {
+          work_key: workKey,
+          title: externalData.title,
+          description: externalData.description,
+          subject_tags: externalData.subjects,
+          primary_provider: 'isbndb',
+        });
+
+        // Then enrich the edition (stores metadata + cover URLs)
+        await enrichEdition(sql, {
+          isbn,
+          title: externalData.title,
+          subtitle: externalData.subtitle,
+          publisher: externalData.publisher,
+          publication_date: externalData.publicationDate,
+          page_count: externalData.pageCount,
+          format: externalData.binding,
+          language: externalData.language,
+          primary_provider: 'isbndb',
+          cover_urls: externalData.coverUrls,
+          cover_source: 'isbndb',
+          work_key: workKey,
+          subjects: externalData.subjects,
+          dewey_decimal: externalData.deweyDecimal,
+          binding: externalData.binding,
+          related_isbns: externalData.relatedISBNs,
+        }, c.env);
+
+        results.enriched++;
+
+        // Queue cover download if we have a cover URL
+        if (externalData.coverUrls?.original || externalData.coverUrls?.large) {
+          try {
+            await c.env.COVER_QUEUE.send({
+              isbn,
+              work_key: workKey,
+              provider_url: externalData.coverUrls.original || externalData.coverUrls.large,
+              priority: 'normal',
+              source
+            });
+            results.covers_queued++;
+          } catch (queueError) {
+            // Don't fail enrichment if cover queue fails
+            console.warn(`[Batch Direct] Failed to queue cover for ${isbn}:`, queueError);
+          }
+        }
+
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        results.failed++;
+        results.errors.push({ isbn, error: message });
+      }
+    }
+
+    results.duration_ms = Date.now() - startTime;
+
+    console.log(`[Batch Direct] Complete: ${results.enriched} enriched, ${results.failed} failed, ${results.not_found} not found in ${results.duration_ms}ms`);
+
+    return c.json(results);
+
+  } catch (error) {
+    console.error('[Batch Direct] Error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({
+      error: 'Batch enrichment failed',
+      message,
+      duration_ms: Date.now() - startTime
+    }, 500);
+  }
+});
+
 // POST /api/authors/bibliography -> Get author bibliography from ISBNdb
 app.post('/api/authors/bibliography', async (c) => {
   try {
@@ -502,8 +633,9 @@ app.post('/api/authors/bibliography', async (c) => {
     let hasMore = true;
 
     while (hasMore && page <= max_pages) {
+      // Use Premium endpoint for 3x throughput (3 req/sec vs 1 req/sec)
       const response = await fetch(
-        `https://api2.isbndb.com/author/${encodeURIComponent(author_name)}?page=${page}&pageSize=${pageSize}`,
+        `https://api.premium.isbndb.com/author/${encodeURIComponent(author_name)}?page=${page}&pageSize=${pageSize}`,
         {
           headers: {
             'Authorization': apiKey,
@@ -527,6 +659,9 @@ app.post('/api/authors/bibliography', async (c) => {
 
       const data = await response.json();
 
+      // Debug: log the pagination info from ISBNdb
+      console.log(`[Bibliography] Page ${page}: total=${data.total}, books_in_response=${data.books?.length || 0}`);
+
       if (data.books && Array.isArray(data.books)) {
         for (const book of data.books) {
           const isbn = book.isbn13 || book.isbn;
@@ -542,15 +677,21 @@ app.post('/api/authors/bibliography', async (c) => {
         }
       }
 
+      // ISBNdb pagination: if we got a full page, there might be more
+      // Also check data.total if available
+      const booksInResponse = data.books?.length || 0;
       const total = data.total || 0;
-      const currentCount = page * pageSize;
-      hasMore = currentCount < total;
+
+      // Continue if: we got a full page OR total indicates more pages exist
+      hasMore = booksInResponse === pageSize || (total > 0 && books.length < total);
+
+      console.log(`[Bibliography] After page ${page}: collected=${books.length}, hasMore=${hasMore}`);
 
       page++;
 
-      // Rate limit between pagination requests (ISBNdb limit: 1 req/sec)
+      // Rate limit between pagination requests (ISBNdb Premium: 3 req/sec)
       if (hasMore && page <= max_pages) {
-        await new Promise(resolve => setTimeout(resolve, 1100)); // 1.1s delay
+        await new Promise(resolve => setTimeout(resolve, 350)); // 350ms delay for 3 req/sec
       }
     }
 

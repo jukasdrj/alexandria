@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues.
+**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues. **Dec 10, 2025**: Upgraded to ISBNdb Premium (3x rate, 10x batch size), added direct batch endpoint for 10x efficiency.
 
 ## Architecture Flow
 
@@ -172,26 +172,36 @@ curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offse
 - **POST /api/enrich/edition** - Store edition metadata
 - **POST /api/enrich/work** - Store work metadata
 - **POST /api/enrich/author** - Store author biographical data
-- **POST /api/enrich/queue** - Queue background enrichment
+- **POST /api/enrich/queue** - Queue background enrichment (max 100 per batch)
+- **POST /api/enrich/batch-direct** - Direct batch enrichment (up to 1000 ISBNs, bypasses queue) ⭐ NEW
 - **GET /api/enrich/status/:id** - Check enrichment status
+- **POST /api/authors/bibliography** - Get author's complete bibliography from ISBNdb
 
 ## ISBNdb API Integration (COMPLETE ✅)
 
-### Plan: Basic (Paid)
-- **Rate Limit**: 1 request/second
-- **Batch Endpoint**: Up to 100 ISBNs per POST request
-- **Base URL**: api2.isbndb.com
+### Plan: Premium (Paid) - Upgraded Dec 10, 2025
+- **Rate Limit**: 3 requests/second (3x faster than Basic)
+- **Batch Endpoint**: Up to 1000 ISBNs per POST request (10x larger than Basic)
+- **Base URL**: `api.premium.isbndb.com` (NOT `api2.isbndb.com`)
 
 ### Available Endpoints (All Verified Working ✅)
 1. **GET /book/{isbn}** - Single book lookup (includes pricing)
-2. **POST /books** - Batch lookup (up to 100 ISBNs) ⭐ **Most Efficient**
+2. **POST /books** - Batch lookup (up to 1000 ISBNs) ⭐ **Most Efficient**
 3. **GET /books/{query}** - Search with pagination
-4. **GET /author/{name}** - Author details
+4. **GET /author/{name}** - Author bibliography with pagination
 5. **GET /authors/{query}** - Author search
 6. **GET /publisher/{name}** - Publisher catalog
 7. **GET /publishers/{query}** - Publisher search
 8. **GET /subject/{name}** - Books by subject
 9. **GET /subjects/{query}** - Subject search
+
+### ISBNdb Pagination (IMPORTANT)
+The `/author/{name}` endpoint **does NOT return a `total` field**. Pagination must check if the response contains a full page (100 books) to determine if more pages exist:
+```javascript
+// ISBNdb pagination: if we got a full page, there might be more
+const booksInResponse = data.books?.length || 0;
+hasMore = booksInResponse === pageSize; // pageSize = 100
+```
 
 ### Enrichment Opportunities
 ISBNdb provides rich metadata beyond current usage:
@@ -206,10 +216,11 @@ ISBNdb provides rich metadata beyond current usage:
 **See**: `docs/ISBNDB-ENRICHMENT.md` for implementation guide
 
 ### Best Practices
-1. **Use batch endpoint** for multiple ISBNs (100x faster than sequential)
-2. **Extract `image_original`** for best cover quality
-3. **Rate limit**: 1 req/sec, use KV for distributed limiting
-4. **Chunk large lists**: 100 ISBNs per batch (Basic plan limit)
+1. **Use batch endpoint** for multiple ISBNs (1000x faster than sequential)
+2. **Use Premium endpoint** (`api.premium.isbndb.com`) for 3x rate limit
+3. **Extract `image_original`** for best cover quality
+4. **Rate limit**: 3 req/sec (Premium), use 350ms delay between requests
+5. **Chunk large lists**: 1000 ISBNs per batch (Premium limit)
 
 ### Test Endpoints
 ```bash
@@ -397,6 +408,26 @@ await queueEnrichmentBatch(isbns, { priority: 'low', source: 'import' }, env)
 |-------|-----------|-----------|---------|
 | **alexandria-cover-queue** | Alexandria, bendv3 | Alexandria | Async cover downloads |
 | **alexandria-enrichment-queue** | Alexandria, bendv3 | Alexandria | Async metadata enrichment |
+
+### Queue Batch Size Limitation (IMPORTANT - Dec 10, 2025)
+
+**Cloudflare Queues has a hard limit of 100 messages per batch** (`max_batch_size` cannot exceed 100). This creates an efficiency gap with ISBNdb Premium which supports 1000 ISBNs per batch call.
+
+**Solution: Direct Batch Endpoint**
+
+For bulk operations, use `/api/enrich/batch-direct` which bypasses queues entirely:
+```bash
+# Enrich up to 1000 ISBNs in a single API call (10x more efficient!)
+curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/batch-direct' \
+  -H 'Content-Type: application/json' \
+  -d '{"isbns": ["9780439064873", "9781234567890", ...], "source": "bulk_import"}'
+```
+
+**When to use each approach:**
+- **Queue** (`/api/enrich/queue`): Real-time trickle of ISBNs (user actions, imports < 100)
+- **Direct** (`/api/enrich/batch-direct`): Bulk operations (author bibliographies, large imports)
+
+**Future Enhancement (GitHub Issue #82)**: Durable Objects as a batching buffer to aggregate queue messages into optimal ISBNdb batch sizes.
 
 ### Monitoring
 
@@ -612,11 +643,15 @@ alex/
 │   ├── image-utils.js         # Image download, validation, hashing utilities
 │   ├── enrich-handlers.js     # Enrichment API handlers
 │   ├── enrichment-service.js  # Enrichment business logic
+│   ├── queue-handlers.js      # Queue consumer handlers (cover + enrichment)
 │   ├── services/
 │   │   ├── image-processor.js # ISBN-based cover processing pipeline
-│   │   └── cover-fetcher.js   # Multi-provider cover URL fetching
+│   │   ├── cover-fetcher.js   # Multi-provider cover URL fetching
+│   │   └── batch-isbndb.ts    # ISBNdb Premium batch API (1000 ISBNs/call)
 │   └── package.json           # Dependencies
 ├── scripts/                   # Deployment & monitoring scripts
+│   ├── expand-author-bibliographies.js  # Bulk author enrichment script
+│   └── e2e-author-enrichment-test.js    # E2E test for author pipeline
 ├── docs/                      # Documentation
 │   ├── CREDENTIALS.md         # Passwords (gitignored!)
 │   ├── ARCHITECTURE.md        # System design

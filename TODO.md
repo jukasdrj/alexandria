@@ -6,20 +6,30 @@ Current status and next steps for development.
 
 ## 🚨 CRITICAL: Active Work
 
-### Post-Migration Optimization (NEXT)
-**Status:** Ready to begin
+### Author Enrichment Expansion (ACTIVE)
+**Status:** Ready to scale
 **Priority:** HIGH
+
+**Completed (December 10, 2025):**
+1. ✅ ISBNdb Premium upgrade (3x rate, 10x batch)
+2. ✅ `/api/enrich/batch-direct` endpoint (bypasses queue limits)
+3. ✅ Fixed bibliography pagination (ISBNdb doesn't return `total`)
+4. ✅ Callie Hart test: 167 books → 82 enriched, 1 API call
+
+**Next Steps:**
+1. Run author expansion script on full library CSV
+2. Monitor cover queue processing
+3. Verify enriched data quality in database
+4. Consider Durable Object buffer (GitHub #82) if queue bottlenecks appear
+
+### Post-Migration Optimization (COMPLETE)
+**Status:** Done
+**Priority:** LOW
 
 **Completed Migrations (December 5, 2025):**
 1. ✅ enriched_works: 21.25M records (12:30 PM)
 2. ✅ enriched_editions: 28.58M records (4:08 PM)
 3. ✅ enriched_authors: 8.15M records (8:12 PM)
-
-**Next Steps:**
-1. Run ANALYZE on all enriched tables
-2. Switch search endpoints to query enriched tables
-3. Add KV caching for popular searches (#39)
-4. Implement rate limiting (#40)
 
 ### Issue #35: ILIKE Performance - RESOLVED ✅
 **Priority:** LOW (was HIGH)  
@@ -99,6 +109,25 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 - Editions: 49.6% full metadata, 48.2% good, 1.8% minimal
 - Authors: 7.8% with birth years, 0.35% with bios
 
+### Phase 2.9: ISBNdb Premium & Batch Direct (COMPLETE ✅ - Dec 10, 2025)
+- [x] Upgraded ISBNdb plan from Basic to Premium
+  - Rate limit: 3 req/sec (was 1 req/sec)
+  - Batch size: 1000 ISBNs (was 100 ISBNs)
+  - Endpoint: `api.premium.isbndb.com` (was `api2.isbndb.com`)
+- [x] Added `/api/enrich/batch-direct` endpoint
+  - Bypasses Cloudflare Queue's 100-message batch limit
+  - Direct call to ISBNdb batch API for 10x efficiency
+  - Accepts up to 1000 ISBNs per request
+- [x] Fixed author bibliography pagination
+  - ISBNdb `/author/{name}` does NOT return `total` field
+  - Fixed logic: check if response has full page (100 books) to detect more pages
+  - Tested: Callie Hart returns 167 books (2 pages), was incorrectly returning 100
+- [x] Updated bibliography endpoint to use Premium endpoint
+- [x] Reduced rate limit delay from 1100ms to 350ms
+
+**GitHub Issue Created:**
+- #82: "Add Durable Object buffer for queue-based ISBN enrichment" (Phase 2.10, future work)
+
 ---
 
 ## Phase 3: Performance & Search Optimization
@@ -144,6 +173,40 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 - [ ] Add KV caching for combined search endpoint
 - [ ] Verify bendv3 integration
 
+## Phase 4: Author Enrichment Expansion (IN PROGRESS)
+
+**Goal:** Populate Alexandria with rich metadata for all books by known authors.
+
+### Workflow
+1. Get author bibliography from ISBNdb (`/api/authors/bibliography`)
+2. Filter to new ISBNs not already in enriched_editions
+3. Call batch-direct endpoint to enrich all ISBNs in one ISBNdb API call
+4. Cover images automatically queued during enrichment
+
+### Current Scripts
+- `scripts/expand-author-bibliographies.js` - Bulk author enrichment with checkpointing
+- `scripts/e2e-author-enrichment-test.js` - E2E test for full pipeline
+
+### Remaining Tasks
+- [ ] **Run large-scale author expansion** - Process authors from CSV library
+  - Script supports checkpointing for resume after interruption
+  - Checkpoint file: `data/author-expansion-checkpoint.json`
+- [ ] **Verify cover queue processing** - Ensure covers are downloaded after enrichment
+- [ ] **Monitor enriched table growth** - Track new editions, works, authors added
+- [ ] **Add author deduplication** - Handle "Stephen King" vs "Stephen King & Owen King"
+- [ ] **GitHub #82: Durable Object buffer** - Optional optimization for queue batching
+
+### Efficiency Notes
+- Bibliography API: 1 call per author (paginated, 100 books/page)
+- Enrichment: 1 API call per 1000 ISBNs (batch-direct endpoint)
+- Example: 50 authors × ~80 books/author = 4000 ISBNs = 4 ISBNdb batch calls
+- Cover queue: Async processing, no rate limit on our side
+
+### Data Quality Considerations
+- ISBNdb author search may return co-authored works (filter if needed)
+- Some ISBNs may not have cover images available
+- Related ISBNs field can help find alternate editions
+
 ## Phase 5: Advanced Features
 
 - [ ] Combined search (`/api/search?q={query}`)
@@ -165,8 +228,8 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 
 **Search:**
 - `GET /api/search?isbn={isbn}` - ISBN lookup
-- `GET /api/search?title={title}` - Title search (ILIKE - slow!)
-- `GET /api/search?author={author}` - Author search (ILIKE - slow!)
+- `GET /api/search?title={title}` - Title search (ILIKE)
+- `GET /api/search?author={author}` - Author search (ILIKE)
 - `GET /api/stats` - Database statistics
 
 **Covers (Work-based):**
@@ -183,8 +246,12 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 - `POST /api/enrich/edition` - Store edition
 - `POST /api/enrich/work` - Store work
 - `POST /api/enrich/author` - Store author
-- `POST /api/enrich/queue` - Queue job
+- `POST /api/enrich/queue` - Queue job (max 100 ISBNs)
+- `POST /api/enrich/batch-direct` - Direct batch enrichment (up to 1000 ISBNs) ⭐ NEW
 - `GET /api/enrich/status/:id` - Job status
+
+**Author Bibliography:**
+- `POST /api/authors/bibliography` - Get author's books from ISBNdb ⭐ NEW
 
 **System:**
 - `GET /health` - Health check
@@ -220,4 +287,4 @@ FROM pg_stat_activity WHERE query LIKE '%INSERT INTO enriched%';
 
 ---
 
-**Last Updated:** December 8, 2025
+**Last Updated:** December 10, 2025
