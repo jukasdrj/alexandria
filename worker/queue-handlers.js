@@ -14,6 +14,7 @@ import { smartResolveISBN } from './services/smart-enrich.js';
 import { fetchISBNdbBatch } from './services/batch-isbndb.js';
 import { enrichEdition, enrichWork, enrichAuthor } from './enrichment-service.js';
 import { normalizeISBN } from './lib/isbn-utils.js';
+import { Logger } from './lib/logger.js';
 
 /**
  * Process cover messages from queue
@@ -26,11 +27,12 @@ import { normalizeISBN } from './lib/isbn-utils.js';
  * @returns {Promise<object>} Processing results summary
  */
 export async function processCoverQueue(batch, env) {
-  console.log(`[CoverQueue] ========================================`);
-  console.log(`[CoverQueue] Queue triggered with ${batch.messages.length} messages`);
-  console.log(`[CoverQueue] Queue name: ${batch.queue}`);
-  console.log(`[CoverQueue] Timestamp: ${new Date().toISOString()}`);
-  console.log(`[CoverQueue] ========================================`);
+  const logger = Logger.forQueue(env, 'alexandria-cover-queue', batch.messages.length);
+
+  logger.info('Cover queue processing started', {
+    queueName: batch.queue,
+    messageCount: batch.messages.length
+  });
 
   const results = {
     processed: 0,
@@ -43,7 +45,7 @@ export async function processCoverQueue(batch, env) {
     try {
       const { isbn, work_key, provider_url, priority } = message.body;
 
-      console.log(`[CoverQueue] Processing ISBN ${isbn} (priority: ${priority || 'normal'})`);
+      logger.debug('Processing cover', { isbn, priority: priority || 'normal', has_provider_url: !!provider_url });
 
       // Build options with provider URL if available (avoids redundant API lookups)
       const options = {
@@ -52,7 +54,7 @@ export async function processCoverQueue(batch, env) {
 
       if (provider_url) {
         options.knownCoverUrl = provider_url;  // ✅ Use provider URL from enrichment
-        console.log(`[CoverQueue] Using provider URL: ${provider_url}`);
+        logger.debug('Using provider URL from enrichment', { isbn, provider_url });
       }
 
       const result = await processCoverImage(isbn, env, options);
@@ -64,8 +66,8 @@ export async function processCoverQueue(batch, env) {
         if (env.COVER_ANALYTICS) {
           try {
             env.COVER_ANALYTICS.writeDataPoint({
-              indexes: [isbn, result.source],
-              blobs: [isbn, result.source],
+              indexes: [isbn],  // Single index (Analytics Engine limit: max 1 index)
+              blobs: [result.source, isbn],  // Move source to blobs for categorical tracking
               doubles: [result.processingTimeMs || 0, result.size || 0]
             });
           } catch (analyticsError) {
@@ -84,7 +86,10 @@ export async function processCoverQueue(batch, env) {
       message.ack();
 
     } catch (error) {
-      console.error('[CoverQueue] Message processing error:', error);
+      logger.error('Cover processing failed', {
+        isbn: message.body?.isbn || 'unknown',
+        error: error instanceof Error ? error.message : String(error)
+      });
       results.failed++;
       results.errors.push({
         isbn: message.body?.isbn || 'unknown',
@@ -96,12 +101,12 @@ export async function processCoverQueue(batch, env) {
     }
   }
 
-  console.log('[CoverQueue] Batch complete:', JSON.stringify({
+  logger.info('Cover queue processing complete', {
     processed: results.processed,
     cached: results.cached,
     failed: results.failed,
     errorCount: results.errors.length
-  }));
+  });
 
   return results;
 }
@@ -119,9 +124,11 @@ export async function processCoverQueue(batch, env) {
  * @returns {Promise<object>} Processing results summary
  */
 export async function processEnrichmentQueue(batch, env) {
-  console.log(`[EnrichQueue] ========================================`);
-  console.log(`[EnrichQueue] Processing ${batch.messages.length} enrichment requests (BATCHED)`);
-  console.log(`[EnrichQueue] ========================================`);
+  const logger = Logger.forQueue(env, 'alexandria-enrichment-queue', batch.messages.length);
+
+  logger.info('Enrichment queue processing started (BATCHED)', {
+    messageCount: batch.messages.length
+  });
 
   // Create postgres connection for this batch
   const sql = postgres(env.HYPERDRIVE.connectionString, {
@@ -148,7 +155,7 @@ export async function processEnrichmentQueue(batch, env) {
       const normalizedISBN = normalizeISBN(isbn);
 
       if (!normalizedISBN) {
-        console.warn(`[EnrichQueue] Invalid ISBN format: ${isbn}`);
+        logger.warn('Invalid ISBN format', { isbn });
         results.failed++;
         results.errors.push({ isbn, error: 'Invalid ISBN format' });
         message.ack(); // Don't retry invalid ISBNs
@@ -159,7 +166,7 @@ export async function processEnrichmentQueue(batch, env) {
       const cacheKey = `isbn_not_found:${normalizedISBN}`;
       const cachedNotFound = await env.CACHE.get(cacheKey);
       if (cachedNotFound) {
-        console.log(`[EnrichQueue] ISBN ${normalizedISBN} previously failed, skipping`);
+        logger.debug('ISBN previously failed, skipping', { isbn: normalizedISBN });
         results.cached++;
         message.ack(); // Don't retry known failures
         continue;
@@ -170,19 +177,30 @@ export async function processEnrichmentQueue(batch, env) {
     }
 
     if (isbnsToFetch.length === 0) {
-      console.log('[EnrichQueue] No valid ISBNs to process after filtering');
+      logger.info('No valid ISBNs to process after filtering');
       return results;
     }
 
-    console.log(`[EnrichQueue] Fetching ${isbnsToFetch.length} ISBNs via batch API`);
+    logger.info('Fetching ISBNs via batch API', { count: isbnsToFetch.length });
 
     // 2. Fetch ALL ISBNs in a single batched API call (100x efficiency!)
     const batchStartTime = Date.now();
     const enrichmentData = await fetchISBNdbBatch(isbnsToFetch, env);
     const batchDuration = Date.now() - batchStartTime;
 
-    console.log(`[EnrichQueue] Batch fetch complete: ${enrichmentData.size}/${isbnsToFetch.length} ISBNs in ${batchDuration}ms`);
+    logger.info('Batch fetch complete', {
+      found: enrichmentData.size,
+      requested: isbnsToFetch.length,
+      durationMs: batchDuration
+    });
     results.api_calls_saved = isbnsToFetch.length - 1; // Saved N-1 API calls
+
+    // Log performance analytics
+    logger.perf('isbndb_batch_fetch', batchDuration, {
+      isbn_count: isbnsToFetch.length,
+      found_count: enrichmentData.size,
+      api_calls_saved: results.api_calls_saved
+    });
 
     // 3. Process each ISBN result
     for (const [isbn, externalData] of enrichmentData) {
@@ -222,13 +240,16 @@ export async function processEnrichmentQueue(batch, env) {
           related_isbns: externalData.relatedISBNs,
         }, env);
 
-        console.log(`[EnrichQueue] ✓ Enriched ${isbn} from batch`);
+        logger.debug('Enriched ISBN from batch', { isbn });
 
         results.enriched++;
         message.ack();
 
       } catch (error) {
-        console.error(`[EnrichQueue] Storage error for ${isbn}:`, error);
+        logger.error('Storage error during enrichment', {
+          isbn,
+          error: error.message
+        });
         results.failed++;
         results.errors.push({ isbn, error: error.message });
         message.retry();
@@ -246,22 +267,20 @@ export async function processEnrichmentQueue(batch, env) {
           expirationTtl: 86400 // 24 hours
         });
 
-        console.warn(`[EnrichQueue] ISBN ${isbn} not found in ISBNdb, cached failure`);
+        logger.warn('ISBN not found in ISBNdb, cached failure', { isbn });
         results.failed++;
         results.errors.push({ isbn, error: 'Not found in ISBNdb' });
         message.ack(); // Don't retry - it won't exist on retry either
       }
     }
 
-    console.log('[EnrichQueue] ========================================');
-    console.log('[EnrichQueue] Batch complete:', JSON.stringify({
+    logger.info('Enrichment queue processing complete', {
       enriched: results.enriched,
       cached: results.cached,
       failed: results.failed,
       api_calls_saved: results.api_calls_saved,
       errorCount: results.errors.length
-    }));
-    console.log('[EnrichQueue] ========================================');
+    });
 
   } finally {
     // Always close the connection

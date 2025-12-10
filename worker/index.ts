@@ -14,6 +14,7 @@ import { processCoverQueue, processEnrichmentQueue as processEnrichmentQueueBatc
 import { errorHandler } from './middleware/error-handler.js';
 import type { Env, Variables } from './env.d.js';
 import { openAPISpec } from './openapi.js';
+import { Logger } from './lib/logger.js';
 import { getDashboardHTML } from './dashboard.js';
 import { smartResolveISBN, shouldResolveExternally } from './services/smart-enrich.js';
 import {
@@ -174,6 +175,20 @@ app.use('*', secureHeaders());
 
 // Global error handler - consistent JSON responses for bendv3 integration
 app.onError(errorHandler);
+
+// Request ID middleware - attach unique ID for log tracing (issue #72)
+app.use('*', async (c, next) => {
+  // Use Cloudflare Ray ID if available, otherwise generate UUID
+  const requestId = c.req.header('cf-ray') || crypto.randomUUID();
+  c.set('requestId', requestId);
+  c.header('x-request-id', requestId);
+
+  // Create request-scoped logger
+  const logger = Logger.forRequest(c.env, c.req.raw);
+  c.set('logger', logger);
+
+  await next();
+});
 
 // Database initialization middleware
 app.use('*', async (c, next) => {
@@ -589,8 +604,11 @@ app.get('/api/search',
       }, 400);
     }
 
+    const logger = c.get('logger');
     const sql = c.get('sql');
     const start = Date.now();
+
+    logger.debug('Search request received', { isbn, title, author, limit, offset });
 
     // Determine query type and generate cache key
     const queryType = isbn ? 'isbn' : title ? 'title' : 'author';
@@ -604,6 +622,7 @@ app.get('/api/search',
       cached = await getCachedResults(c.env.CACHE, cacheKey);
       if (cached) {
         cacheHit = true;
+        logger.info('Cache hit', { queryType, cacheKey });
         // Return cached results with cache metadata
         return c.json({
           ...cached,
@@ -660,16 +679,16 @@ app.get('/api/search',
         // If ISBN search found nothing AND smart resolution is enabled,
         // fetch from external providers and store in Alexandria DB
         if (results.length === 0 && shouldResolveExternally(isbn, c.env)) {
-          console.log(`[Smart Resolve] Cache miss for ISBN ${isbn}, resolving externally...`);
+          logger.info('Smart resolution triggered for ISBN', { isbn });
 
           const enrichedResult = await smartResolveISBN(isbn, sql, c.env);
 
           if (enrichedResult) {
-            console.log(`[Smart Resolve] ✓ Successfully enriched ISBN ${isbn}`);
+            logger.info('Smart resolution successful', { isbn });
             results = [enrichedResult];
             total = 1;
           } else {
-            console.log(`[Smart Resolve] ✗ No external data found for ISBN ${isbn}`);
+            logger.warn('Smart resolution failed - no external data found', { isbn });
           }
         }
 
@@ -756,6 +775,12 @@ app.get('/api/search',
 
       const queryDuration = Date.now() - start;
 
+      // Log query performance
+      logger.query(queryType, queryDuration, {
+        result_count: results.length,
+        cache_hit: false
+      });
+
       // Format results - enriched tables already have cover URLs
       const formattedResults = results.map((row) => {
         // Use pre-cached cover URLs from enriched_editions (already in R2 or external)
@@ -810,7 +835,13 @@ app.get('/api/search',
       });
 
     } catch (e) {
-      console.error('Search query error:', e);
+      logger.error('Search query failed', {
+        error: e instanceof Error ? e.message : String(e),
+        queryType,
+        isbn,
+        title,
+        author
+      });
       return c.json({
         error: 'Database query failed',
         message: e instanceof Error ? e.message : 'Unknown error'
@@ -1111,15 +1142,88 @@ app.get('/covers/:isbn/:size', async (c) => {
   }
 
   try {
-    // MVP: We only store original - try common extensions
-    // Future: Add pre-generated sizes or use CF Image Resizing
-    const extensions = ['jpg', 'png', 'webp'];
+    // STRATEGY 1: Check KV cache for ISBN→R2 key mapping
+    // This cache is populated when covers are processed
+    const cacheKey = `cover_key:${normalizedISBN}`;
+    let r2Key = await c.env.CACHE.get(cacheKey);
     let object = null;
 
-    for (const ext of extensions) {
-      const key = `isbn/${normalizedISBN}/original.${ext}`;
-      object = await c.env.COVER_IMAGES.get(key);
-      if (object) break;
+    if (r2Key) {
+      console.log(`[CoverServe] Found cached R2 key for ISBN ${normalizedISBN}: ${r2Key}`);
+      object = await c.env.COVER_IMAGES.get(r2Key);
+
+      // If cached key is stale (object deleted), remove from cache
+      if (!object) {
+        console.log(`[CoverServe] Cached R2 key is stale, removing from cache`);
+        await c.env.CACHE.delete(cacheKey);
+        r2Key = null;
+      }
+    }
+
+    // STRATEGY 2: Try legacy ISBN-based storage (isbn/{isbn}/original.{ext})
+    // This was the old storage format before work-based keys were introduced
+    if (!object) {
+      const extensions = ['jpg', 'png', 'webp'];
+
+      for (const ext of extensions) {
+        const key = `isbn/${normalizedISBN}/original.${ext}`;
+        object = await c.env.COVER_IMAGES.get(key);
+        if (object) {
+          console.log(`[CoverServe] Found ISBN-based cover: ${key}`);
+          // Cache this key for future requests
+          await c.env.CACHE.put(cacheKey, key, { expirationTtl: 86400 * 30 }); // 30 days
+          break;
+        }
+      }
+    }
+
+    // STRATEGY 3: Search work-based storage (covers/{work_key}/{hash}/original)
+    // This is the current storage format used by queue-based processing
+    if (!object) {
+      console.log(`[CoverServe] Searching work-based storage for ISBN ${normalizedISBN}`);
+
+      // List objects with covers/ prefix and filter by ISBN in customMetadata
+      // Note: R2 doesn't support metadata queries, so we need to list and filter
+      let cursor: string | undefined;
+      let found = false;
+
+      // Search through covers prefix (limit search to avoid timeout)
+      const maxPages = 5; // Search up to 5,000 objects (5 pages × 1000/page)
+      let pageCount = 0;
+
+      while (!found && pageCount < maxPages) {
+        const list = await c.env.COVER_IMAGES.list({
+          prefix: 'covers/',
+          cursor,
+          limit: 1000
+        });
+
+        // Check each object's metadata for matching ISBN
+        for (const obj of list.objects) {
+          const head = await c.env.COVER_IMAGES.head(obj.key);
+          if (head?.customMetadata?.isbn === normalizedISBN) {
+            console.log(`[CoverServe] Found work-based cover: ${obj.key} (ISBN: ${normalizedISBN})`);
+            object = await c.env.COVER_IMAGES.get(obj.key);
+            r2Key = obj.key;
+
+            // Cache this key for future requests (30 days)
+            await c.env.CACHE.put(cacheKey, r2Key, { expirationTtl: 86400 * 30 });
+            console.log(`[CoverServe] Cached R2 key: ${cacheKey} → ${r2Key}`);
+
+            found = true;
+            break;
+          }
+        }
+
+        cursor = list.truncated ? list.cursor : undefined;
+        pageCount++;
+
+        if (!cursor) break; // No more objects to list
+      }
+
+      if (!object) {
+        console.log(`[CoverServe] No cover found for ISBN ${normalizedISBN} after searching ${pageCount} pages`);
+      }
     }
 
     if (!object) {

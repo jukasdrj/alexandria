@@ -42,7 +42,7 @@
 
     "LOG_LEVEL": "info",
     "ENABLE_PERFORMANCE_LOGGING": "true",
-    "ENABLE_QUERY_LOGGING": "false",
+    "ENABLE_QUERY_LOGGING": "true",
     "STRUCTURED_LOGGING": "true",
 
     "ENABLE_ENRICHMENT_QUEUE": "true",

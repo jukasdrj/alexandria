@@ -60,4 +60,6 @@ export interface Env {
 export type Variables = {
   sql: Sql; // postgres-js SQL instance with full type safety
   startTime: number;
+  requestId: string; // Unique request ID for log tracing (cf-ray or UUID)
+  logger: any; // Logger instance (from lib/logger.js) - using any since it's a JS module
 };
