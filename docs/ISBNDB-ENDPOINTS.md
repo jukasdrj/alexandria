@@ -1,6 +1,6 @@
 # ISBNdb API v2 Endpoints - Complete Documentation
 
-Last Updated: 2025-12-03
+Last Updated: 2025-12-10
 Test Status: **All 10 endpoints verified working** ✅
 
 ## Overview
@@ -21,16 +21,32 @@ const apiKey = await env.ISBNDB_API_KEY.get();
 
 ## Base URL
 
+**Alexandria is on Premium plan** (upgraded Dec 10, 2025):
 ```
-https://api2.isbndb.com
+https://api.premium.isbndb.com
 ```
 
-## Rate Limits
+## Rate Limits & Pricing Tiers
 
-- **Standard Plan**: 1 request/second
-- **Premium Plan**: 3 requests/second (use `api.premium.isbndb.com`)
-- **Pro Plan**: 5 requests/second (use `api.pro.isbndb.com`)
-- **Enterprise Plan**: 10 requests/second (use `api.enterprise.isbndb.com`)
+| Plan | Price | Rate Limit | Batch Size | Daily Calls | Base URL |
+|------|-------|------------|------------|-------------|----------|
+| Basic | $14.95/mo | 1 req/sec | 100 ISBNs | ~7,500 | api2.isbndb.com |
+| **Premium** ⭐ | $29.95/mo | **3 req/sec** | **1000 ISBNs** | ~15,000 | api.premium.isbndb.com |
+| Pro | $74.95/mo | 5 req/sec | 1000 ISBNs | ~30,000 | api.pro.isbndb.com |
+| Enterprise | Custom | 10 req/sec | 1000 ISBNs | Custom | api.enterprise.isbndb.com |
+
+## How API Calls Are Counted (IMPORTANT!)
+
+**Each API REQUEST = 1 call, regardless of results returned.**
+- Fetching 100 books in one request = 1 call (NOT 100 calls)
+- Batch POST for 1000 ISBNs = 1 call (NOT 1000 calls)
+- This is **PER-REQUEST billing**, not per-result
+- Daily calls **do NOT roll over** - unused quota expires
+
+## Global Limits
+
+- **Max 10,000 results** total regardless of pagination
+- **6MB response size limit** - returns 500 error if exceeded
 
 ## Available Endpoints
 
@@ -85,8 +101,8 @@ Fetch multiple books by ISBN in a single request. **This is the most efficient w
 
 **Plan Limits:**
 - **Academic:** Up to 10 ISBNs per request
-- **Basic:** Up to 100 ISBNs per request ⭐ (Alexandria's current plan)
-- **Pro/Premium:** Up to 1,000 ISBNs per request
+- **Basic:** Up to 100 ISBNs per request
+- **Premium/Pro:** Up to 1,000 ISBNs per request ⭐ (Alexandria's current plan)
 
 **Request Body:**
 ```
@@ -205,9 +221,21 @@ Fetch author details and their books. Author name should be lowercase with under
 
 **Format:** `first_last` or `first_middle_last`
 
+**Query Parameters:**
+- `page` - Page number (default: 1)
+- `pageSize` - Results per page (default: 20, max: 1000)
+- `language` - Filter by ISO language code
+
+**Pagination Note (IMPORTANT):**
+The `/author/{name}` endpoint does **NOT return a `total` field**. To paginate correctly, check if the response contains a full page:
+```javascript
+const booksInResponse = data.books?.length || 0;
+hasMore = booksInResponse === pageSize; // If full page, more may exist
+```
+
 **Example:**
 ```bash
-curl "https://api2.isbndb.com/author/j.k._rowling" \
+curl "https://api.premium.isbndb.com/author/j.k._rowling?page=1&pageSize=100" \
   -H "Authorization: YOUR_API_KEY"
 ```
 
@@ -474,14 +502,15 @@ const bookData = await resolveExternalISBN('9780439064873', env);
 
 ### Understanding ISBNdb Plans
 
-Alexandria is on the **Basic paid plan** with the following capabilities:
+Alexandria is on the **Premium paid plan** (upgraded Dec 10, 2025) with the following capabilities:
 
-| Feature | Basic Plan | Premium Plan | Pro Plan |
+| Feature | Basic Plan | **Premium Plan** ⭐ | Pro Plan |
 |---------|-----------|--------------|----------|
-| Rate Limit | 1 req/sec | 3 req/sec | 5 req/sec |
-| Batch Size (POST /books) | **100 ISBNs** | 1,000 ISBNs | 1,000 ISBNs |
-| Search pageSize | Up to 2,000+ | Up to 1,000 | Up to 1,000 |
-| Base URL | api2.isbndb.com | api.premium.isbndb.com | api.pro.isbndb.com |
+| Price | $14.95/mo | **$29.95/mo** | $74.95/mo |
+| Rate Limit | 1 req/sec | **3 req/sec** | 5 req/sec |
+| Batch Size (POST /books) | 100 ISBNs | **1,000 ISBNs** | 1,000 ISBNs |
+| Daily Calls | ~7,500 | **~15,000** | ~30,000 |
+| Base URL | api2.isbndb.com | **api.premium.isbndb.com** | api.pro.isbndb.com |
 
 ### When to Use Batch Endpoint
 
@@ -529,19 +558,19 @@ await fetch('/books', {
 
 3. **Chunking Large Lists:**
    ```javascript
-   // For > 100 ISBNs, chunk into batches
+   // For > 1000 ISBNs, chunk into batches
    function chunkArray(array, size) {
      return Array.from({ length: Math.ceil(array.length / size) },
        (_, i) => array.slice(i * size, i * size + size)
      );
    }
 
-   const chunks = chunkArray(allIsbns, 100); // 100 = Basic plan limit
+   const chunks = chunkArray(allIsbns, 1000); // 1000 = Premium plan limit
 
    for (const chunk of chunks) {
      const result = await fetchBatch(chunk);
      // Process results...
-     await sleep(1000); // Rate limiting
+     await sleep(350); // Rate limiting (3 req/sec on Premium)
    }
    ```
 
@@ -553,14 +582,14 @@ await fetch('/books', {
 ### Integration Example
 
 ```typescript
-// Efficient batch ISBN resolution for Alexandria
+// Efficient batch ISBN resolution for Alexandria (Premium plan)
 async function batchResolveISBNs(isbns: string[], env: Env) {
   const apiKey = await env.ISBNDB_API_KEY.get();
-  const chunks = chunkArray(isbns, 100); // Basic plan limit
+  const chunks = chunkArray(isbns, 1000); // Premium plan limit
   const results = [];
 
   for (const chunk of chunks) {
-    const response = await fetch('https://api2.isbndb.com/books', {
+    const response = await fetch('https://api.premium.isbndb.com/books', {
       method: 'POST',
       headers: {
         'Authorization': apiKey,
@@ -574,9 +603,9 @@ async function batchResolveISBNs(isbns: string[], env: Env) {
       results.push(...data.data);
     }
 
-    // Rate limiting for multi-chunk requests
+    // Rate limiting for multi-chunk requests (3 req/sec on Premium)
     if (chunks.length > 1) {
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      await new Promise(resolve => setTimeout(resolve, 350));
     }
   }
 
@@ -589,7 +618,7 @@ async function batchResolveISBNs(isbns: string[], env: Env) {
 ## Best Practices
 
 ### 1. Rate Limiting
-- Implement client-side rate limiting (1 req/sec for standard plan)
+- Implement client-side rate limiting (3 req/sec for Premium plan, 350ms delay)
 - Use KV storage for distributed rate limiting across Worker isolates
 - Alexandria's implementation: `worker/services/cover-fetcher.js:enforceISBNdbRateLimit()`
 
@@ -638,15 +667,27 @@ if (response.status === 429) {
 
 ## API Limitations
 
-### Standard Plan
-- 1 request/second
-- 20 results per page (max)
-- No bulk data access
+### All Plans
+- **6MB response size limit** (returns 500 if exceeded)
+- **10,000 max results** total regardless of pagination
+- **Daily calls do NOT roll over** - unused quota expires at midnight
 
-### Premium+ Plans
-- Higher rate limits (3-10 req/sec)
-- Up to 1000 results per page
-- Bulk data API access
+### Basic Plan ($14.95/mo)
+- 1 request/second
+- ~7,500 daily calls
+- 100 ISBNs per batch
+- Default 20 results per page
+
+### Premium Plan ($29.95/mo) ⭐ Alexandria's current plan
+- 3 requests/second
+- ~15,000 daily calls
+- **1,000 ISBNs per batch**
+- Up to 1,000 results per page
+
+### Pro Plan ($74.95/mo)
+- 5 requests/second
+- ~30,000 daily calls
+- 1,000 ISBNs per batch
 - Priority support
 
 ---

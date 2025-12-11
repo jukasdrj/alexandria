@@ -128,6 +128,27 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 **GitHub Issue Created:**
 - #82: "Add Durable Object buffer for queue-based ISBN enrichment" (Phase 2.10, future work)
 
+### Phase 2.10: Efficient Author Enrichment (COMPLETE ✅ - Dec 10, 2025)
+- [x] Added `/api/authors/enrich-bibliography` endpoint (most efficient!)
+  - Fetches author bibliography AND enriches database in ONE step
+  - No double-fetch: uses book data directly from ISBNdb response
+  - Caches results in KV for 24 hours (repeat queries = 0 API calls)
+  - Only queues cover downloads (unavoidable)
+- [x] Updated `expand-author-bibliographies.js` to use new endpoint
+  - Single API call per author (was: fetch + separate batch enrichment)
+  - Stops gracefully on quota exhaustion (403)
+  - Reduced rate limit delay from 2s to 1.5s
+- [x] Fixed duplicate `/api/isbns/check` endpoint (was defined twice)
+- [x] Documented ISBNdb billing model correctly
+
+**ISBNdb API Billing Clarification:**
+- Each API **REQUEST** = 1 call (NOT per-result!)
+- Fetching 100 books = 1 call, batch of 1000 ISBNs = 1 call
+- Premium plan: ~15,000 daily calls, resets every 24h, does NOT roll over
+- Default `/author` pageSize is 20 (can request up to 1000)
+- Max 10,000 results total regardless of pagination
+- 6MB response size limit (returns 500 if exceeded)
+
 ---
 
 ## Phase 3: Performance & Search Optimization
@@ -177,30 +198,48 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 
 **Goal:** Populate Alexandria with rich metadata for all books by known authors.
 
-### Workflow
-1. Get author bibliography from ISBNdb (`/api/authors/bibliography`)
-2. Filter to new ISBNs not already in enriched_editions
-3. Call batch-direct endpoint to enrich all ISBNs in one ISBNdb API call
+### Efficient Workflow (Updated Dec 10, 2025)
+1. Call `/api/authors/enrich-bibliography` with author name
+2. Endpoint fetches bibliography from ISBNdb AND enriches database in ONE step
+3. KV cache prevents repeat API calls for same author (24h TTL)
 4. Cover images automatically queued during enrichment
+
+**Old workflow (deprecated):**
+~~1. Get bibliography → 2. Filter ISBNs → 3. Batch enrich (separate API call)~~
 
 ### Current Scripts
 - `scripts/expand-author-bibliographies.js` - Bulk author enrichment with checkpointing
+  - Now uses efficient `/api/authors/enrich-bibliography` endpoint
+  - Stops gracefully on quota exhaustion
 - `scripts/e2e-author-enrichment-test.js` - E2E test for full pipeline
+
+### Author CSV Files Available
+- `docs/csv_examples/combined_library_expanded.csv` - Original library (519 authors)
+- `docs/csv_examples/bestselling_authors_2015_2024.csv` - Fiction bestsellers (197 authors)
+- `docs/csv_examples/bestselling_nonfiction_authors.csv` - Nonfiction bestsellers (199 authors)
 
 ### Remaining Tasks
 - [ ] **Run large-scale author expansion** - Process authors from CSV library
   - Script supports checkpointing for resume after interruption
   - Checkpoint file: `data/author-expansion-checkpoint.json`
+  - Wait for ISBNdb quota reset (daily at midnight or billing cycle)
 - [ ] **Verify cover queue processing** - Ensure covers are downloaded after enrichment
 - [ ] **Monitor enriched table growth** - Track new editions, works, authors added
 - [ ] **Add author deduplication** - Handle "Stephen King" vs "Stephen King & Owen King"
 - [ ] **GitHub #82: Durable Object buffer** - Optional optimization for queue batching
 
-### Efficiency Notes
-- Bibliography API: 1 call per author (paginated, 100 books/page)
-- Enrichment: 1 API call per 1000 ISBNs (batch-direct endpoint)
-- Example: 50 authors × ~80 books/author = 4000 ISBNs = 4 ISBNdb batch calls
+### Efficiency Notes (Updated)
+- **New efficient endpoint**: 1 API call per author does BOTH fetch + enrich
+- No separate batch enrichment call needed anymore
+- KV caching: Repeat author queries = 0 API calls for 24 hours
 - Cover queue: Async processing, no rate limit on our side
+- **Example**: 50 authors = ~75 API calls (avg 1.5 pages/author), directly enriches all books
+
+### ISBNdb Quota Planning
+- Premium plan: ~15,000 daily calls
+- Each author: 1-10 API calls (depends on bibliography size, 100 books/page)
+- Estimate: Can process ~1,500-10,000 authors per day depending on bibliography sizes
+- Quota resets daily (does NOT roll over)
 
 ### Data Quality Considerations
 - ISBNdb author search may return co-authored works (filter if needed)
@@ -251,7 +290,8 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 - `GET /api/enrich/status/:id` - Job status
 
 **Author Bibliography:**
-- `POST /api/authors/bibliography` - Get author's books from ISBNdb ⭐ NEW
+- `POST /api/authors/bibliography` - Get author's books from ISBNdb (fetch only)
+- `POST /api/authors/enrich-bibliography` - Fetch + enrich in ONE call ⭐ **RECOMMENDED**
 
 **System:**
 - `GET /health` - Health check
@@ -287,4 +327,4 @@ FROM pg_stat_activity WHERE query LIKE '%INSERT INTO enriched%';
 
 ---
 
-**Last Updated:** December 10, 2025
+**Last Updated:** December 10, 2025 (ISBNdb billing clarification, efficient enrich-bibliography endpoint)

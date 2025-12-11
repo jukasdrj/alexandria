@@ -4,6 +4,9 @@
  * Alexandria Author Bibliography Expansion
  * Expand dataset by finding complete bibliographies for all CSV authors
  *
+ * EFFICIENT VERSION: Uses /api/authors/enrich-bibliography endpoint which
+ * fetches AND enriches in one step (no double-fetch of ISBNdb data!)
+ *
  * Usage:
  *   node expand-author-bibliographies.js --csv docs/csv_examples/combined_library_expanded.csv
  *   node expand-author-bibliographies.js --csv docs/csv_examples/combined_library_expanded.csv --dry-run
@@ -17,9 +20,6 @@ import { parse } from 'csv-parse/sync';
 import { ISBNdbClient } from './lib/isbndb-client.js';
 import { CheckpointManager } from './lib/checkpoint-manager.js';
 import { DatabaseClient } from './lib/db-client.js';
-import { validateISBNs } from './lib/isbn-validator.js';
-import { processBatches } from './lib/batch-processor.js';
-import { QueueClient } from './lib/queue-client.js';
 import { ProgressTracker } from './lib/progress-tracker.js';
 
 // Sleep utility for rate limiting
@@ -33,10 +33,8 @@ async function main() {
       checkpoint: { type: 'string', default: 'data/author-expansion-checkpoint.json' },
       resume: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
-      'skip-dedup': { type: 'boolean', default: false }, // Skip ISBN deduplication, queue all
       author: { type: 'string' }, // Process single author
-      'max-pages': { type: 'string', default: '10' },
-      priority: { type: 'string', default: 'low' }
+      'max-pages': { type: 'string', default: '10' }
     }
   });
 
@@ -55,7 +53,6 @@ async function main() {
   const checkpoint = new CheckpointManager(args.checkpoint);
   const isbndbClient = new ISBNdbClient('https://alexandria.ooheynerds.com');
   const dbClient = new DatabaseClient('https://alexandria.ooheynerds.com');
-  const queueClient = new QueueClient('https://alexandria.ooheynerds.com');
 
   tracker.start('Alexandria Author Bibliography Expansion');
 
@@ -110,74 +107,66 @@ async function main() {
   const dbStats = await dbClient.getStats();
   tracker.log(`Database: ${dbStats.enriched_editions.toLocaleString()} enriched editions`);
 
-  // 3. Process each author
+  // 3. Process each author using EFFICIENT endpoint (fetch + enrich in one call)
   tracker.phase(`Processing ${remainingAuthors.length} authors` + (args['dry-run'] ? ' (DRY RUN)' : ''));
+  tracker.log('Using efficient /api/authors/enrich-bibliography endpoint (no double-fetch!)');
 
   const authorBar = tracker.createProgressBar(remainingAuthors.length);
   const maxPages = parseInt(args['max-pages']);
 
   let totalBooksFound = 0;
-  let totalNewBooks = 0;
-  let totalQueued = 0;
+  let totalNewlyEnriched = 0;
+  let totalCoversQueued = 0;
+  let totalCacheHits = 0;
 
   for (const authorName of remainingAuthors) {
     try {
-      // 3a. Query ISBNdb for author bibliography
-      const books = await isbndbClient.getAuthorBibliography(authorName, maxPages);
-      totalBooksFound += books.length;
-
-      if (books.length === 0) {
-        checkpoint.markProcessed(authorName, 0, 0, 0);
+      if (args['dry-run']) {
+        // Dry run: just fetch bibliography to see what would be processed
+        const books = await isbndbClient.getAuthorBibliography(authorName, maxPages);
+        totalBooksFound += books.length;
+        checkpoint.markProcessed(authorName, books.length, 0, 0);
         authorBar.increment();
+        await sleep(2000);
         continue;
       }
 
-      // 3b. Validate and normalize ISBNs
-      const { valid } = validateISBNs(books);
+      // EFFICIENT: Fetch AND enrich in ONE API call (no double-fetch!)
+      const result = await isbndbClient.enrichAuthorBibliography(authorName, maxPages);
 
-      // 3c. Filter out books that already exist in database (or skip if --skip-dedup)
-      let newBooks;
-      if (args['dry-run'] || args['skip-dedup']) {
-        newBooks = valid;
-      } else {
-        newBooks = await dbClient.filterNewBooks(valid);
-      }
-      totalNewBooks += newBooks.length;
-
-      // 3d. Queue new books for enrichment and covers
-      let queued = 0;
-      if (!args['dry-run'] && newBooks.length > 0) {
-        // Queue enrichment
-        const enrichQueued = await processBatches(newBooks, {
-          endpoint: '/api/enrich/queue/batch',
-          batchSize: 100,
-          client: queueClient,
-          tracker,
-          priority: args.priority
-        });
-
-        // Queue covers
-        const coverQueued = await processBatches(newBooks, {
-          endpoint: '/api/covers/queue',
-          batchSize: 20,
-          client: queueClient,
-          tracker,
-          priority: args.priority
-        });
-
-        queued = Math.max(enrichQueued, coverQueued); // Should be same
-        totalQueued += queued;
+      // Check for errors
+      if (result.error) {
+        if (result.error === 'quota_exhausted') {
+          tracker.log(`ISBNdb quota exhausted! Stopping...`);
+          checkpoint.markFailed(authorName, 'quota_exhausted');
+          break; // Stop processing - no point continuing without API quota
+        }
+        checkpoint.markFailed(authorName, result.error);
+        authorBar.increment();
+        await sleep(2000);
+        continue;
       }
 
-      // Update checkpoint
-      checkpoint.markProcessed(authorName, books.length, newBooks.length, queued);
+      // Track totals
+      totalBooksFound += result.books_found || 0;
+      totalNewlyEnriched += result.newly_enriched || 0;
+      totalCoversQueued += result.covers_queued || 0;
+      if (result.cached) totalCacheHits++;
+
+      // Update checkpoint with new format
+      checkpoint.markProcessed(
+        authorName,
+        result.books_found || 0,
+        result.newly_enriched || 0,
+        result.covers_queued || 0
+      );
 
       authorBar.increment();
 
-      // Rate limit: Wait between authors to prevent overwhelming ISBNdb
-      // Each author request can trigger up to max_pages pagination requests
-      // ISBNdb limit is 1 req/sec, so 2s delay gives margin for safety
-      await sleep(2000);
+      // Rate limit: Wait between authors
+      // ISBNdb Premium is 3 req/sec, but author bibliographies can span multiple pages
+      // 1.5s delay is safe for typical 1-2 page bibliographies
+      await sleep(1500);
     } catch (error) {
       console.error(`Error processing ${authorName}:`, error.message);
       checkpoint.markFailed(authorName, error.message);
@@ -194,8 +183,19 @@ async function main() {
   const summary = checkpoint.getSummary();
   await tracker.complete({
     ...summary,
+    total_books_found: totalBooksFound,
+    total_newly_enriched: totalNewlyEnriched,
+    total_covers_queued: totalCoversQueued,
+    total_cache_hits: totalCacheHits,
     dry_run: args['dry-run']
   });
+
+  tracker.log('\n=== Efficiency Report ===');
+  tracker.log(`Books found: ${totalBooksFound.toLocaleString()}`);
+  tracker.log(`Newly enriched: ${totalNewlyEnriched.toLocaleString()}`);
+  tracker.log(`Covers queued: ${totalCoversQueued.toLocaleString()}`);
+  tracker.log(`Cache hits: ${totalCacheHits}`);
+  tracker.log('Using efficient single-call endpoint (no double-fetch!)');
 
   await dbClient.close();
 }

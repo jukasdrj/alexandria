@@ -75,6 +75,50 @@ export class ISBNdbClient {
   }
 
   /**
+   * Fetch bibliography AND enrich in one API call (no double-fetch!)
+   * This is the efficient method that avoids re-fetching book data.
+   *
+   * @param {string} authorName - Author name to search
+   * @param {number} maxPages - Maximum pages to fetch (default: 10 = 1000 books)
+   * @returns {Promise<Object>} - { books_found, already_enriched, newly_enriched, covers_queued, cached }
+   */
+  async enrichAuthorBibliography(authorName, maxPages = 10) {
+    try {
+      const response = await fetch(`${this.workerBaseURL}/api/authors/enrich-bibliography`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          author_name: authorName,
+          max_pages: maxPages
+        })
+      });
+
+      if (response.status === 429) {
+        console.warn(`Rate limited by ISBNdb for ${authorName}`);
+        return { error: 'rate_limited', books_found: 0 };
+      }
+
+      if (response.status === 403) {
+        console.warn(`ISBNdb quota exhausted for ${authorName}`);
+        return { error: 'quota_exhausted', books_found: 0 };
+      }
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.warn(`Worker error for ${authorName}:`, error.error || error.message);
+        return { error: error.error || error.message, books_found: 0 };
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error(`Error enriching bibliography for ${authorName}:`, error.message);
+      return { error: error.message, books_found: 0 };
+    }
+  }
+
+  /**
    * Sleep utility
    * @param {number} ms - Milliseconds to sleep
    * @returns {Promise}

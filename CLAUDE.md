@@ -173,9 +173,10 @@ curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offse
 - **POST /api/enrich/work** - Store work metadata
 - **POST /api/enrich/author** - Store author biographical data
 - **POST /api/enrich/queue** - Queue background enrichment (max 100 per batch)
-- **POST /api/enrich/batch-direct** - Direct batch enrichment (up to 1000 ISBNs, bypasses queue) ⭐ NEW
+- **POST /api/enrich/batch-direct** - Direct batch enrichment (up to 1000 ISBNs, bypasses queue)
 - **GET /api/enrich/status/:id** - Check enrichment status
 - **POST /api/authors/bibliography** - Get author's complete bibliography from ISBNdb
+- **POST /api/authors/enrich-bibliography** - Fetch + enrich author bibliography in one step (most efficient!) ⭐ NEW
 
 ## ISBNdb API Integration (COMPLETE ✅)
 
@@ -183,12 +184,27 @@ curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offse
 - **Rate Limit**: 3 requests/second (3x faster than Basic)
 - **Batch Endpoint**: Up to 1000 ISBNs per POST request (10x larger than Basic)
 - **Base URL**: `api.premium.isbndb.com` (NOT `api2.isbndb.com`)
+- **Daily Quota**: ~15,000 API calls (resets every 24 hours, does NOT roll over)
+
+### How API Calls Are Counted (IMPORTANT!)
+**Each API REQUEST = 1 call, regardless of results returned.**
+- Fetching 100 books in one request = 1 call (NOT 100 calls)
+- Batch POST for 1000 ISBNs = 1 call (NOT 1000 calls)
+- This is PER-REQUEST billing, not per-result
+
+### ISBNdb Pricing Tiers (Reference)
+| Plan | Price | Daily Calls | Rate Limit | Batch Size | Base URL |
+|------|-------|-------------|------------|------------|----------|
+| Basic | $14.95/mo | ~7,500 | 1 req/sec | 100 ISBNs | api2.isbndb.com |
+| **Premium** | $29.95/mo | ~15,000 | **3 req/sec** | **1000 ISBNs** | api.premium.isbndb.com |
+| Pro | $74.95/mo | ~30,000 | 5 req/sec | 1000 ISBNs | api.pro.isbndb.com |
+| Enterprise | Custom | Custom | 10 req/sec | 1000 ISBNs | api.enterprise.isbndb.com |
 
 ### Available Endpoints (All Verified Working ✅)
 1. **GET /book/{isbn}** - Single book lookup (includes pricing)
 2. **POST /books** - Batch lookup (up to 1000 ISBNs) ⭐ **Most Efficient**
 3. **GET /books/{query}** - Search with pagination
-4. **GET /author/{name}** - Author bibliography with pagination
+4. **GET /author/{name}** - Author bibliography with pagination (default: 20/page, max: 1000)
 5. **GET /authors/{query}** - Author search
 6. **GET /publisher/{name}** - Publisher catalog
 7. **GET /publishers/{query}** - Publisher search
@@ -196,12 +212,16 @@ curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offse
 9. **GET /subjects/{query}** - Subject search
 
 ### ISBNdb Pagination (IMPORTANT)
-The `/author/{name}` endpoint **does NOT return a `total` field**. Pagination must check if the response contains a full page (100 books) to determine if more pages exist:
+The `/author/{name}` endpoint **does NOT return a `total` field**. Pagination must check if the response contains a full page to determine if more pages exist:
 ```javascript
 // ISBNdb pagination: if we got a full page, there might be more
 const booksInResponse = data.books?.length || 0;
 hasMore = booksInResponse === pageSize; // pageSize = 100
 ```
+**Note**: Default page size is 20, but can request up to 1000 via `?pageSize=1000`. Max 10,000 total results regardless of pagination.
+
+### Response Size Limit
+ISBNdb has a **6MB response size limit**. If exceeded, returns 500 error. For large batch requests, consider chunking.
 
 ### Enrichment Opportunities
 ISBNdb provides rich metadata beyond current usage:
@@ -216,11 +236,13 @@ ISBNdb provides rich metadata beyond current usage:
 **See**: `docs/ISBNDB-ENRICHMENT.md` for implementation guide
 
 ### Best Practices
-1. **Use batch endpoint** for multiple ISBNs (1000x faster than sequential)
+1. **Use batch endpoint** for multiple ISBNs (1 call for 1000 ISBNs vs 1000 calls)
 2. **Use Premium endpoint** (`api.premium.isbndb.com`) for 3x rate limit
-3. **Extract `image_original`** for best cover quality
-4. **Rate limit**: 3 req/sec (Premium), use 350ms delay between requests
-5. **Chunk large lists**: 1000 ISBNs per batch (Premium limit)
+3. **Use `/api/authors/enrich-bibliography`** for author expansion (fetches + enriches in one step)
+4. **Extract `image_original`** for best cover quality
+5. **Rate limit**: 3 req/sec (Premium), use 350ms delay between requests
+6. **Chunk large lists**: 1000 ISBNs per batch (Premium limit)
+7. **Monitor quota**: Dashboard shows 30-day trailing usage; calls don't roll over
 
 ### Test Endpoints
 ```bash

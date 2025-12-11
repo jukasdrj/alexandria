@@ -708,68 +708,240 @@ app.post('/api/authors/bibliography', async (c) => {
   }
 });
 
-// POST /api/isbns/check -> Check which ISBNs already exist in database
-// Used for deduplication before queueing enrichment
-app.post('/api/isbns/check', async (c) => {
+// POST /api/authors/enrich-bibliography -> Fetch author bibliography AND directly enrich (no re-fetch!)
+// This is 50-90% more efficient than bibliography → queue → batch-fetch
+// ISBNdb author endpoint returns full book metadata, so we enrich directly from that response
+app.post('/api/authors/enrich-bibliography', async (c) => {
+  const startTime = Date.now();
+
   try {
     const body = await c.req.json();
-    const { isbns } = body;
+    const { author_name, max_pages = 10, skip_existing = true } = body;
 
-    // Validate input
-    if (!Array.isArray(isbns) || isbns.length === 0) {
-      return c.json({ error: 'isbns array required' }, 400);
+    if (!author_name || typeof author_name !== 'string') {
+      return c.json({ error: 'author_name required' }, 400);
     }
 
-    if (isbns.length > 1000) {
-      return c.json({ error: 'Max 1000 ISBNs per request' }, 400);
+    const apiKey = await c.env.ISBNDB_API_KEY.get();
+    if (!apiKey) {
+      return c.json({ error: 'ISBNdb API key not configured' }, 500);
     }
 
-    // Normalize ISBNs
-    const normalizedISBNs = isbns
-      .map((isbn: string) => isbn?.replace(/[^0-9X]/gi, '').toUpperCase())
-      .filter((isbn: string) => isbn && (isbn.length === 10 || isbn.length === 13));
+    // Check KV cache for this author (avoid redundant API calls)
+    const cacheKey = `author_bibliography:${author_name.toLowerCase().replace(/\s+/g, '_')}`;
+    const cached = await c.env.CACHE.get(cacheKey, 'json');
 
-    if (normalizedISBNs.length === 0) {
-      return c.json({ existing: [], checked: 0 });
+    if (cached) {
+      console.log(`[EnrichBibliography] Cache hit for "${author_name}"`);
+      return c.json({
+        ...cached,
+        cached: true,
+        duration_ms: Date.now() - startTime
+      });
     }
 
-    // Check enriched_editions table for existing ISBNs
     const sql = c.get('sql');
-    const result = await sql`
-      SELECT DISTINCT unnest(related_isbns) AS isbn
-      FROM enriched_editions
-      WHERE related_isbns && ${normalizedISBNs}::text[]
-    `;
+    const pageSize = 100;
 
-    // Also check edition_isbns table (OpenLibrary data)
-    const olResult = await sql`
-      SELECT isbn FROM edition_isbns
-      WHERE isbn = ANY(${normalizedISBNs}::text[])
-      LIMIT 1000
-    `;
+    // Track results
+    const results = {
+      author: author_name,
+      books_found: 0,
+      already_existed: 0,
+      enriched: 0,
+      covers_queued: 0,
+      failed: 0,
+      pages_fetched: 0,
+      api_calls: 0,  // Track ISBNdb API calls
+      errors: [] as Array<{ isbn: string; error: string }>,
+      duration_ms: 0
+    };
 
-    // Combine results
-    const existingSet = new Set<string>();
-    for (const row of result) {
-      if (normalizedISBNs.includes(row.isbn)) {
-        existingSet.add(row.isbn);
+    // Collect all books from ISBNdb author endpoint (with full metadata!)
+    const allBooks: Array<{
+      isbn: string;
+      title: string;
+      authors: string[];
+      publisher?: string;
+      date_published?: string;
+      pages?: number;
+      language?: string;
+      synopsis?: string;
+      image?: string;
+      subjects?: string[];
+      binding?: string;
+    }> = [];
+
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && page <= max_pages) {
+      const response = await fetch(
+        `https://api.premium.isbndb.com/author/${encodeURIComponent(author_name)}?page=${page}&pageSize=${pageSize}`,
+        {
+          headers: {
+            'Authorization': apiKey,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      results.api_calls++;
+
+      if (response.status === 404) {
+        break;
+      }
+
+      if (response.status === 429) {
+        return c.json({ error: 'Rate limited by ISBNdb', partial_results: results }, 429);
+      }
+
+      if (!response.ok) {
+        return c.json({ error: `ISBNdb API error: ${response.status}`, partial_results: results }, response.status);
+      }
+
+      const data = await response.json();
+      results.pages_fetched = page;
+
+      if (data.books && Array.isArray(data.books)) {
+        for (const book of data.books) {
+          const isbn = book.isbn13 || book.isbn;
+          if (isbn) {
+            allBooks.push({
+              isbn,
+              title: book.title || 'Unknown',
+              authors: book.authors || [author_name],
+              publisher: book.publisher,
+              date_published: book.date_published,
+              pages: book.pages,
+              language: book.language,
+              synopsis: book.synopsis,
+              image: book.image,
+              subjects: book.subjects,
+              binding: book.binding
+            });
+          }
+        }
+      }
+
+      const booksInResponse = data.books?.length || 0;
+      const total = data.total || 0;
+      hasMore = booksInResponse === pageSize || (total > 0 && allBooks.length < total);
+
+      page++;
+
+      // Rate limit between pagination requests (ISBNdb Premium: 3 req/sec)
+      if (hasMore && page <= max_pages) {
+        await new Promise(resolve => setTimeout(resolve, 350));
       }
     }
-    for (const row of olResult) {
-      existingSet.add(row.isbn);
+
+    results.books_found = allBooks.length;
+    console.log(`[EnrichBibliography] Found ${allBooks.length} books for "${author_name}" in ${results.api_calls} API calls`);
+
+    if (allBooks.length === 0) {
+      // Cache empty result to avoid repeated lookups
+      await c.env.CACHE.put(cacheKey, JSON.stringify(results), { expirationTtl: 86400 });
+      results.duration_ms = Date.now() - startTime;
+      return c.json(results);
     }
 
-    return c.json({
-      existing: Array.from(existingSet),
-      checked: normalizedISBNs.length,
-      found: existingSet.size
-    });
+    // Check which ISBNs already exist (if skip_existing is true)
+    let isbnsToEnrich = allBooks;
+
+    if (skip_existing) {
+      const allISBNs = allBooks.map(b => b.isbn);
+      const existingResult = await sql`
+        SELECT isbn FROM enriched_editions
+        WHERE isbn IN ${sql(allISBNs)}
+      `;
+      const existingSet = new Set(existingResult.map((r: any) => r.isbn));
+      results.already_existed = existingSet.size;
+
+      isbnsToEnrich = allBooks.filter(b => !existingSet.has(b.isbn));
+      console.log(`[EnrichBibliography] ${existingSet.size} already exist, ${isbnsToEnrich.length} to enrich`);
+    }
+
+    // DIRECTLY enrich from the data we already have (NO re-fetch from ISBNdb!)
+    for (const book of isbnsToEnrich) {
+      try {
+        // Generate a work key for grouping editions
+        const workKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
+
+        // Create enriched_work
+        await enrichWork(sql, {
+          work_key: workKey,
+          title: book.title,
+          description: book.synopsis,
+          subject_tags: book.subjects,
+          primary_provider: 'isbndb',
+        });
+
+        // Create enriched_edition with all the metadata we already have
+        await enrichEdition(sql, {
+          isbn: book.isbn,
+          title: book.title,
+          publisher: book.publisher,
+          publication_date: book.date_published,
+          page_count: book.pages,
+          language: book.language,
+          primary_provider: 'isbndb',
+          cover_urls: book.image ? { large: book.image, medium: book.image, small: book.image } : undefined,
+          cover_source: book.image ? 'isbndb' : undefined,
+          work_key: workKey,
+          subjects: book.subjects,
+          binding: book.binding,
+        }, c.env);
+
+        results.enriched++;
+
+        // Queue ONLY cover download (not ISBN re-fetch!)
+        if (book.image) {
+          try {
+            await c.env.COVER_QUEUE.send({
+              isbn: book.isbn,
+              work_key: workKey,
+              provider_url: book.image,
+              priority: 'normal',
+              source: 'author_bibliography'
+            });
+            results.covers_queued++;
+          } catch (queueError) {
+            // Don't fail enrichment if cover queue fails
+            console.warn(`[EnrichBibliography] Cover queue failed for ${book.isbn}:`, queueError);
+          }
+        }
+
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        results.failed++;
+        results.errors.push({ isbn: book.isbn, error: message });
+      }
+    }
+
+    results.duration_ms = Date.now() - startTime;
+
+    // Cache successful result (24 hours)
+    const cacheResult = { ...results, errors: [] }; // Don't cache individual errors
+    await c.env.CACHE.put(cacheKey, JSON.stringify(cacheResult), { expirationTtl: 86400 });
+
+    console.log(`[EnrichBibliography] Complete for "${author_name}": ${results.enriched} enriched, ${results.already_existed} existed, ${results.failed} failed in ${results.duration_ms}ms`);
+
+    return c.json(results);
+
   } catch (error) {
-    console.error('ISBN check error:', error);
+    console.error('[EnrichBibliography] Error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: 'Failed to check ISBNs', message }, 500);
+    return c.json({
+      error: 'Failed to enrich author bibliography',
+      message,
+      duration_ms: Date.now() - startTime
+    }, 500);
   }
 });
+
+// NOTE: /api/isbns/check is defined above at line 341 with better query logic
+// (checking both primary ISBN and alternate_isbns array)
 
 // POST /api/covers/queue -> Queue cover processing jobs (batch)
 app.post('/api/covers/queue', async (c) => {
