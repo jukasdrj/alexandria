@@ -1,10 +1,15 @@
 #!/bin/bash
 # Pre-commit hook for Alexandria
 # Validates code before allowing commits
+# Updated for Claude Code 2.0.65 hook system
 
 set -e
 
 echo "🔍 Running pre-commit checks..."
+
+# Access hook environment variables (available in Claude Code 2.0.54+)
+# CLAUDE_PROJECT_DIR - the project directory
+# hook_event_name - the event that triggered this hook (from 2.0.41+)
 
 # Check if CREDENTIALS.md is being committed (should be gitignored)
 if git diff --cached --name-only | grep -q "docs/CREDENTIALS.md"; then

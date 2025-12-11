@@ -18,13 +18,16 @@ This directory contains Claude Code configuration files that enhance the develop
 │   ├── perf-check.md
 │   ├── queue-status.md
 │   └── verify-infra.md
-├── hooks/                             # Git hooks
+├── hooks/                             # Claude Code hooks
 │   └── pre-commit.sh
-├── prompts/                           # Reusable prompts
+├── prompts/                           # Reusable prompts (legacy, prefer skills)
 │   ├── add-endpoint.md
 │   └── optimize-query.md
+├── rules/                             # Auto-loaded context rules (NEW in 2.0.64)
+│   ├── database.md                    # Database-specific rules
+│   ├── workers.md                     # Cloudflare Workers rules
+│   └── security.md                    # Security enforcement rules
 └── tdd-guide.md                       # Testing guidelines
-
 ```
 
 ## Settings
@@ -36,16 +39,27 @@ The following files are denied from Claude Code access for security:
 - `**/*.key`, `**/*.pem`, `**/*.crt` - Certificate files
 
 ### MCP Servers
-- **zen** - Advanced AI capabilities (chat, thinkdeep, planner, consensus, debug, codereview, precommit)
+- **pal** - Advanced AI capabilities (chat, thinkdeep, planner, consensus, debug, codereview, precommit)
 - **ios-simulator** - iOS simulator control (useful for bendv3 mobile testing)
 
+### Attribution (NEW in 2.0.62)
+Customized commit and PR bylines with project-specific format.
+
 ### Hooks
-- **pre-commit** - Validates no secrets are being committed, runs TypeScript checks
+See **Hooks** section below for complete hook configuration.
 
 ## Agents
 
+Agents can be invoked automatically based on context, or manually via `@agent-name`.
+
 ### cloudflare-workers-optimizer
 Specialized agent for Cloudflare Workers optimization on paid plans.
+
+**Frontmatter features:**
+- `model: sonnet` - Uses Sonnet for complex reasoning
+- `permissionMode: default` - Standard permission handling
+- `disallowedTools: [WebSearch]` - Prevents external web searches
+- `skills: [optimize-query]` - Auto-loads query optimization skill
 
 **When to use:**
 - Reviewing wrangler.jsonc configuration
@@ -54,10 +68,14 @@ Specialized agent for Cloudflare Workers optimization on paid plans.
 - Understanding billing and limits
 - Working with Durable Objects, KV, R2, D1, Queues
 
-**Usage:** This agent is automatically invoked when working with Workers-specific code.
-
 ### postgres-optimizer
-PostgreSQL database optimization expert with enthusiasm for database performance.
+PostgreSQL database optimization expert.
+
+**Frontmatter features:**
+- `model: sonnet` - Uses Sonnet for analysis
+- `permissionMode: default` - Standard permission handling
+- `disallowedTools: [WebSearch]` - Prevents external web searches
+- `skills: [optimize-query, db-query]` - Auto-loads DB skills
 
 **When to use:**
 - Optimizing slow queries
@@ -66,97 +84,116 @@ PostgreSQL database optimization expert with enthusiasm for database performance
 - Schema design improvements
 - Database maintenance tasks
 
-**Usage:** Automatically invoked when working with database queries or schema.
-
 ## Slash Commands
+
+All commands support model specification in frontmatter (NEW in 1.0.57).
 
 ### Infrastructure Commands
 
 #### `/verify-infra`
-Comprehensive infrastructure health check:
-- Tunnel status (4 connections expected)
-- Database connectivity
-- Worker deployment status
+Comprehensive infrastructure health check.
+- `model: haiku` - Fast, efficient execution
+- Checks: Tunnel status, database connectivity, Worker deployment
 
 #### `/db-query`
 Test PostgreSQL queries via SSH before implementing in Worker.
-Always use this to validate queries before adding to production code.
+- `argument-hint: SQL query to execute` - Shows usage hint
+- Always use parameterized queries in Worker code
 
 #### `/deploy-check`
-Full deployment workflow with pre/post validation:
-- Infrastructure verification
-- Local testing prompts
-- Deployment execution
-- Live endpoint testing
+Full deployment workflow with pre/post validation.
+- `model: sonnet` - Uses deeper reasoning for deployment
+- Triggers thinking mode for risk analysis
+- Pre-checks, deployment, live verification
 
-#### `/enrich-status` (NEW)
-Check enriched tables status:
-- Row counts for enriched_works, enriched_editions, enriched_authors
-- Index sizes and health
-- Statistics analysis timestamps
+#### `/enrich-status`
+Check enriched tables status and recent activity.
+- `model: haiku` - Quick status checks
+- Row counts, recent enrichments, index health
 
-#### `/queue-status` (NEW)
-Monitor Cloudflare Queue activity:
-- Queue list and consumer configurations
-- Recent processing activity
-- Dead letter queue status
+#### `/queue-status`
+Monitor Cloudflare Queue activity.
+- `model: haiku` - Fast queue inspection
+- Queue list, consumer configs, DLQ status
 
-#### `/perf-check` (NEW)
-Performance benchmarks for API endpoints:
-- Health endpoint
-- ISBN search (indexed)
-- Title search (trigram fuzzy)
-- Author search (joins)
-- Cover image serving
+#### `/perf-check`
+Performance benchmarks for API endpoints.
+- `model: haiku` - Efficient benchmark execution
+- Triggers thinking for performance analysis
+- Health, ISBN, title, author, and cover endpoints
 
-## Prompts
+## Hooks (Updated for 2.0.65)
 
-### Optimize Query
-Structured workflow for PostgreSQL query optimization:
-1. EXPLAIN ANALYZE execution
-2. Index analysis
-3. Rewrite suggestions
-4. Performance estimates
+Claude Code hooks enable automatic actions on specific events.
 
-**Usage:** Reference when optimizing database queries.
+### Configured Hooks
 
-### Add Endpoint
-Step-by-step guide for adding new API endpoints:
-1. Database query testing
-2. Implementation pattern (Hono + TypeScript)
-3. Caching strategy
-4. Security checklist
+| Event | Matcher | Action |
+|-------|---------|--------|
+| `PreToolUse` | `git commit` | Runs pre-commit.sh validation |
+| `SessionStart` | (all) | Displays welcome message |
+| `SessionEnd` | (all) | Displays goodbye message |
+| `SubagentStart` | (all) | Notifies subagent launch |
+| `SubagentStop` | (all) | Notifies subagent completion |
+| `PermissionRequest` | `Bash(./scripts/*)` | Auto-allows project scripts |
 
-**Usage:** Reference when adding new API routes to the Worker.
+### Available Hook Events (2.0.65)
 
-## TDD Guide
+- **PreToolUse** - Before tool execution (can modify inputs)
+- **PostToolUse** - After tool execution
+- **Stop** - When main agent stops
+- **SubagentStart** - When subagent starts (includes agent_id)
+- **SubagentStop** - When subagent finishes (includes agent_id, transcript_path)
+- **SessionStart** - When new session begins
+- **SessionEnd** - When session ends (supports systemMessage)
+- **PreCompact** - Before conversation compaction
+- **Notification** - For notification events
+- **PermissionRequest** - Auto-approve/deny permission requests
+- **UserPromptSubmit** - On user prompt submission (supports additionalContext)
 
-Comprehensive testing philosophy for Alexandria:
-- Test queries in psql BEFORE Worker implementation
-- Local testing with `npm run dev`
-- Integration testing checklist
-- Performance targets
+### Hook Environment Variables
 
-## Version Information
+Available in hook commands (since 2.0.54):
+- `CLAUDE_PROJECT_DIR` - The project directory
+- `hook_event_name` - The event that triggered this hook
 
-- **Claude Code Version:** 2.0.60
-- **Key Features Used:**
-  - Custom agents with model specification
-  - MCP server integrations
-  - Slash commands for workflows
-  - Pre-commit hooks for safety
-  - Background agent support (NEW in 2.0.60)
+## Rules (NEW in 2.0.64)
 
-## New in Claude Code 2.0.59-60
+The `.claude/rules/` directory contains context rules that are automatically loaded:
 
-### Agent System
-The `agent` setting in settings.json can override the main thread agent. We currently use default agent but can switch to specialized agents per session.
+### database.md
+- Query guidelines and performance targets
+- Table reference with row counts
+- pg_trgm fuzzy search patterns
 
-### Background Agents
-Agents can now run in the background while you work. Useful for long-running tasks like database migrations or comprehensive code reviews.
+### workers.md
+- Worker code guidelines and patterns
+- Bindings reference
+- ISBNdb Premium configuration
+- Security checklist
 
-### MCP Server Management
-Use `/mcp enable [server]` or `/mcp disable [server]` to toggle MCP servers on the fly.
+### security.md
+- Files to never commit
+- API key handling
+- Cover URL whitelist
+- Access control configuration
+
+## Prompts (Legacy)
+
+Prompts in `.claude/prompts/` provide reusable workflows. Consider migrating to skills for better integration.
+
+### optimize-query.md
+Structured workflow for PostgreSQL query optimization.
+
+### add-endpoint.md
+Step-by-step guide for adding new API endpoints.
+
+## Named Sessions (NEW in 2.0.64)
+
+Use named sessions to organize your work:
+- `/rename` - Name the current session
+- `/resume <name>` - Resume a named session
+- `claude --resume <name>` - Resume from terminal
 
 ## Best Practices
 
@@ -170,12 +207,12 @@ Use `/mcp enable [server]` or `/mcp disable [server]` to toggle MCP servers on t
 ### When Optimizing Database Queries
 1. Use `/db-query` with EXPLAIN ANALYZE
 2. Reference `optimize-query.md` prompt
-3. Consider postgres-optimizer agent for complex cases
+3. Use `@postgres-optimizer` agent for complex cases
 4. Test with realistic data volumes (50M+ rows)
 
 ### When Adding New Features
 1. Reference `add-endpoint.md` for API changes
-2. Use cloudflare-workers-optimizer for Workers-specific features
+2. Use `@cloudflare-workers-optimizer` for Workers-specific features
 3. Update CLAUDE.md with new endpoints/features
 4. Add tests to tdd-guide.md if establishing new patterns
 
@@ -191,21 +228,63 @@ chmod +x .claude/hooks/*.sh
 Commands must have the `description:` frontmatter field to appear in the command list.
 
 ### Agent Not Activating
-Agents activate automatically based on context. You can also explicitly call them using the Task tool with the appropriate subagent_type.
+Agents activate automatically based on context. You can also explicitly invoke them using `@agent-name`.
+
+### Rules Not Loading
+Rules in `.claude/rules/` are automatically loaded. Ensure files are valid markdown.
+
+## Version Information
+
+- **Claude Code Version:** 2.0.65
+- **Key Features Used:**
+  - Custom agents with model specification and skills
+  - Slash commands with model and thinking triggers
+  - Rules directory for automatic context loading
+  - Named session support
+  - MCP server integrations
+  - Pre-commit hooks for safety
+  - PermissionRequest hooks for auto-approval
+  - Session lifecycle hooks
+  - Subagent tracking hooks
+  - Attribution settings for commits
+
+## New in Claude Code 2.0.62-2.0.65
+
+### v2.0.65
+- Switch models while writing prompt (alt+p / option+p)
+- Context window information in status line
+- `fileSuggestion` setting for custom file search
+- `CLAUDE_CODE_SHELL` environment variable
+
+### v2.0.64
+- **Rules directory** (`.claude/rules/`) for automatic context
+- **Named sessions** - `/rename` and `/resume <name>`
+- Async agents and bash commands with wake-up messages
+- `/stats` command for usage statistics
+- Instant auto-compacting
+- Unified TaskOutputTool
+
+### v2.0.62
+- **Attribution setting** - Customize commit/PR bylines
+- "(Recommended)" indicator in multiple-choice questions
+- Fixed duplicate slash commands
+- Fixed symlinked skill directories
 
 ## Contributing
 
 When adding new Claude Code configurations:
 
-1. **Commands** - Add to `.claude/commands/` with clear description
-2. **Agents** - Add to `.claude/agents/` with usage examples
-3. **Prompts** - Add to `.claude/prompts/` for reusable workflows
+1. **Commands** - Add to `.claude/commands/` with clear description and model
+2. **Agents** - Add to `.claude/agents/` with usage examples, skills, and permissions
+3. **Rules** - Add to `.claude/rules/` for automatic context loading
 4. **Hooks** - Add to `.claude/hooks/` and make executable
 5. **Update this README** - Keep documentation current
 
 ## Resources
 
-- [Claude Code Documentation](https://claude.com/claude-code)
+- [Claude Code Documentation](https://code.claude.com/docs)
+- [Hooks Documentation](https://code.claude.com/docs/en/hooks)
+- [Memory & Rules](https://code.claude.com/docs/en/memory)
 - [Alexandria CLAUDE.md](../CLAUDE.md) - Main project documentation
 - [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
 - [PostgreSQL Documentation](https://www.postgresql.org/docs/)

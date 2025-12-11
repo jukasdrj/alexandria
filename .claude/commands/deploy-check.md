@@ -1,8 +1,11 @@
 ---
 description: Deploy Worker with full pre/post validation
+model: sonnet
 ---
 
 Deploy the Cloudflare Worker with comprehensive checks.
+
+think harder about potential deployment risks and validation steps
 
 ## Pre-deployment
 

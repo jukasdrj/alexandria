@@ -1,5 +1,6 @@
 ---
 description: Check Cloudflare queue status and recent activity
+model: haiku
 ---
 
 Check the status of Alexandria's Cloudflare Queues.

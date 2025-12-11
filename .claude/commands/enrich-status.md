@@ -1,5 +1,6 @@
 ---
 description: Check status of enriched tables and recent enrichment activity
+model: haiku
 ---
 
 Check the health and status of Alexandria's enriched tables, including recent enrichment activity.

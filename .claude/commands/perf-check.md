@@ -1,8 +1,11 @@
 ---
 description: Run comprehensive performance check on API endpoints
+model: haiku
 ---
 
 Test performance of key Alexandria API endpoints.
+
+think about what endpoints might have performance issues before testing
 
 ## Steps
 

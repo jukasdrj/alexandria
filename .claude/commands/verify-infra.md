@@ -1,5 +1,6 @@
 ---
 description: Verify Alexandria infrastructure health (tunnel + database)
+model: haiku
 ---
 
 Check the health of the entire Alexandria infrastructure stack.

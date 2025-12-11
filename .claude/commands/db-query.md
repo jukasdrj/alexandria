@@ -1,5 +1,6 @@
 ---
 description: Test a database query via SSH
+argument-hint: SQL query to execute (e.g., "SELECT * FROM editions LIMIT 5")
 ---
 
 Test a PostgreSQL query on the Alexandria database.
