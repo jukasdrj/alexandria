@@ -126,11 +126,11 @@
       },
       {
         "queue": "alexandria-cover-queue",
-        "max_batch_size": 50,
-        "max_batch_timeout": 15,
+        "max_batch_size": 10,
+        "max_batch_timeout": 10,
         "max_retries": 3,
         "dead_letter_queue": "alexandria-cover-dlq",
-        "max_concurrency": 3
+        "max_concurrency": 5
       }
     ]
   },

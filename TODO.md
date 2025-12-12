@@ -6,21 +6,32 @@ Current status and next steps for development.
 
 ## 🚨 CRITICAL: Active Work
 
-### Author Enrichment Expansion (ACTIVE)
-**Status:** Ready to scale
+### Bulk Author Harvesting (ACTIVE)
+**Status:** Top-100 complete, ready for larger tiers
 **Priority:** HIGH
 
-**Completed (December 10, 2025):**
-1. ✅ ISBNdb Premium upgrade (3x rate, 10x batch)
-2. ✅ `/api/enrich/batch-direct` endpoint (bypasses queue limits)
-3. ✅ Fixed bibliography pagination (ISBNdb doesn't return `total`)
-4. ✅ Callie Hart test: 167 books → 82 enriched, 1 API call
+**Completed (December 11, 2025):**
+1. ✅ Multi-model consensus on harvesting strategy (gemini-2.5-pro, grok-4-1)
+2. ✅ `GET /api/authors/top` endpoint (queries by work count, cached 24h)
+3. ✅ `scripts/bulk-author-harvest.js` with checkpoint/resume support
+4. ✅ Top-100 tier: 98 authors processed, 9,655 books, 4,918 covers queued
+5. ✅ Fixed memory limit errors: reduced batch size 50→10, increased concurrency 3→5
+6. ✅ jSquash WebP cover processing working (50-80% compression on large images)
+
+**Issues Created:**
+- #84: Skip WebP conversion for small images (negative compression on <5KB images)
+
+**Top-100 Results:**
+- Authors processed: 98/100 (2 failed due to ISBNdb 400 errors)
+- Books found: 9,655 (all already existed in enriched_editions)
+- Covers queued: 4,918 (processing in background)
+- Cache hits: 5 (previously enriched authors)
 
 **Next Steps:**
-1. Run author expansion script on full library CSV
-2. Monitor cover queue processing
-3. Verify enriched data quality in database
-4. Consider Durable Object buffer (GitHub #82) if queue bottlenecks appear
+1. [ ] Wait for cover queue to drain (~2 hours)
+2. [ ] Run `--tier top-1000` (1,000 authors)
+3. [ ] Monitor for memory/CPU limit errors
+4. [ ] Fix #84 (WebP small image optimization)
 
 ### Post-Migration Optimization (COMPLETE)
 **Status:** Done
