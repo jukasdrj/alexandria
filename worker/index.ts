@@ -613,6 +613,83 @@ app.post('/api/enrich/batch-direct', async (c) => {
   }
 });
 
+// GET /api/authors/top -> Get top authors by work count (for bulk harvesting)
+// Note: Uses work count (faster query) as proxy for popularity.
+// Filters out institutional/corporate "authors" that won't have ISBNdb entries.
+// Results are cached in KV for 24 hours since this is an expensive query (~20s).
+app.get('/api/authors/top', async (c) => {
+  const startTime = Date.now();
+
+  try {
+    const sql = c.get('sql');
+
+    const offset = parseInt(c.req.query('offset') || '0');
+    const limit = Math.min(parseInt(c.req.query('limit') || '100'), 1000);
+    const noCache = c.req.query('nocache') === 'true';
+
+    // Check cache first (expensive query ~20s)
+    const cacheKey = `top_authors:${offset}:${limit}`;
+    if (!noCache) {
+      const cached = await c.env.CACHE.get(cacheKey, 'json');
+      if (cached) {
+        return c.json({
+          ...cached,
+          cached: true,
+          query_duration_ms: Date.now() - startTime
+        });
+      }
+    }
+
+    // Query authors sorted by work count (faster than edition count)
+    // Excludes institutional/corporate authors that won't have ISBNdb entries
+    const authors = await sql`
+      SELECT
+        a.key as author_key,
+        a.data->>'name' as author_name,
+        COUNT(*)::int as work_count
+      FROM authors a
+      JOIN author_works aw ON aw.author_key = a.key
+      WHERE a.data->>'name' IS NOT NULL
+        AND LENGTH(a.data->>'name') > 3
+        AND a.data->>'name' !~* '^(United States|Great Britain|Anonymous|Congress|House|Senate|Committee|Department|Ministry|Government|Office|Board|Bureau|Commission|Council|Agency|Institute|Corporation|Company|Ltd|Inc|Corp|Association|Society|Foundation|University|College|Library|Museum|Press|Publishing|Rand McNally|ICON Group|Philip M\. Parker|\[name missing\])'
+        AND a.data->>'name' NOT LIKE '%Congress%'
+        AND a.data->>'name' NOT LIKE '%Parliament%'
+        AND a.data->>'name' NOT LIKE '%Government%'
+        AND a.data->>'name' NOT LIKE '%Ministry%'
+      GROUP BY a.key, a.data->>'name'
+      ORDER BY COUNT(*) DESC
+      OFFSET ${offset}
+      LIMIT ${limit}
+    `;
+
+    const result = {
+      authors: authors.map(a => ({
+        author_key: a.author_key,
+        author_name: a.author_name,
+        work_count: a.work_count
+      })),
+      pagination: {
+        offset,
+        limit,
+        returned: authors.length
+      }
+    };
+
+    // Cache for 24 hours (expensive query)
+    await c.env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 86400 });
+
+    return c.json({
+      ...result,
+      cached: false,
+      query_duration_ms: Date.now() - startTime
+    });
+  } catch (error) {
+    console.error('Top authors query error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: 'Failed to query top authors', message }, 500);
+  }
+});
+
 // POST /api/authors/bibliography -> Get author bibliography from ISBNdb
 app.post('/api/authors/bibliography', async (c) => {
   try {

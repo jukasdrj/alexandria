@@ -654,6 +654,83 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 - Consider Hyperdrive for connection pooling
 - Database is optimized, but 50M+ row joins need careful design
 
+## Bulk Author Harvesting (NEW - Dec 11, 2025)
+
+### Overview
+
+Bulk harvesting of author bibliographies from ISBNdb to enrich Alexandria's catalog with high-quality covers and metadata. Based on multi-model consensus analysis.
+
+### Strategy (Consensus-Driven)
+
+| Decision | Recommendation | Rationale |
+|----------|----------------|-----------|
+| **Prioritization** | Edition count (not work count) | Better proxy for ISBNdb coverage |
+| **Approach** | Breadth-first (1 page/author) | Faster widespread improvement |
+| **Rate** | 1.5s delay between authors | Safe for 3 req/sec limit |
+| **Fallback** | Use `image` URL if `image_original` expires | 2-hour JWT on high-res URLs |
+
+### Scripts
+
+```bash
+# Dry run - see what would be processed
+node scripts/bulk-author-harvest.js --dry-run --tier top-1000
+
+# Validation run (100 authors)
+node scripts/bulk-author-harvest.js --tier top-100
+
+# Full tier processing
+node scripts/bulk-author-harvest.js --tier top-1000
+node scripts/bulk-author-harvest.js --tier 1000-5000
+node scripts/bulk-author-harvest.js --tier 5000-20000
+
+# Resume from checkpoint
+node scripts/bulk-author-harvest.js --resume
+
+# Single author test
+node scripts/bulk-author-harvest.js --author "Brandon Sanderson"
+```
+
+### Tiers by Edition Count
+
+| Tier | Authors | Est. API Calls | Days to Complete |
+|------|---------|----------------|------------------|
+| top-100 | 100 | 100 | <1 hour |
+| top-1000 | 1,000 | 1,000 | <1 day |
+| 1000-5000 | 4,000 | 4,000 | <1 day |
+| 5000-20000 | 15,000 | 15,000 | 1 day |
+
+### Critical Constraints
+
+1. **ISBNdb Premium Quota**: 15,000 calls/day (resets every 24 hours)
+2. **Image URL Expiry**: `image_original` URLs have 2-hour JWT - queue must process within 2 hours
+3. **Queue Throughput**: Cover queue processes 50 images/batch with 15s timeout
+
+### Monitoring
+
+```bash
+# Watch queue processing
+npx wrangler tail alexandria --format pretty | grep -E "(Cover|Queue)"
+
+# Check queue depth
+curl https://alexandria.ooheynerds.com/api/queue/status
+
+# View cover analytics
+# Dashboard: Cloudflare > Analytics Engine > alexandria_covers
+```
+
+### Pipeline Flow
+
+```
+bulk-author-harvest.js
+    └─→ /api/authors/enrich-bibliography (Alexandria Worker)
+            ├─→ ISBNdb /author/{name} (fetch books)
+            ├─→ enriched_editions (store metadata)
+            ├─→ enriched_works (store work data)
+            └─→ alexandria-cover-queue (queue cover URLs)
+                    └─→ jSquash WASM (download → resize → WebP → R2)
+                            └─→ isbn/{isbn}/{large,medium,small}.webp
+```
+
 ## File Structure
 
 ```
@@ -672,7 +749,8 @@ alex/
 │   │   └── batch-isbndb.ts    # ISBNdb Premium batch API (1000 ISBNs/call)
 │   └── package.json           # Dependencies
 ├── scripts/                   # Deployment & monitoring scripts
-│   ├── expand-author-bibliographies.js  # Bulk author enrichment script
+│   ├── bulk-author-harvest.js           # Bulk author harvesting (edition count priority)
+│   ├── expand-author-bibliographies.js  # CSV-based author enrichment script
 │   └── e2e-author-enrichment-test.js    # E2E test for author pipeline
 ├── docs/                      # Documentation
 │   ├── CREDENTIALS.md         # Passwords (gitignored!)
