@@ -9,7 +9,8 @@
  */
 
 import postgres from 'postgres';
-import { processCoverImage } from './services/image-processor.js';
+import { processAndStoreCover, coversExist } from './services/jsquash-processor.js';
+import { fetchBestCover } from './services/cover-fetcher.js';
 import { smartResolveISBN } from './services/smart-enrich.js';
 import { fetchISBNdbBatch } from './services/batch-isbndb.js';
 import { enrichEdition, enrichWork, enrichAuthor } from './enrichment-service.js';
@@ -29,7 +30,7 @@ import { Logger } from './lib/logger.js';
 export async function processCoverQueue(batch, env) {
   const logger = Logger.forQueue(env, 'alexandria-cover-queue', batch.messages.length);
 
-  logger.info('Cover queue processing started', {
+  logger.info('Cover queue processing started (jSquash WebP)', {
     queueName: batch.queue,
     messageCount: batch.messages.length
   });
@@ -38,74 +39,122 @@ export async function processCoverQueue(batch, env) {
     processed: 0,
     cached: 0,
     failed: 0,
-    errors: []
+    errors: [],
+    compressionStats: {
+      totalOriginalBytes: 0,
+      totalWebpBytes: 0
+    }
   };
 
   for (const message of batch.messages) {
     try {
       const { isbn, work_key, provider_url, priority } = message.body;
+      const normalizedISBN = isbn?.replace(/[-\s]/g, '') || '';
 
-      logger.debug('Processing cover', { isbn, priority: priority || 'normal', has_provider_url: !!provider_url });
+      logger.debug('Processing cover', { isbn: normalizedISBN, priority: priority || 'normal', has_provider_url: !!provider_url });
 
-      // Build options with provider URL if available (avoids redundant API lookups)
-      const options = {
-        force: priority === 'high'
-      };
-
-      if (provider_url) {
-        options.knownCoverUrl = provider_url;  // ✅ Use provider URL from enrichment
-        logger.debug('Using provider URL from enrichment', { isbn, provider_url });
+      // Skip if already processed (unless high priority forces reprocessing)
+      if (priority !== 'high') {
+        const exists = await coversExist(env, normalizedISBN);
+        if (exists) {
+          logger.debug('Cover already exists, skipping', { isbn: normalizedISBN });
+          results.cached++;
+          message.ack();
+          continue;
+        }
       }
 
-      const result = await processCoverImage(isbn, env, options);
+      // Determine cover URL - use provided URL or fetch from providers
+      let coverUrl = provider_url;
+
+      if (!coverUrl) {
+        // No provider URL provided, search across providers
+        logger.debug('No provider URL, fetching from providers', { isbn: normalizedISBN });
+        const coverResult = await fetchBestCover(normalizedISBN, env);
+
+        if (coverResult.source === 'placeholder') {
+          logger.warn('No cover found from any provider', { isbn: normalizedISBN });
+          results.failed++;
+          results.errors.push({ isbn: normalizedISBN, error: 'No cover found from any provider' });
+          message.ack(); // Don't retry - no cover exists
+          continue;
+        }
+
+        coverUrl = coverResult.url;
+      }
+
+      // Process with jSquash: download → decode → resize → WebP → R2
+      const result = await processAndStoreCover(normalizedISBN, coverUrl, env);
 
       if (result.status === 'processed') {
         results.processed++;
+        results.compressionStats.totalOriginalBytes += result.metrics.originalSize || 0;
+        results.compressionStats.totalWebpBytes += result.compression?.totalWebpSize || 0;
 
         // Write analytics if binding exists
         if (env.COVER_ANALYTICS) {
           try {
             env.COVER_ANALYTICS.writeDataPoint({
-              indexes: [isbn],  // Single index (Analytics Engine limit: max 1 index)
-              blobs: [result.source, isbn],  // Move source to blobs for categorical tracking
-              doubles: [result.processingTimeMs || 0, result.size || 0]
+              indexes: [normalizedISBN],
+              blobs: ['jsquash', normalizedISBN],
+              doubles: [
+                result.metrics.totalMs || 0,
+                result.metrics.originalSize || 0,
+                result.compression?.totalWebpSize || 0
+              ]
             });
           } catch (analyticsError) {
             console.error('[CoverQueue] Analytics write failed:', analyticsError);
           }
         }
 
-      } else if (result.status === 'already_exists') {
-        results.cached++;
+        logger.info('Cover processed successfully', {
+          isbn: normalizedISBN,
+          originalSize: result.metrics.originalSize,
+          webpSize: result.compression?.totalWebpSize,
+          compression: result.compression?.ratio,
+          processingMs: result.metrics.totalMs
+        });
+
       } else {
         results.failed++;
-        results.errors.push({ isbn, error: result.error || 'Unknown error' });
+        results.errors.push({ isbn: normalizedISBN, error: result.error || 'Processing failed' });
+        logger.error('Cover processing failed', { isbn: normalizedISBN, error: result.error });
       }
 
-      // Ack message on success
+      // Ack message on success or non-retryable failure
       message.ack();
 
     } catch (error) {
-      logger.error('Cover processing failed', {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('Cover processing exception', {
         isbn: message.body?.isbn || 'unknown',
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMsg
       });
       results.failed++;
       results.errors.push({
         isbn: message.body?.isbn || 'unknown',
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMsg
       });
 
-      // Retry on failure (up to max_retries from wrangler.jsonc)
+      // Retry on exception (up to max_retries from wrangler.jsonc)
       message.retry();
     }
   }
+
+  // Log batch summary
+  const compressionRatio = results.compressionStats.totalOriginalBytes > 0
+    ? ((1 - results.compressionStats.totalWebpBytes / results.compressionStats.totalOriginalBytes) * 100).toFixed(1)
+    : 0;
 
   logger.info('Cover queue processing complete', {
     processed: results.processed,
     cached: results.cached,
     failed: results.failed,
-    errorCount: results.errors.length
+    errorCount: results.errors.length,
+    totalOriginalBytes: results.compressionStats.totalOriginalBytes,
+    totalWebpBytes: results.compressionStats.totalWebpBytes,
+    overallCompression: `${compressionRatio}%`
   });
 
   return results;

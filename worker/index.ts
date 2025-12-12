@@ -19,6 +19,7 @@ import { getDashboardHTML } from './dashboard.js';
 import { smartResolveISBN, shouldResolveExternally } from './services/smart-enrich.js';
 import { fetchISBNdbBatch } from './services/batch-isbndb.js';
 import { enrichEdition, enrichWork } from './enrichment-service.js';
+import { processAndStoreCover, benchmark as jsquashBenchmark } from './services/jsquash-processor.js';
 import {
   testAllISBNdbEndpoints,
   testISBNdbBook,
@@ -809,7 +810,7 @@ app.post('/api/authors/enrich-bibliography', async (c) => {
           if (isbn) {
             allBooks.push({
               isbn,
-              title: book.title || 'Unknown',
+              title: book.title_long || book.title || 'Unknown',
               authors: book.authors || [author_name],
               publisher: book.publisher,
               date_published: book.date_published,
@@ -817,8 +818,11 @@ app.post('/api/authors/enrich-bibliography', async (c) => {
               language: book.language,
               synopsis: book.synopsis,
               image: book.image,
+              image_original: book.image_original, // High-quality cover (2hr expiry!)
               subjects: book.subjects,
-              binding: book.binding
+              binding: book.binding,
+              dewey_decimal: book.dewey_decimal,
+              related: book.related,
             });
           }
         }
@@ -878,6 +882,15 @@ app.post('/api/authors/enrich-bibliography', async (c) => {
         });
 
         // Create enriched_edition with all the metadata we already have
+        // Prefer image_original for highest quality (but it expires in 2hrs!)
+        const hasCover = book.image_original || book.image;
+        const coverUrls = hasCover ? {
+          original: book.image_original, // High-quality original (best for R2)
+          large: book.image,
+          medium: book.image,
+          small: book.image,
+        } : undefined;
+
         await enrichEdition(sql, {
           isbn: book.isbn,
           title: book.title,
@@ -886,23 +899,26 @@ app.post('/api/authors/enrich-bibliography', async (c) => {
           page_count: book.pages,
           language: book.language,
           primary_provider: 'isbndb',
-          cover_urls: book.image ? { large: book.image, medium: book.image, small: book.image } : undefined,
-          cover_source: book.image ? 'isbndb' : undefined,
+          cover_urls: coverUrls,
+          cover_source: hasCover ? 'isbndb' : undefined,
           work_key: workKey,
           subjects: book.subjects,
           binding: book.binding,
+          dewey_decimal: book.dewey_decimal,
+          related_isbns: book.related,
         }, c.env);
 
         results.enriched++;
 
-        // Queue ONLY cover download (not ISBN re-fetch!)
-        if (book.image) {
+        // Queue cover download - prefer image_original (expires in 2hrs!) for best quality
+        if (hasCover) {
           try {
+            const bestCoverUrl = book.image_original || book.image;
             await c.env.COVER_QUEUE.send({
               isbn: book.isbn,
               work_key: workKey,
-              provider_url: book.image,
-              priority: 'normal',
+              provider_url: bestCoverUrl,
+              priority: 'high', // Bump priority since image_original expires!
               source: 'author_bibliography'
             });
             results.covers_queued++;
@@ -1622,13 +1638,82 @@ app.get('/api/covers/:work_key/:size', handleServeCover);
 // Cover Image Routes (ISBN-based - legacy)
 // =================================================================================
 
+// GET /covers/:isbn/status - Check if cover exists (MUST be before :size route!)
+app.get('/covers/:isbn/status', async (c) => {
+  const { isbn } = c.req.param();
+  const normalizedISBN = isbn.replace(/[-\s]/g, '');
+
+  // ISBN-10: 9 digits + optional X, or ISBN-13: 13 digits
+  if (!/^(?:[0-9]{9}X|[0-9]{10,13})$/i.test(normalizedISBN)) {
+    return c.json({ error: 'Invalid ISBN format' }, 400);
+  }
+
+  try {
+    // First check for jSquash WebP files (preferred format)
+    const webpKey = `isbn/${normalizedISBN}/large.webp`;
+    const webpHead = await c.env.COVER_IMAGES.head(webpKey);
+
+    if (webpHead) {
+      // Get metadata from WebP file
+      const sizes: Record<string, number> = {};
+      for (const size of ['large', 'medium', 'small']) {
+        const sizeHead = await c.env.COVER_IMAGES.head(`isbn/${normalizedISBN}/${size}.webp`);
+        if (sizeHead) {
+          sizes[size] = sizeHead.size;
+        }
+      }
+
+      return c.json({
+        exists: true,
+        isbn: normalizedISBN,
+        format: 'webp',
+        storage: 'jsquash',
+        sizes,
+        uploaded: webpHead.uploaded,
+        ...webpHead.customMetadata,
+        urls: {
+          large: `/covers/${normalizedISBN}/large`,
+          medium: `/covers/${normalizedISBN}/medium`,
+          small: `/covers/${normalizedISBN}/small`
+        }
+      });
+    }
+
+    // Fallback to legacy metadata check
+    const metadata = await getCoverMetadata(c.env, normalizedISBN);
+
+    if (!metadata) {
+      return c.json({
+        exists: false,
+        isbn: normalizedISBN
+      });
+    }
+
+    return c.json({
+      exists: true,
+      isbn: normalizedISBN,
+      format: 'legacy',
+      ...metadata,
+      urls: {
+        original: `/covers/${normalizedISBN}/original`,
+        large: `/covers/${normalizedISBN}/large`,
+        medium: `/covers/${normalizedISBN}/medium`,
+        small: `/covers/${normalizedISBN}/small`
+      }
+    });
+
+  } catch (error) {
+    console.error(`Error checking cover status for ${normalizedISBN}:`, error);
+    return c.json({ error: 'Failed to check cover status' }, 500);
+  }
+});
+
 // GET /covers/:isbn/:size - Serve cover image from R2
-// MVP: Currently serves original for all sizes. On-demand resizing via CF Images
-// can be added later, or pre-generated sizes stored in R2.
+// Supports both new jSquash WebP format (isbn/{isbn}/{size}.webp) and legacy originals
 app.get('/covers/:isbn/:size', async (c) => {
   const { isbn, size } = c.req.param();
 
-  // Validate size parameter (accepted for future compatibility)
+  // Validate size parameter
   const validSizes = ['small', 'medium', 'large', 'original'];
   if (!validSizes.includes(size)) {
     return c.json({
@@ -1645,11 +1730,27 @@ app.get('/covers/:isbn/:size', async (c) => {
   }
 
   try {
-    // STRATEGY 1: Check KV cache for ISBN→R2 key mapping
-    // This cache is populated when covers are processed
+    let object = null;
+
+    // STRATEGY 1: Try new jSquash WebP format (isbn/{isbn}/{size}.webp)
+    // This is the preferred format - pre-resized WebP files from jSquash processing
+    if (size !== 'original') {
+      const webpKey = `isbn/${normalizedISBN}/${size}.webp`;
+      object = await c.env.COVER_IMAGES.get(webpKey);
+      if (object) {
+        console.log(`[CoverServe] Found jSquash WebP: ${webpKey}`);
+        // Return WebP with caching headers
+        const headers = new Headers();
+        headers.set('Content-Type', 'image/webp');
+        headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+        headers.set('CDN-Cache-Control', 'max-age=31536000');
+        return new Response(object.body, { headers });
+      }
+    }
+
+    // STRATEGY 2: Check KV cache for ISBN→R2 key mapping (legacy originals)
     const cacheKey = `cover_key:${normalizedISBN}`;
     let r2Key = await c.env.CACHE.get(cacheKey);
-    let object = null;
 
     if (r2Key) {
       console.log(`[CoverServe] Found cached R2 key for ISBN ${normalizedISBN}: ${r2Key}`);
@@ -1663,8 +1764,7 @@ app.get('/covers/:isbn/:size', async (c) => {
       }
     }
 
-    // STRATEGY 2: Try legacy ISBN-based storage (isbn/{isbn}/original.{ext})
-    // This was the old storage format before work-based keys were introduced
+    // STRATEGY 3: Try legacy ISBN-based storage (isbn/{isbn}/original.{ext})
     if (!object) {
       const extensions = ['jpg', 'png', 'webp'];
 
@@ -1672,7 +1772,7 @@ app.get('/covers/:isbn/:size', async (c) => {
         const key = `isbn/${normalizedISBN}/original.${ext}`;
         object = await c.env.COVER_IMAGES.get(key);
         if (object) {
-          console.log(`[CoverServe] Found ISBN-based cover: ${key}`);
+          console.log(`[CoverServe] Found legacy ISBN-based cover: ${key}`);
           // Cache this key for future requests
           await c.env.CACHE.put(cacheKey, key, { expirationTtl: 86400 * 30 }); // 30 days
           break;
@@ -1680,18 +1780,14 @@ app.get('/covers/:isbn/:size', async (c) => {
       }
     }
 
-    // STRATEGY 3: Search work-based storage (covers/{work_key}/{hash}/original)
-    // This is the current storage format used by queue-based processing
+    // STRATEGY 4: Search work-based storage (covers/{work_key}/{hash}/original)
+    // This is the older work-based format
     if (!object) {
       console.log(`[CoverServe] Searching work-based storage for ISBN ${normalizedISBN}`);
 
-      // List objects with covers/ prefix and filter by ISBN in customMetadata
-      // Note: R2 doesn't support metadata queries, so we need to list and filter
       let cursor: string | undefined;
       let found = false;
-
-      // Search through covers prefix (limit search to avoid timeout)
-      const maxPages = 5; // Search up to 5,000 objects (5 pages × 1000/page)
+      const maxPages = 5;
       let pageCount = 0;
 
       while (!found && pageCount < maxPages) {
@@ -1701,18 +1797,13 @@ app.get('/covers/:isbn/:size', async (c) => {
           limit: 1000
         });
 
-        // Check each object's metadata for matching ISBN
         for (const obj of list.objects) {
           const head = await c.env.COVER_IMAGES.head(obj.key);
           if (head?.customMetadata?.isbn === normalizedISBN) {
-            console.log(`[CoverServe] Found work-based cover: ${obj.key} (ISBN: ${normalizedISBN})`);
+            console.log(`[CoverServe] Found work-based cover: ${obj.key}`);
             object = await c.env.COVER_IMAGES.get(obj.key);
             r2Key = obj.key;
-
-            // Cache this key for future requests (30 days)
             await c.env.CACHE.put(cacheKey, r2Key, { expirationTtl: 86400 * 30 });
-            console.log(`[CoverServe] Cached R2 key: ${cacheKey} → ${r2Key}`);
-
             found = true;
             break;
           }
@@ -1720,17 +1811,11 @@ app.get('/covers/:isbn/:size', async (c) => {
 
         cursor = list.truncated ? list.cursor : undefined;
         pageCount++;
-
-        if (!cursor) break; // No more objects to list
-      }
-
-      if (!object) {
-        console.log(`[CoverServe] No cover found for ISBN ${normalizedISBN} after searching ${pageCount} pages`);
+        if (!cursor) break;
       }
     }
 
     if (!object) {
-      // Redirect to placeholder if not found
       return c.redirect(getPlaceholderCover(), 302);
     }
 
@@ -1739,51 +1824,12 @@ app.get('/covers/:isbn/:size', async (c) => {
     headers.set('Content-Type', object.httpMetadata?.contentType || 'image/jpeg');
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
     headers.set('CDN-Cache-Control', 'max-age=31536000');
-    // Note: size parameter currently ignored - serving original for all requests
 
     return new Response(object.body, { headers });
 
   } catch (error) {
     console.error(`Error serving cover for ${normalizedISBN}:`, error);
     return c.redirect(getPlaceholderCover(), 302);
-  }
-});
-
-// GET /covers/:isbn/status - Check if cover exists
-app.get('/covers/:isbn/status', async (c) => {
-  const { isbn } = c.req.param();
-  const normalizedISBN = isbn.replace(/[-\s]/g, '');
-
-  // ISBN-10: 9 digits + optional X, or ISBN-13: 13 digits
-  if (!/^(?:[0-9]{9}X|[0-9]{10,13})$/i.test(normalizedISBN)) {
-    return c.json({ error: 'Invalid ISBN format' }, 400);
-  }
-
-  try {
-    const metadata = await getCoverMetadata(c.env, normalizedISBN);
-
-    if (!metadata) {
-      return c.json({
-        exists: false,
-        isbn: normalizedISBN
-      });
-    }
-
-    return c.json({
-      exists: true,
-      isbn: normalizedISBN,
-      ...metadata,
-      urls: {
-        original: `/covers/${normalizedISBN}/original`,
-        large: `/covers/${normalizedISBN}/large`,
-        medium: `/covers/${normalizedISBN}/medium`,
-        small: `/covers/${normalizedISBN}/small`
-      }
-    });
-
-  } catch (error) {
-    console.error(`Error checking cover status for ${normalizedISBN}:`, error);
-    return c.json({ error: 'Failed to check cover status' }, 500);
   }
 });
 
@@ -2100,6 +2146,41 @@ app.post('/api/test/isbndb/batch', async (c) => {
     console.error('ISBNdb batch test error:', error);
     return c.json({
       error: 'Batch test failed',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// =================================================================================
+// jSquash Image Processing Benchmark
+// =================================================================================
+
+// POST /api/test/jsquash - Benchmark jSquash image processing
+app.post('/api/test/jsquash', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { url, isbn } = body;
+
+    if (!url) {
+      return c.json({
+        error: 'Missing url parameter',
+        message: 'Provide a cover image URL to process'
+      }, 400);
+    }
+
+    // If ISBN provided, do full processing (stores in R2)
+    // Otherwise, run benchmark (processes but cleans up)
+    if (isbn) {
+      const result = await processAndStoreCover(isbn, url, c.env);
+      return c.json(result);
+    } else {
+      const result = await jsquashBenchmark(url, c.env);
+      return c.json(result);
+    }
+  } catch (error) {
+    console.error('jSquash benchmark error:', error);
+    return c.json({
+      error: 'Benchmark failed',
       message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
