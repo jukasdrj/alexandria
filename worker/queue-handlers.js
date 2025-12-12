@@ -53,15 +53,13 @@ export async function processCoverQueue(batch, env) {
 
       logger.debug('Processing cover', { isbn: normalizedISBN, priority: priority || 'normal', has_provider_url: !!provider_url });
 
-      // Skip if already processed (unless high priority forces reprocessing)
-      if (priority !== 'high') {
-        const exists = await coversExist(env, normalizedISBN);
-        if (exists) {
-          logger.debug('Cover already exists, skipping', { isbn: normalizedISBN });
-          results.cached++;
-          message.ack();
-          continue;
-        }
+      // Skip if already processed - we always check now to avoid duplicate processing
+      const exists = await coversExist(env, normalizedISBN);
+      if (exists) {
+        logger.debug('Cover already exists, skipping', { isbn: normalizedISBN });
+        results.cached++;
+        message.ack();
+        continue;
       }
 
       // Determine cover URL - use provided URL or fetch from providers
