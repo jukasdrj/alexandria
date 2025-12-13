@@ -27,9 +27,9 @@ import {
   handleEnrichAuthor,
   handleQueueEnrichment,
   handleGetEnrichmentStatus,
-} from '../../enrich-handlers.js';
+} from '../services/enrich-handlers.js';
 import { normalizeISBN, validateISBNBatch } from '../../lib/isbn-utils.js';
-import { enrichEdition, enrichWork } from '../../enrichment-service.js';
+import { enrichEdition, enrichWork } from '../services/enrichment-service.js';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 
 // Create enrichment router

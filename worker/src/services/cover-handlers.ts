@@ -1,13 +1,9 @@
-/**
- * Cover Image Processing Handlers for Alexandria
- *
- * Endpoints:
- * - POST /api/covers/process - Process a cover image from provider URL
- * - GET /api/covers/{work_key}/{size}.webp - Serve processed cover
- *
- * R2 Bucket: bookstrack-covers-processed (binding: COVER_IMAGES)
- */
+// =================================================================================
+// Cover Image Processing Handlers for Alexandria
+// =================================================================================
 
+import type { Context } from 'hono';
+import type { AppBindings } from '../env.js';
 import {
   downloadImage,
   hashURL,
@@ -27,41 +23,34 @@ import {
  *   "provider_url": "https://covers.openlibrary.org/b/id/12345-L.jpg",
  *   "isbn": "9780439064873" // optional, for logging
  * }
- *
- * Response:
- * {
- *   "success": true,
- *   "urls": {
- *     "large": "https://alexandria.ooheynerds.com/api/covers/OL45804W/large",
- *     "medium": "https://alexandria.ooheynerds.com/api/covers/OL45804W/medium",
- *     "small": "https://alexandria.ooheynerds.com/api/covers/OL45804W/small"
- *   },
- *   "metadata": {
- *     "processedAt": "2025-11-30T...",
- *     "originalSize": 245678,
- *     "r2Key": "covers/OL45804W/abc123...",
- *     "sourceUrl": "https://covers.openlibrary.org/..."
- *   }
- * }
  */
-export async function handleProcessCover(c) {
+export async function handleProcessCover(c: Context<AppBindings>): Promise<Response> {
   try {
     // 1. Parse and validate request
-    const body = await c.req.json();
+    const body = await c.req.json<{
+      work_key?: string;
+      provider_url?: string;
+      isbn?: string;
+    }>();
     const { work_key, provider_url, isbn } = body;
 
     if (!work_key || !provider_url) {
-      return c.json({
-        success: false,
-        error: 'Missing required fields: work_key, provider_url',
-      }, 400);
+      return c.json(
+        {
+          success: false,
+          error: 'Missing required fields: work_key, provider_url',
+        },
+        400
+      );
     }
 
     console.log(`[CoverProcessor] Processing cover for ${work_key} from ${provider_url}`);
 
     // 2. Download and validate original image
     const { buffer: originalImage, contentType } = await downloadImage(provider_url);
-    console.log(`[CoverProcessor] Downloaded ${originalImage.byteLength} bytes (${contentType})`);
+    console.log(
+      `[CoverProcessor] Downloaded ${originalImage.byteLength} bytes (${contentType})`
+    );
 
     // 3. Generate R2 key (use URL hash for deduplication)
     const urlHash = await hashURL(normalizeImageURL(provider_url));
@@ -106,20 +95,24 @@ export async function handleProcessCover(c) {
         workKey: work_key,
       },
     });
-
   } catch (error) {
     console.error('[CoverProcessor] Error:', error);
 
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
     // Return placeholder URLs on error
-    return c.json({
-      success: false,
-      error: error.message,
-      urls: {
-        large: PLACEHOLDER_COVER,
-        medium: PLACEHOLDER_COVER,
-        small: PLACEHOLDER_COVER,
+    return c.json(
+      {
+        success: false,
+        error: errorMessage,
+        urls: {
+          large: PLACEHOLDER_COVER,
+          medium: PLACEHOLDER_COVER,
+          small: PLACEHOLDER_COVER,
+        },
       },
-    }, error.message.includes('Domain not allowed') ? 403 : 500);
+      errorMessage.includes('Domain not allowed') ? 403 : 500
+    );
   }
 }
 
@@ -130,10 +123,10 @@ export async function handleProcessCover(c) {
  *
  * Example: GET /api/covers/OL45804W/medium
  */
-export async function handleServeCover(c) {
+export async function handleServeCover(c: Context<AppBindings>): Promise<Response> {
   try {
     const work_key = c.req.param('work_key');
-    const size = c.req.param('size');
+    const size = c.req.param('size') as keyof typeof SIZES;
 
     if (!SIZES[size]) {
       return c.json({ error: 'Invalid size. Use: large, medium, or small' }, 400);
@@ -176,7 +169,6 @@ export async function handleServeCover(c) {
         'X-Image-Height': dimensions.height.toString(),
       },
     });
-
   } catch (error) {
     console.error('[CoverServer] Error:', error);
     return c.redirect(PLACEHOLDER_COVER);

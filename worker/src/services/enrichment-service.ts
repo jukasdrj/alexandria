@@ -2,29 +2,57 @@
 // Enrichment Service - Database Operations
 // =================================================================================
 
-import { calculateEditionQuality, calculateWorkQuality, calculateCompleteness, formatPgArray } from './utils.js';
+import type { Sql, TransactionSql } from 'postgres';
+import type { Env } from '../env.js';
+import type {
+  EnrichEditionRequest,
+  EnrichWorkRequest,
+  EnrichAuthorRequest,
+  EnrichmentData,
+  QueueEnrichmentRequest,
+  QueueEnrichmentResponse,
+  EnrichmentJobStatus,
+  EnrichmentLogEntry,
+} from './types.js';
+import {
+  calculateEditionQuality,
+  calculateWorkQuality,
+  calculateCompleteness,
+  formatPgArray,
+  flattenFieldKeys,
+  normalizePriority,
+} from './utils.js';
 
 /**
  * Enrich an edition in the database
- * @param {import('postgres').Sql | import('postgres').TransactionSql} sql - postgres connection or transaction
- * @param {import('./types').EnrichEditionRequest} edition - Edition data
- * @param {import('./env').Env} env - Worker environment with COVER_QUEUE binding
- * @returns {Promise<{isbn: string, action: 'created'|'updated', quality_improvement: number, stored_at: string}>}
  */
-export async function enrichEdition(sql, edition, env) {
+export async function enrichEdition(
+  sql: Sql | TransactionSql,
+  edition: EnrichEditionRequest,
+  env?: Env
+): Promise<EnrichmentData & { isbn: string; quality_improvement: number }> {
   const startTime = Date.now();
   const qualityScore = calculateEditionQuality(edition);
-  const completenessScore = calculateCompleteness(edition, [
-    'title', 'subtitle', 'publisher', 'publication_date', 'page_count',
-    'format', 'language', 'cover_urls', 'openlibrary_edition_id',
-    'amazon_asins', 'google_books_volume_ids', 'goodreads_edition_ids'
+  const completenessScore = calculateCompleteness(edition as unknown as Record<string, unknown>, [
+    'title',
+    'subtitle',
+    'publisher',
+    'publication_date',
+    'page_count',
+    'format',
+    'language',
+    'cover_urls',
+    'openlibrary_edition_id',
+    'amazon_asins',
+    'google_books_volume_ids',
+    'goodreads_edition_ids',
   ]);
 
   try {
     // Fetch existing quality score before upsert (for quality improvement calculation)
     const existing = await sql`
       SELECT isbndb_quality FROM enriched_editions WHERE isbn = ${edition.isbn}
-    `.then(rows => rows[0]);
+    `.then((rows) => rows[0] as { isbndb_quality?: number } | undefined);
 
     // Upsert into enriched_editions
     const result = await sql`
@@ -176,17 +204,18 @@ export async function enrichEdition(sql, edition, env) {
         isbndb_quality
     `;
 
-    const row = result[0];
+    const row = result[0] as { isbn: string; was_insert: boolean; isbndb_quality: number };
     const wasInsert = row.was_insert;
-    const previousQuality = wasInsert ? 0 : (existing?.isbndb_quality || 0);
+    const previousQuality = wasInsert ? 0 : existing?.isbndb_quality || 0;
     const qualityImprovement = row.isbndb_quality - previousQuality;
 
-    // ✅ NEW: Queue cover download if URLs exist
+    // Queue cover download if URLs exist
     if (env?.COVER_QUEUE && edition.cover_urls) {
-      const coverUrl = edition.cover_urls.original ||
-                       edition.cover_urls.large ||
-                       edition.cover_urls.medium ||
-                       edition.cover_urls.small;
+      const coverUrl =
+        edition.cover_urls.original ||
+        edition.cover_urls.large ||
+        edition.cover_urls.medium ||
+        edition.cover_urls.small;
 
       if (coverUrl) {
         try {
@@ -196,9 +225,11 @@ export async function enrichEdition(sql, edition, env) {
             provider_url: coverUrl,
             priority: 'normal',
             source: `enrichment-${edition.primary_provider}`,
-            queued_at: new Date().toISOString()
+            queued_at: new Date().toISOString(),
           });
-          console.log(`[Enrichment] ✓ Queued cover download for ${row.isbn} from ${edition.primary_provider}`);
+          console.log(
+            `[Enrichment] Queued cover download for ${row.isbn} from ${edition.primary_provider}`
+          );
         } catch (queueError) {
           // Log but don't fail enrichment
           console.error(`[Enrichment] Cover queue failed for ${row.isbn}:`, queueError);
@@ -213,15 +244,18 @@ export async function enrichEdition(sql, edition, env) {
       provider: edition.primary_provider,
       operation: wasInsert ? 'create' : 'update',
       success: true,
-      fields_updated: flattenFieldKeys(edition, ['isbn', 'primary_provider']),
-      response_time_ms: Date.now() - startTime
+      fields_updated: flattenFieldKeys(edition as unknown as Record<string, unknown>, [
+        'isbn',
+        'primary_provider',
+      ]),
+      response_time_ms: Date.now() - startTime,
     });
 
     return {
       isbn: row.isbn,
       action: wasInsert ? 'created' : 'updated',
       quality_improvement: qualityImprovement,
-      stored_at: new Date().toISOString()
+      stored_at: new Date().toISOString(),
     };
   } catch (error) {
     console.error('enrichEdition database error:', error);
@@ -233,27 +267,37 @@ export async function enrichEdition(sql, edition, env) {
       provider: edition.primary_provider,
       operation: 'upsert',
       success: false,
-      error_message: error.message,
-      response_time_ms: Date.now() - startTime
+      error_message: error instanceof Error ? error.message : String(error),
+      response_time_ms: Date.now() - startTime,
     }).catch(() => {}); // Don't throw if logging fails
 
-    throw new Error(`Database operation failed: ${error.message}`);
+    throw new Error(
+      `Database operation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
 /**
  * Enrich a work in the database
- * @param {import('postgres').Sql | import('postgres').TransactionSql} sql - postgres connection or transaction
- * @param {import('./types').EnrichWorkRequest} work - Work data
- * @returns {Promise<{work_key: string, action: 'created'|'updated', quality_improvement: number, stored_at: string}>}
  */
-export async function enrichWork(sql, work) {
+export async function enrichWork(
+  sql: Sql | TransactionSql,
+  work: EnrichWorkRequest
+): Promise<EnrichmentData & { work_key: string }> {
   const startTime = Date.now();
   const qualityScore = calculateWorkQuality(work);
-  const completenessScore = calculateCompleteness(work, [
-    'title', 'subtitle', 'description', 'original_language', 'first_publication_year',
-    'subject_tags', 'cover_urls', 'openlibrary_work_id', 'goodreads_work_ids',
-    'amazon_asins', 'google_books_volume_ids'
+  const completenessScore = calculateCompleteness(work as unknown as Record<string, unknown>, [
+    'title',
+    'subtitle',
+    'description',
+    'original_language',
+    'first_publication_year',
+    'subject_tags',
+    'cover_urls',
+    'openlibrary_work_id',
+    'goodreads_work_ids',
+    'amazon_asins',
+    'google_books_volume_ids',
   ]);
 
   try {
@@ -340,7 +384,7 @@ export async function enrichWork(sql, work) {
         isbndb_quality
     `;
 
-    const row = result[0];
+    const row = result[0] as { work_key: string; was_insert: boolean; isbndb_quality: number };
 
     // Log the enrichment operation
     await logEnrichmentOperation(sql, {
@@ -349,15 +393,18 @@ export async function enrichWork(sql, work) {
       provider: work.primary_provider,
       operation: row.was_insert ? 'create' : 'update',
       success: true,
-      fields_updated: flattenFieldKeys(work, ['work_key', 'primary_provider']),
-      response_time_ms: Date.now() - startTime
+      fields_updated: flattenFieldKeys(work as unknown as Record<string, unknown>, [
+        'work_key',
+        'primary_provider',
+      ]),
+      response_time_ms: Date.now() - startTime,
     });
 
     return {
       work_key: row.work_key,
       action: row.was_insert ? 'created' : 'updated',
       quality_improvement: 0, // Could track this if we stored previous quality
-      stored_at: new Date().toISOString()
+      stored_at: new Date().toISOString(),
     };
   } catch (error) {
     console.error('enrichWork database error:', error);
@@ -369,21 +416,23 @@ export async function enrichWork(sql, work) {
       provider: work.primary_provider,
       operation: 'upsert',
       success: false,
-      error_message: error.message,
-      response_time_ms: Date.now() - startTime
+      error_message: error instanceof Error ? error.message : String(error),
+      response_time_ms: Date.now() - startTime,
     }).catch(() => {});
 
-    throw new Error(`Database operation failed: ${error.message}`);
+    throw new Error(
+      `Database operation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
 /**
  * Enrich an author in the database
- * @param {import('postgres').Sql | import('postgres').TransactionSql} sql - postgres connection or transaction
- * @param {import('./types').EnrichAuthorRequest} author - Author data
- * @returns {Promise<{author_key: string, action: 'created'|'updated', stored_at: string}>}
  */
-export async function enrichAuthor(sql, author) {
+export async function enrichAuthor(
+  sql: Sql | TransactionSql,
+  author: EnrichAuthorRequest
+): Promise<EnrichmentData & { author_key: string }> {
   const startTime = Date.now();
   try {
     const result = await sql`
@@ -438,7 +487,7 @@ export async function enrichAuthor(sql, author) {
         (xmax = 0) AS was_insert
     `;
 
-    const row = result[0];
+    const row = result[0] as { author_key: string; was_insert: boolean };
 
     // Log the enrichment operation
     await logEnrichmentOperation(sql, {
@@ -447,14 +496,17 @@ export async function enrichAuthor(sql, author) {
       provider: author.primary_provider,
       operation: row.was_insert ? 'create' : 'update',
       success: true,
-      fields_updated: flattenFieldKeys(author, ['author_key', 'primary_provider']),
-      response_time_ms: Date.now() - startTime
+      fields_updated: flattenFieldKeys(author as unknown as Record<string, unknown>, [
+        'author_key',
+        'primary_provider',
+      ]),
+      response_time_ms: Date.now() - startTime,
     });
 
     return {
       author_key: row.author_key,
       action: row.was_insert ? 'created' : 'updated',
-      stored_at: new Date().toISOString()
+      stored_at: new Date().toISOString(),
     };
   } catch (error) {
     console.error('enrichAuthor database error:', error);
@@ -466,52 +518,23 @@ export async function enrichAuthor(sql, author) {
       provider: author.primary_provider,
       operation: 'upsert',
       success: false,
-      error_message: error.message,
-      response_time_ms: Date.now() - startTime
+      error_message: error instanceof Error ? error.message : String(error),
+      response_time_ms: Date.now() - startTime,
     }).catch(() => {});
 
-    throw new Error(`Database operation failed: ${error.message}`);
+    throw new Error(
+      `Database operation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
 /**
  * Queue an enrichment job
- * @param {import('postgres').Sql} sql - postgres connection
- * @param {Object} queueRequest - Queue request data
- * @param {string} queueRequest.entity_type - Type: work, edition, or author
- * @param {string} queueRequest.entity_key - ISBN, work_key, or author_key
- * @param {string[]} queueRequest.providers_to_try - List of providers to try
- * @param {number} [queueRequest.priority] - Priority (1-10, default 5)
- * @returns {Promise<{queue_id: string, position_in_queue: number, estimated_processing_time: string}>}
  */
-/**
- * Convert priority from string or integer to integer (1-10)
- * @param {string|number} priority - Priority value
- * @returns {number} - Integer priority 1-10
- */
-function normalizePriority(priority) {
-  if (!priority) return 5; // Default to medium
-
-  // If already a number, validate range
-  if (typeof priority === 'number') {
-    return Math.max(1, Math.min(10, priority));
-  }
-
-  // Convert string to integer
-  const priorityMap = {
-    'urgent': 1,
-    'high': 3,
-    'medium': 5,
-    'normal': 5,
-    'low': 7,
-    'background': 9
-  };
-
-  const normalized = priorityMap[priority.toLowerCase()];
-  return normalized || 5; // Default to medium if unknown string
-}
-
-export async function queueEnrichment(sql, queueRequest) {
+export async function queueEnrichment(
+  sql: Sql,
+  queueRequest: QueueEnrichmentRequest
+): Promise<QueueEnrichmentResponse> {
   try {
     const priority = normalizePriority(queueRequest.priority);
 
@@ -544,27 +567,30 @@ export async function queueEnrichment(sql, queueRequest) {
         AND (priority > ${priority} OR (priority = ${priority} AND created_at < NOW()))
     `;
 
-    const position = parseInt(positionResult[0].position, 10) + 1;
-    const estimatedTime = position <= 10 ? '1-5 minutes' : position <= 50 ? '5-15 minutes' : '15-30 minutes';
+    const position = parseInt(String(positionResult[0].position), 10) + 1;
+    const estimatedTime =
+      position <= 10 ? '1-5 minutes' : position <= 50 ? '5-15 minutes' : '15-30 minutes';
 
     return {
-      queue_id: result[0].id,
+      queue_id: (result[0] as { id: string }).id,
       position_in_queue: position,
-      estimated_processing_time: estimatedTime
+      estimated_processing_time: estimatedTime,
     };
   } catch (error) {
     console.error('queueEnrichment database error:', error);
-    throw new Error(`Failed to queue enrichment: ${error.message}`);
+    throw new Error(
+      `Failed to queue enrichment: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
 /**
  * Get enrichment job status
- * @param {import('postgres').Sql} sql - postgres connection
- * @param {string} jobId - Queue job ID
- * @returns {Promise<Object>} Job status
  */
-export async function getEnrichmentStatus(sql, jobId) {
+export async function getEnrichmentStatus(
+  sql: Sql,
+  jobId: string
+): Promise<EnrichmentJobStatus> {
   try {
     const result = await sql`
       SELECT
@@ -586,28 +612,22 @@ export async function getEnrichmentStatus(sql, jobId) {
       throw new Error('Job not found');
     }
 
-    return result[0];
+    return result[0] as EnrichmentJobStatus;
   } catch (error) {
     console.error('getEnrichmentStatus database error:', error);
-    throw new Error(`Failed to get job status: ${error.message}`);
+    throw new Error(
+      `Failed to get job status: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
 /**
  * Log an enrichment operation to the audit log
- * @param {import('postgres').Sql} sql - postgres connection
- * @param {Object} logEntry - Log entry data
- * @param {string} logEntry.entity_type - Type: work, edition, or author
- * @param {string} logEntry.entity_key - ISBN, work_key, or author_key
- * @param {string} logEntry.provider - Provider that performed the enrichment
- * @param {string} logEntry.operation - Operation type: create, update, delete
- * @param {boolean} logEntry.success - Whether the operation succeeded
- * @param {string[]} [logEntry.fields_updated] - List of fields that were updated
- * @param {string} [logEntry.error_message] - Error message if failed
- * @param {number} [logEntry.response_time_ms] - Response time in milliseconds
- * @returns {Promise<void>}
  */
-async function logEnrichmentOperation(sql, logEntry) {
+async function logEnrichmentOperation(
+  sql: Sql | TransactionSql,
+  logEntry: EnrichmentLogEntry
+): Promise<void> {
   try {
     await sql`
       INSERT INTO enrichment_log (
@@ -634,33 +654,6 @@ async function logEnrichmentOperation(sql, logEntry) {
     `;
   } catch (error) {
     // Log but don't throw - logging shouldn't break enrichment
-    console.error('Failed to write enrichment_log:', error.message);
+    console.error('Failed to write enrichment_log:', error instanceof Error ? error.message : String(error));
   }
-}
-
-/**
- * Flatten object keys for logging, expanding nested objects like cover_urls
- * @param {Object} obj - Object to extract keys from
- * @param {string[]} excludeKeys - Keys to exclude from the result
- * @returns {string[]} Flattened list of field names that have values
- */
-function flattenFieldKeys(obj, excludeKeys = []) {
-  const fields = [];
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (excludeKeys.includes(key) || value == null) continue;
-
-    if (typeof value === 'object' && !Array.isArray(value)) {
-      // Flatten nested objects (e.g., cover_urls.large, cover_urls.medium)
-      for (const [subKey, subValue] of Object.entries(value)) {
-        if (subValue != null) {
-          fields.push(`${key}.${subKey}`);
-        }
-      }
-    } else {
-      fields.push(key);
-    }
-  }
-
-  return fields;
 }

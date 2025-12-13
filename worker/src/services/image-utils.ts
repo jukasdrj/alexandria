@@ -1,25 +1,20 @@
-/**
- * Image Processing Utilities for Alexandria Cover Processing
- *
- * Handles:
- * - Download and validation of cover images
- * - WebP compression via Cloudflare Image Resizing
- * - URL hashing for R2 key generation
- * - Security (domain whitelist)
- *
- * R2 Bucket: bookstrack-covers-processed
- */
+// =================================================================================
+// Image Processing Utilities for Alexandria Cover Processing
+// =================================================================================
 
-const PLACEHOLDER_COVER = "https://placehold.co/300x450/e0e0e0/666666?text=No+Cover";
+import type { ImageSizes, DownloadImageResult } from './types.js';
 
-const ALLOWED_DOMAINS = new Set([
+export const PLACEHOLDER_COVER =
+  'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover';
+
+export const ALLOWED_DOMAINS = new Set([
   'books.google.com',
   'covers.openlibrary.org',
   'images-na.ssl-images-amazon.com',
   'images.isbndb.com',
 ]);
 
-const SIZES = {
+export const SIZES: ImageSizes = {
   large: { width: 512, height: 768 },
   medium: { width: 256, height: 384 },
   small: { width: 128, height: 192 },
@@ -28,11 +23,11 @@ const SIZES = {
 /**
  * Download image from provider URL with validation
  *
- * @param {string} url - Provider cover URL
- * @returns {Promise<{buffer: ArrayBuffer, contentType: string}>}
- * @throws {Error} If download fails or validation fails
+ * @param url - Provider cover URL
+ * @returns Promise with buffer and contentType
+ * @throws Error if download fails or validation fails
  */
-export async function downloadImage(url) {
+export async function downloadImage(url: string): Promise<DownloadImageResult> {
   // Security: Validate domain whitelist
   try {
     const parsedUrl = new URL(url);
@@ -40,10 +35,10 @@ export async function downloadImage(url) {
       throw new Error(`Domain not allowed: ${parsedUrl.hostname}`);
     }
   } catch (error) {
-    if (error.message.includes('Domain not allowed')) {
+    if (error instanceof Error && error.message.includes('Domain not allowed')) {
       throw error;
     }
-    throw new Error(`Invalid URL: ${error.message}`);
+    throw new Error(`Invalid URL: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // Download with timeout
@@ -79,7 +74,7 @@ export async function downloadImage(url) {
     return { buffer, contentType };
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
+    if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('Download timeout (>10s)');
     }
     throw error;
@@ -89,10 +84,10 @@ export async function downloadImage(url) {
 /**
  * Generate SHA-256 hash for cache key generation
  *
- * @param {string} url - URL to hash
- * @returns {Promise<string>} Hex-encoded SHA-256 hash
+ * @param url - URL to hash
+ * @returns Hex-encoded SHA-256 hash
  */
-export async function hashURL(url) {
+export async function hashURL(url: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(url);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -103,10 +98,10 @@ export async function hashURL(url) {
 /**
  * Normalize image URL for consistent caching
  *
- * @param {string} url - Original URL
- * @returns {string} Normalized URL (HTTPS, no query params)
+ * @param url - Original URL
+ * @returns Normalized URL (HTTPS, no query params)
  */
-export function normalizeImageURL(url) {
+export function normalizeImageURL(url: string): string {
   try {
     const parsed = new URL(url.trim());
     parsed.search = ''; // Remove query params
@@ -116,5 +111,3 @@ export function normalizeImageURL(url) {
     return url.trim();
   }
 }
-
-export { PLACEHOLDER_COVER, SIZES, ALLOWED_DOMAINS };

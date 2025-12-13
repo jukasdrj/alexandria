@@ -1,48 +1,66 @@
-/**
- * Queue Handlers for Alexandria Worker
- *
- * Handles async queue processing for:
- * 1. Cover image downloads (alexandria-cover-queue)
- * 2. Metadata enrichment (alexandria-enrichment-queue) - BATCHED for 100x efficiency
- *
- * @module queue-handlers
- */
+// =================================================================================
+// Queue Handlers for Alexandria Worker
+//
+// Handles async queue processing for:
+// 1. Cover image downloads (alexandria-cover-queue)
+// 2. Metadata enrichment (alexandria-enrichment-queue) - BATCHED for 100x efficiency
+// =================================================================================
 
 import postgres from 'postgres';
-import { processAndStoreCover, coversExist } from './services/jsquash-processor.js';
-import { fetchBestCover } from './services/cover-fetcher.js';
-import { smartResolveISBN } from './services/smart-enrich.js';
-import { fetchISBNdbBatch } from './services/batch-isbndb.js';
-import { enrichEdition, enrichWork, enrichAuthor } from './enrichment-service.js';
-import { normalizeISBN } from './lib/isbn-utils.js';
-import { Logger } from './lib/logger.js';
+import type { Env } from '../env.js';
+import { processAndStoreCover, coversExist } from '../../services/jsquash-processor.js';
+import { fetchBestCover } from '../../services/cover-fetcher.js';
+import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
+import { enrichEdition, enrichWork } from './enrichment-service.js';
+import { normalizeISBN } from '../../lib/isbn-utils.js';
+import { Logger } from '../../lib/logger.js';
+import type {
+  CoverQueueMessage,
+  EnrichmentQueueMessage,
+  CoverQueueResults,
+  EnrichmentQueueResults,
+  CoverProcessingResult,
+} from './types.js';
+
+// Cloudflare Queue types
+interface QueueMessage<T = unknown> {
+  id: string;
+  timestamp: Date;
+  body: T;
+  ack(): void;
+  retry(): void;
+}
+
+interface MessageBatch<T = unknown> {
+  queue: string;
+  messages: QueueMessage<T>[];
+}
 
 /**
  * Process cover messages from queue
  *
  * Handles async cover downloads from bendv3 enrichment requests.
  * Processes covers in batches with retry logic and analytics tracking.
- *
- * @param {MessageBatch} batch - Queue messages from Cloudflare Queues
- * @param {Env} env - Worker environment bindings
- * @returns {Promise<object>} Processing results summary
  */
-export async function processCoverQueue(batch, env) {
+export async function processCoverQueue(
+  batch: MessageBatch<CoverQueueMessage>,
+  env: Env
+): Promise<CoverQueueResults> {
   const logger = Logger.forQueue(env, 'alexandria-cover-queue', batch.messages.length);
 
   logger.info('Cover queue processing started (jSquash WebP)', {
     queueName: batch.queue,
-    messageCount: batch.messages.length
+    messageCount: batch.messages.length,
   });
 
   // Create postgres connection for updating cover URLs after processing
   const sql = postgres(env.HYPERDRIVE.connectionString, {
     max: 1,
     fetch_types: false,
-    prepare: false
+    prepare: false,
   });
 
-  const results = {
+  const results: CoverQueueResults = {
     processed: 0,
     cached: 0,
     failed: 0,
@@ -50,16 +68,20 @@ export async function processCoverQueue(batch, env) {
     errors: [],
     compressionStats: {
       totalOriginalBytes: 0,
-      totalWebpBytes: 0
-    }
+      totalWebpBytes: 0,
+    },
   };
 
   for (const message of batch.messages) {
     try {
-      const { isbn, work_key, provider_url, priority } = message.body;
+      const { isbn, provider_url, priority } = message.body;
       const normalizedISBN = isbn?.replace(/[-\s]/g, '') || '';
 
-      logger.debug('Processing cover', { isbn: normalizedISBN, priority: priority || 'normal', has_provider_url: !!provider_url });
+      logger.debug('Processing cover', {
+        isbn: normalizedISBN,
+        priority: priority || 'normal',
+        has_provider_url: !!provider_url,
+      });
 
       // Skip if already processed - we always check now to avoid duplicate processing
       const exists = await coversExist(env, normalizedISBN);
@@ -81,7 +103,10 @@ export async function processCoverQueue(batch, env) {
         if (coverResult.source === 'placeholder') {
           logger.warn('No cover found from any provider', { isbn: normalizedISBN });
           results.failed++;
-          results.errors.push({ isbn: normalizedISBN, error: 'No cover found from any provider' });
+          results.errors.push({
+            isbn: normalizedISBN,
+            error: 'No cover found from any provider',
+          });
           message.ack(); // Don't retry - no cover exists
           continue;
         }
@@ -89,8 +114,12 @@ export async function processCoverQueue(batch, env) {
         coverUrl = coverResult.url;
       }
 
-      // Process with jSquash: download → decode → resize → WebP → R2
-      const result = await processAndStoreCover(normalizedISBN, coverUrl, env);
+      // Process with jSquash: download -> decode -> resize -> WebP -> R2
+      const result = (await processAndStoreCover(
+        normalizedISBN,
+        coverUrl,
+        env
+      )) as CoverProcessingResult;
 
       if (result.status === 'processed') {
         results.processed++;
@@ -106,8 +135,8 @@ export async function processCoverQueue(batch, env) {
               doubles: [
                 result.metrics.totalMs || 0,
                 result.metrics.originalSize || 0,
-                result.compression?.totalWebpSize || 0
-              ]
+                result.compression?.totalWebpSize || 0,
+              ],
             });
           } catch (analyticsError) {
             console.error('[CoverQueue] Analytics write failed:', analyticsError);
@@ -119,7 +148,7 @@ export async function processCoverQueue(batch, env) {
           originalSize: result.metrics.originalSize,
           webpSize: result.compression?.totalWebpSize,
           compression: result.compression?.ratio,
-          processingMs: result.metrics.totalMs
+          processingMs: result.metrics.totalMs,
         });
 
         // Update enriched_editions with Alexandria R2 URLs (closes the loop!)
@@ -141,29 +170,33 @@ export async function processCoverQueue(batch, env) {
           // Don't fail the cover processing if DB update fails
           logger.warn('Failed to update enriched_editions with R2 URLs', {
             isbn: normalizedISBN,
-            error: dbError instanceof Error ? dbError.message : String(dbError)
+            error: dbError instanceof Error ? dbError.message : String(dbError),
           });
         }
-
       } else {
         results.failed++;
-        results.errors.push({ isbn: normalizedISBN, error: result.error || 'Processing failed' });
-        logger.error('Cover processing failed', { isbn: normalizedISBN, error: result.error });
+        results.errors.push({
+          isbn: normalizedISBN,
+          error: result.error || 'Processing failed',
+        });
+        logger.error('Cover processing failed', {
+          isbn: normalizedISBN,
+          error: result.error,
+        });
       }
 
       // Ack message on success or non-retryable failure
       message.ack();
-
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error('Cover processing exception', {
         isbn: message.body?.isbn || 'unknown',
-        error: errorMsg
+        error: errorMsg,
       });
       results.failed++;
       results.errors.push({
         isbn: message.body?.isbn || 'unknown',
-        error: errorMsg
+        error: errorMsg,
       });
 
       // Retry on exception (up to max_retries from wrangler.jsonc)
@@ -172,9 +205,15 @@ export async function processCoverQueue(batch, env) {
   }
 
   // Log batch summary
-  const compressionRatio = results.compressionStats.totalOriginalBytes > 0
-    ? ((1 - results.compressionStats.totalWebpBytes / results.compressionStats.totalOriginalBytes) * 100).toFixed(1)
-    : 0;
+  const compressionRatio =
+    results.compressionStats.totalOriginalBytes > 0
+      ? (
+          (1 -
+            results.compressionStats.totalWebpBytes /
+              results.compressionStats.totalOriginalBytes) *
+          100
+        ).toFixed(1)
+      : 0;
 
   logger.info('Cover queue processing complete', {
     processed: results.processed,
@@ -184,7 +223,7 @@ export async function processCoverQueue(batch, env) {
     errorCount: results.errors.length,
     totalOriginalBytes: results.compressionStats.totalOriginalBytes,
     totalWebpBytes: results.compressionStats.totalWebpBytes,
-    overallCompression: `${compressionRatio}%`
+    overallCompression: `${compressionRatio}%`,
   });
 
   // Close database connection
@@ -200,40 +239,39 @@ export async function processCoverQueue(batch, env) {
  * Uses ISBNdb batch endpoint to fetch up to 100 ISBNs in a SINGLE API call.
  *
  * This reduces API waste from 7.1x to near 1.0x efficiency (90%+ reduction).
- *
- * @param {MessageBatch} batch - Queue messages from Cloudflare Queues
- * @param {Env} env - Worker environment bindings
- * @returns {Promise<object>} Processing results summary
  */
-export async function processEnrichmentQueue(batch, env) {
+export async function processEnrichmentQueue(
+  batch: MessageBatch<EnrichmentQueueMessage>,
+  env: Env
+): Promise<EnrichmentQueueResults> {
   const logger = Logger.forQueue(env, 'alexandria-enrichment-queue', batch.messages.length);
 
   logger.info('Enrichment queue processing started (BATCHED)', {
-    messageCount: batch.messages.length
+    messageCount: batch.messages.length,
   });
 
   // Create postgres connection for this batch
   const sql = postgres(env.HYPERDRIVE.connectionString, {
     max: 1,
     fetch_types: false,
-    prepare: false
+    prepare: false,
   });
 
-  const results = {
+  const results: EnrichmentQueueResults = {
     enriched: 0,
     cached: 0,
     failed: 0,
     errors: [],
-    api_calls_saved: 0
+    api_calls_saved: 0,
   };
 
   try {
     // 1. Collect all ISBNs from batch messages
-    const isbnMessages = new Map();
-    const isbnsToFetch = [];
+    const isbnMessages = new Map<string, QueueMessage<EnrichmentQueueMessage>>();
+    const isbnsToFetch: string[] = [];
 
     for (const message of batch.messages) {
-      const { isbn, priority, source } = message.body;
+      const { isbn } = message.body;
       const normalizedISBN = normalizeISBN(isbn);
 
       if (!normalizedISBN) {
@@ -273,7 +311,7 @@ export async function processEnrichmentQueue(batch, env) {
     logger.info('Batch fetch complete', {
       found: enrichmentData.size,
       requested: isbnsToFetch.length,
-      durationMs: batchDuration
+      durationMs: batchDuration,
     });
     results.api_calls_saved = isbnsToFetch.length - 1; // Saved N-1 API calls
 
@@ -281,7 +319,7 @@ export async function processEnrichmentQueue(batch, env) {
     logger.perf('isbndb_batch_fetch', batchDuration, {
       isbn_count: isbnsToFetch.length,
       found_count: enrichmentData.size,
-      api_calls_saved: results.api_calls_saved
+      api_calls_saved: results.api_calls_saved,
     });
 
     // 3. Process each ISBN result
@@ -303,37 +341,41 @@ export async function processEnrichmentQueue(batch, env) {
         });
 
         // Then enrich the edition (stores metadata + cover URLs)
-        await enrichEdition(sql, {
-          isbn,
-          title: externalData.title,
-          subtitle: externalData.subtitle,
-          publisher: externalData.publisher,
-          publication_date: externalData.publicationDate,
-          page_count: externalData.pageCount,
-          format: externalData.binding,
-          language: externalData.language,
-          primary_provider: 'isbndb',
-          cover_urls: externalData.coverUrls,
-          cover_source: 'isbndb',
-          work_key: workKey,
-          subjects: externalData.subjects,
-          dewey_decimal: externalData.deweyDecimal,
-          binding: externalData.binding,
-          related_isbns: externalData.relatedISBNs,
-        }, env);
+        await enrichEdition(
+          sql,
+          {
+            isbn,
+            title: externalData.title,
+            subtitle: externalData.subtitle,
+            publisher: externalData.publisher,
+            publication_date: externalData.publicationDate,
+            page_count: externalData.pageCount,
+            format: externalData.binding,
+            language: externalData.language,
+            primary_provider: 'isbndb',
+            cover_urls: externalData.coverUrls,
+            cover_source: 'isbndb',
+            work_key: workKey,
+            subjects: externalData.subjects,
+            dewey_decimal: externalData.deweyDecimal,
+            binding: externalData.binding,
+            related_isbns: externalData.relatedISBNs,
+          },
+          env
+        );
 
         logger.debug('Enriched ISBN from batch', { isbn });
 
         results.enriched++;
         message.ack();
-
       } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
         logger.error('Storage error during enrichment', {
           isbn,
-          error: error.message
+          error: errorMsg,
         });
         results.failed++;
-        results.errors.push({ isbn, error: error.message });
+        results.errors.push({ isbn, error: errorMsg });
         message.retry();
       }
     }
@@ -342,11 +384,12 @@ export async function processEnrichmentQueue(batch, env) {
     for (const isbn of isbnsToFetch) {
       if (!enrichmentData.has(isbn)) {
         const message = isbnMessages.get(isbn);
+        if (!message) continue;
 
         // Cache "not found" to prevent future API calls
         const cacheKey = `isbn_not_found:${isbn}`;
         await env.CACHE.put(cacheKey, 'true', {
-          expirationTtl: 86400 // 24 hours
+          expirationTtl: 86400, // 24 hours
         });
 
         logger.warn('ISBN not found in ISBNdb, cached failure', { isbn });
@@ -361,9 +404,8 @@ export async function processEnrichmentQueue(batch, env) {
       cached: results.cached,
       failed: results.failed,
       api_calls_saved: results.api_calls_saved,
-      errorCount: results.errors.length
+      errorCount: results.errors.length,
     });
-
   } finally {
     // Always close the connection
     await sql.end();

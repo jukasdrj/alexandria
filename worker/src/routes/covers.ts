@@ -16,7 +16,7 @@ import {
   QueueCoverResultSchema,
   ErrorResponseSchema,
 } from '../schemas/covers.js';
-import { handleProcessCover, handleServeCover } from '../../cover-handlers.js';
+import { handleProcessCover, handleServeCover } from '../services/cover-handlers.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
 
 // Create covers router

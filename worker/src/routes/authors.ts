@@ -14,7 +14,7 @@ import {
   EnrichStatusResponseSchema,
   AuthorErrorSchema,
 } from '../schemas/authors.js';
-import { enrichWork, enrichEdition } from '../../enrichment-service.js';
+import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
 import { fetchWikidataMultipleBatches } from '../../services/wikidata-client.js';
 
 // =================================================================================

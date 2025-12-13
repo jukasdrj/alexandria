@@ -6,7 +6,7 @@
 // =================================================================================
 
 import postgres from 'postgres';
-import { enrichEdition, enrichWork, enrichAuthor } from './enrichment-service.js';
+import { enrichEdition, enrichWork, enrichAuthor } from './src/services/enrichment-service.js';
 import { fetchWithRetry, fetchJSON } from './lib/fetch-utils.js';
 
 // Configuration

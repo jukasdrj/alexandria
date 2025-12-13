@@ -18,8 +18,8 @@ import coversLegacyRoutes from './routes/covers-legacy.js';
 import authorsRoutes from './routes/authors.js';
 import testRoutes from './routes/test.js';
 
-// Queue handlers (imported from parent for now - will migrate later)
-import { processCoverQueue, processEnrichmentQueue } from '../queue-handlers.js';
+// Queue handlers (migrated to TypeScript)
+import { processCoverQueue, processEnrichmentQueue } from './services/queue-handlers.js';
 
 // =================================================================================
 // Application Setup
@@ -182,12 +182,15 @@ export default {
   fetch: app.fetch,
 
   // Queue consumer handler
-  async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext) {
     switch (batch.queue) {
       case 'alexandria-cover-queue':
-        return await processCoverQueue(batch, env);
+        // Cast to expected type for cover queue handler
+        return await processCoverQueue(batch as any, env);
       case 'alexandria-enrichment-queue':
-        return await processEnrichmentQueue(batch, env);
+        // Cast to expected type for enrichment queue handler
+        return await processEnrichmentQueue(batch as any, env);
       default:
         console.error(`Unknown queue: ${batch.queue}`);
         batch.messages.forEach((msg: Message) => msg.ack());

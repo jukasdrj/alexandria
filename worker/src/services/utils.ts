@@ -2,20 +2,26 @@
 // Utility Functions for Enrichment
 // =================================================================================
 
+import type {
+  EnrichEditionRequest,
+  EnrichWorkRequest,
+  EnrichAuthorRequest,
+  ValidationResult,
+  ISBNValidationResult,
+} from './types.js';
+
 /**
  * Calculate quality score for an edition enrichment
- * @param {import('./types').EnrichEditionRequest} edition
- * @returns {number} Quality score (0-100)
  */
-export function calculateEditionQuality(edition) {
+export function calculateEditionQuality(edition: EnrichEditionRequest): number {
   let score = 0;
 
   // Provider weights (40 points max)
-  const providerScores = {
+  const providerScores: Record<string, number> = {
     'isbndb': 40,
     'google-books': 30,
     'openlibrary': 20,
-    'user-correction': 50,  // User corrections are highest quality
+    'user-correction': 50, // User corrections are highest quality
   };
   score += providerScores[edition.primary_provider] || 0;
 
@@ -40,14 +46,12 @@ export function calculateEditionQuality(edition) {
 
 /**
  * Calculate quality score for a work enrichment
- * @param {import('./types').EnrichWorkRequest} work
- * @returns {number} Quality score (0-100)
  */
-export function calculateWorkQuality(work) {
+export function calculateWorkQuality(work: EnrichWorkRequest): number {
   let score = 0;
 
   // Provider weights (40 points max)
-  const providerScores = {
+  const providerScores: Record<string, number> = {
     'isbndb': 40,
     'google-books': 30,
     'openlibrary': 20,
@@ -69,16 +73,16 @@ export function calculateWorkQuality(work) {
 
 /**
  * Calculate completeness score (percentage of filled fields)
- * @param {Object} data - Data object to evaluate
- * @param {string[]} fields - List of field names to check
- * @returns {number} Completeness percentage (0-100)
  */
-export function calculateCompleteness(data, fields) {
-  const filledFields = fields.filter(field => {
+export function calculateCompleteness(
+  data: Record<string, unknown>,
+  fields: string[]
+): number {
+  const filledFields = fields.filter((field) => {
     const value = data[field];
     if (Array.isArray(value)) return value.length > 0;
     if (typeof value === 'object' && value !== null) {
-      return Object.values(value).some(v => v != null && v !== '');
+      return Object.values(value).some((v) => v != null && v !== '');
     }
     return value != null && value !== '';
   });
@@ -88,10 +92,8 @@ export function calculateCompleteness(data, fields) {
 
 /**
  * Validate ISBN format
- * @param {string} isbn - ISBN to validate
- * @returns {{valid: boolean, normalized: string, error?: string}}
  */
-export function validateISBN(isbn) {
+export function validateISBN(isbn: string | undefined): ISBNValidationResult {
   if (!isbn) {
     return { valid: false, normalized: '', error: 'ISBN is required' };
   }
@@ -103,7 +105,7 @@ export function validateISBN(isbn) {
     return {
       valid: false,
       normalized,
-      error: `Invalid ISBN length: ${normalized.length}. Must be 10 or 13 digits.`
+      error: `Invalid ISBN length: ${normalized.length}. Must be 10 or 13 digits.`,
     };
   }
 
@@ -112,30 +114,30 @@ export function validateISBN(isbn) {
 
 /**
  * Validate enrichment request
- * @param {Object} body - Request body
- * @param {'edition'|'work'|'author'} type - Entity type
- * @returns {{valid: boolean, errors: string[]}}
  */
-export function validateEnrichmentRequest(body, type) {
-  const errors = [];
+export function validateEnrichmentRequest(
+  body: Record<string, unknown> | undefined,
+  type: 'edition' | 'work' | 'author'
+): ValidationResult {
+  const errors: string[] = [];
 
   if (!body) {
     return { valid: false, errors: ['Request body is required'] };
   }
 
   // Maximum field lengths to prevent database errors
-  const maxLengths = {
+  const maxLengths: Record<string, number> = {
     title: 500,
     subtitle: 500,
     description: 5000,
     bio: 5000,
     publisher: 200,
     format: 50,
-    language: 20
+    language: 20,
   };
 
   // Validate string field lengths
-  const validateLength = (field, value, max) => {
+  const validateLength = (field: string, value: unknown, max: number): void => {
     if (value && typeof value === 'string' && value.length > max) {
       errors.push(`${field} exceeds maximum length of ${max} characters`);
     }
@@ -146,13 +148,16 @@ export function validateEnrichmentRequest(body, type) {
     if (!body.primary_provider) errors.push('primary_provider is required');
 
     if (body.isbn) {
-      const isbnValidation = validateISBN(body.isbn);
+      const isbnValidation = validateISBN(body.isbn as string);
       if (!isbnValidation.valid) {
-        errors.push(isbnValidation.error);
+        errors.push(isbnValidation.error!);
       }
     }
 
-    if (body.confidence && (body.confidence < 0 || body.confidence > 100)) {
+    if (
+      body.confidence &&
+      ((body.confidence as number) < 0 || (body.confidence as number) > 100)
+    ) {
       errors.push('confidence must be between 0 and 100');
     }
 
@@ -196,25 +201,74 @@ export function validateEnrichmentRequest(body, type) {
  * The postgres.js library doesn't automatically handle arrays when used with
  * Hyperdrive in Cloudflare Workers. We need to format arrays as PostgreSQL
  * array literals manually.
- *
- * @param {string[]|null|undefined} arr - Array to format
- * @returns {string|null} PostgreSQL array literal or null
  */
-export function formatPgArray(arr) {
+export function formatPgArray(arr: unknown[] | null | undefined): string | null {
   if (!arr || !Array.isArray(arr) || arr.length === 0) {
     return null;
   }
   // Filter out null/undefined values
-  const cleanArr = arr.filter(item => item != null && item !== '');
+  const cleanArr = arr.filter((item) => item != null && item !== '');
   if (cleanArr.length === 0) return null;
 
   // Format as PostgreSQL array literal: {"value1","value2"}
   // Escape any double quotes or backslashes in values
-  const escaped = cleanArr.map(item => {
+  const escaped = cleanArr.map((item) => {
     const str = String(item);
     // Escape backslashes first, then double quotes
     return '"' + str.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
   });
 
   return '{' + escaped.join(',') + '}';
+}
+
+/**
+ * Flatten object keys for logging, expanding nested objects like cover_urls
+ */
+export function flattenFieldKeys(
+  obj: Record<string, unknown>,
+  excludeKeys: string[] = []
+): string[] {
+  const fields: string[] = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (excludeKeys.includes(key) || value == null) continue;
+
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      // Flatten nested objects (e.g., cover_urls.large, cover_urls.medium)
+      for (const [subKey, subValue] of Object.entries(value as Record<string, unknown>)) {
+        if (subValue != null) {
+          fields.push(`${key}.${subKey}`);
+        }
+      }
+    } else {
+      fields.push(key);
+    }
+  }
+
+  return fields;
+}
+
+/**
+ * Convert priority from string or integer to integer (1-10)
+ */
+export function normalizePriority(priority: string | number | undefined): number {
+  if (!priority) return 5; // Default to medium
+
+  // If already a number, validate range
+  if (typeof priority === 'number') {
+    return Math.max(1, Math.min(10, priority));
+  }
+
+  // Convert string to integer
+  const priorityMap: Record<string, number> = {
+    urgent: 1,
+    high: 3,
+    medium: 5,
+    normal: 5,
+    low: 7,
+    background: 9,
+  };
+
+  const normalized = priorityMap[priority.toLowerCase()];
+  return normalized || 5; // Default to medium if unknown string
 }
