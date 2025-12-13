@@ -305,16 +305,8 @@ const queueBatchRoute = createRoute({
 // @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 enrichRoutes.openapi(queueBatchRoute, async (c) => {
   try {
-    const body = await c.req.json();
+    const body = c.req.valid('json');
     const { books } = body;
-
-    if (!Array.isArray(books) || books.length === 0) {
-      return c.json({ success: false, error: 'books array required' }, 400);
-    }
-
-    if (books.length > 100) {
-      return c.json({ success: false, error: 'Max 100 books per request' }, 400);
-    }
 
     const logger = c.get('logger');
     const queued: string[] = [];
@@ -472,17 +464,8 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
   const logger = c.get('logger');
 
   try {
-    const body = await c.req.json();
+    const body = c.req.valid('json');
     const { isbns, source = 'batch-direct' } = body;
-
-    // Validate input
-    if (!Array.isArray(isbns) || isbns.length === 0) {
-      return c.json({ success: false, error: 'isbns array required' }, 400);
-    }
-
-    if (isbns.length > 1000) {
-      return c.json({ success: false, error: 'Max 1000 ISBNs per request (ISBNdb Premium limit)' }, 400);
-    }
 
     // Normalize and validate ISBNs using utility
     const { valid: normalizedISBNs, invalid: invalidISBNs } = validateISBNBatch(isbns);

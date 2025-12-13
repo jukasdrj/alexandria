@@ -1,9 +1,16 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from 'zod';
 import type { AppBindings } from '../env.js';
+import {
+  createSuccessSchema,
+  ErrorResponseSchema,
+  createSuccessResponse,
+  createErrorResponse,
+  ErrorCode,
+} from '../schemas/response.js';
 
 // =================================================================================
-// Response Schemas (defined inline for proper type inference)
+// Stats Data Schemas
 // =================================================================================
 
 const EnrichedTableStatsSchema = z.object({
@@ -12,7 +19,7 @@ const EnrichedTableStatsSchema = z.object({
   last_24h: z.number().int().nonnegative(),
 }).openapi('EnrichedTableStats');
 
-const StatsSuccessSchema = z.object({
+const StatsDataSchema = z.object({
   // OpenLibrary core tables
   editions: z.number().int().nonnegative(),
   isbns: z.number().int().nonnegative(),
@@ -25,13 +32,10 @@ const StatsSuccessSchema = z.object({
     works: EnrichedTableStatsSchema,
     authors: EnrichedTableStatsSchema,
   }),
-  query_duration_ms: z.number().nonnegative(),
-}).openapi('StatsResponse');
+}).openapi('StatsData');
 
-const StatsErrorSchema = z.object({
-  error: z.string(),
-  message: z.string(),
-}).openapi('StatsError');
+// Success response with envelope
+const StatsSuccessSchema = createSuccessSchema(StatsDataSchema, 'StatsSuccess');
 
 // =================================================================================
 // Stats Route Definition
@@ -61,7 +65,7 @@ const statsRoute = createRoute({
       description: 'Database query failed',
       content: {
         'application/json': {
-          schema: StatsErrorSchema,
+          schema: ErrorResponseSchema,
         },
       },
     },
@@ -77,7 +81,6 @@ const app = new OpenAPIHono<AppBindings>();
 app.openapi(statsRoute, async (c) => {
   try {
     const sql = c.get('sql');
-    const start = Date.now();
 
     // OpenLibrary core tables + enriched tables in parallel
     const [editions, isbns, works, authors, enrichedStats] = await Promise.all([
@@ -86,7 +89,6 @@ app.openapi(statsRoute, async (c) => {
       sql`SELECT count(*) FROM works`.then(r => r[0].count),
       sql`SELECT count(*) FROM authors`.then(r => r[0].count),
       // Enriched tables with recent activity counts
-      // Note: enriched_editions uses updated_at (upsert behavior), others use created_at
       sql`
         SELECT
           (SELECT COUNT(*) FROM enriched_editions) as enriched_editions,
@@ -100,7 +102,6 @@ app.openapi(statsRoute, async (c) => {
           (SELECT COUNT(*) FROM enriched_authors WHERE created_at > NOW() - INTERVAL '24 hours') as enriched_authors_24h
       `.then(r => r[0]),
     ]);
-    const queryDuration = Date.now() - start;
 
     // Count covers in R2 bucket
     let coverCount = 0;
@@ -117,7 +118,7 @@ app.openapi(statsRoute, async (c) => {
       logger.error('Error counting R2 covers', { error: e instanceof Error ? e.message : 'Unknown' });
     }
 
-    const stats = {
+    const statsData = {
       // OpenLibrary core tables
       editions: parseInt(editions, 10),
       isbns: parseInt(isbns, 10),
@@ -142,19 +143,21 @@ app.openapi(statsRoute, async (c) => {
           last_24h: parseInt(enrichedStats.enriched_authors_24h, 10),
         },
       },
-      query_duration_ms: queryDuration,
     };
 
-    return c.json(stats, 200, {
-      'cache-control': 'public, max-age=300'
+    return createSuccessResponse(c, statsData, 200, {
+      'cache-control': 'public, max-age=300',
     });
   } catch (e) {
     const logger = c.get('logger');
     logger.error('Stats query error', { error: e instanceof Error ? e.message : 'Unknown' });
-    return c.json({
-      error: 'Database query failed',
-      message: e instanceof Error ? e.message : 'Unknown error'
-    }, 500);
+
+    return createErrorResponse(
+      c,
+      ErrorCode.DATABASE_ERROR,
+      'Failed to retrieve database statistics',
+      { details: e instanceof Error ? e.message : 'Unknown error' }
+    );
   }
 });
 

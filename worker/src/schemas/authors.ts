@@ -147,7 +147,11 @@ export const AuthorErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
   author_key: z.string().optional(),
-  partial_results: z.object({}).passthrough().optional(),
+  partial_results: z.object({
+    author_name: z.string().optional(),
+    books_found: z.number().optional(),
+    pages_fetched: z.number().optional(),
+  }).optional(),
 }).openapi('AuthorError');
 
 // =================================================================================

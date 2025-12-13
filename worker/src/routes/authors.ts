@@ -350,7 +350,7 @@ app.openapi(topAuthorsRoute, async (c) => {
       query_duration_ms: Date.now() - startTime
     });
   } catch (error) {
-    c.get('logger')?.error('Top authors query error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('Top authors query error', { error: error instanceof Error ? error.message : String(error) });
     const message = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: 'Failed to query top authors', message }, 500);
   }
@@ -434,7 +434,7 @@ app.openapi(authorDetailsRoute, async (c) => {
       query_duration_ms: Date.now() - startTime
     });
   } catch (error) {
-    c.get('logger')?.error('Author details error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('Author details error', { error: error instanceof Error ? error.message : String(error) });
     const message = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: 'Failed to fetch author details', message }, 500);
   }
@@ -484,7 +484,7 @@ app.openapi(bibliographyRoute, async (c) => {
       const data = await response.json() as ISBNdbAuthorResponse;
 
       // Debug: log the pagination info from ISBNdb
-      console.log(`[Bibliography] Page ${page}: total=${data.total}, books_in_response=${data.books?.length || 0}`);
+      c.get('logger')?.info('[Bibliography] Page info', { page, total: data.total, books_in_response: data.books?.length || 0 });
 
       if (data.books && Array.isArray(data.books)) {
         for (const book of data.books) {
@@ -509,7 +509,7 @@ app.openapi(bibliographyRoute, async (c) => {
       // Continue if: we got a full page OR total indicates more pages exist
       hasMore = booksInResponse === pageSize || (total > 0 && books.length < total);
 
-      console.log(`[Bibliography] After page ${page}: collected=${books.length}, hasMore=${hasMore}`);
+      c.get('logger')?.info('[Bibliography] After page', { page, collected: books.length, hasMore });
 
       page++;
 
@@ -526,7 +526,7 @@ app.openapi(bibliographyRoute, async (c) => {
       books
     });
   } catch (error) {
-    c.get('logger')?.error('Author bibliography error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('Author bibliography error', { error: error instanceof Error ? error.message : String(error) });
     const message = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: 'Failed to fetch author bibliography', message }, 500);
   }
@@ -550,7 +550,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
     const cached = await c.env.CACHE.get(cacheKey, 'json');
 
     if (cached) {
-      console.log(`[EnrichBibliography] Cache hit for "${author_name}"`);
+      c.get('logger')?.info('[EnrichBibliography] Cache hit', { author_name });
       return c.json({
         ...cached,
         cached: true,
@@ -661,7 +661,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
     }
 
     results.books_found = allBooks.length;
-    console.log(`[EnrichBibliography] Found ${allBooks.length} books for "${author_name}" in ${results.api_calls} API calls`);
+    c.get('logger')?.info('[EnrichBibliography] Found books', { books_found: allBooks.length, author_name, api_calls: results.api_calls });
 
     if (allBooks.length === 0) {
       // Cache empty result to avoid repeated lookups
@@ -683,7 +683,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
       results.already_existed = existingSet.size;
 
       isbnsToEnrich = allBooks.filter(b => !existingSet.has(b.isbn));
-      console.log(`[EnrichBibliography] ${existingSet.size} already exist, ${isbnsToEnrich.length} to enrich`);
+      c.get('logger')?.info('[EnrichBibliography] Existing vs new', { already_existed: existingSet.size, to_enrich: isbnsToEnrich.length });
     }
 
     // DIRECTLY enrich from the data we already have (NO re-fetch from ISBNdb!)
@@ -744,7 +744,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
             results.covers_queued++;
           } catch (queueError) {
             // Don't fail enrichment if cover queue fails
-            console.warn(`[EnrichBibliography] Cover queue failed for ${book.isbn}:`, queueError);
+            c.get('logger')?.warn('[EnrichBibliography] Cover queue failed', { isbn: book.isbn, error: queueError });
           }
         }
 
@@ -761,12 +761,18 @@ app.openapi(enrichBibliographyRoute, async (c) => {
     const cacheResult = { ...results, errors: [] }; // Don't cache individual errors
     await c.env.CACHE.put(cacheKey, JSON.stringify(cacheResult), { expirationTtl: 86400 });
 
-    console.log(`[EnrichBibliography] Complete for "${author_name}": ${results.enriched} enriched, ${results.already_existed} existed, ${results.failed} failed in ${results.duration_ms}ms`);
+    c.get('logger')?.info('[EnrichBibliography] Complete', {
+      author_name,
+      enriched: results.enriched,
+      already_existed: results.already_existed,
+      failed: results.failed,
+      duration_ms: results.duration_ms
+    });
 
     return c.json(results);
 
   } catch (error) {
-    c.get('logger')?.error('[EnrichBibliography] Error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('[EnrichBibliography] Error', { error: error instanceof Error ? error.message : String(error) });
     const message = error instanceof Error ? error.message : 'Unknown error';
     return c.json({
       error: 'Failed to enrich author bibliography',
@@ -909,7 +915,7 @@ app.openapi(enrichWikidataRoute, async (c) => {
     });
 
   } catch (error) {
-    c.get('logger')?.error('Wikidata enrichment error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('Wikidata enrichment error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Enrichment failed',
       message: error instanceof Error ? error.message : String(error)
@@ -948,7 +954,7 @@ app.openapi(enrichStatusRoute, async (c) => {
     });
 
   } catch (error) {
-    c.get('logger')?.error('Enrichment status error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('Enrichment status error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Status check failed',
       message: error instanceof Error ? error.message : String(error)

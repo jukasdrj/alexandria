@@ -8,7 +8,7 @@ export const ISBNdbTestResultSchema = z.object({
   endpoint: z.string(),
   success: z.boolean(),
   status: z.number().optional(),
-  data: z.object({}).passthrough().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
   error: z.string().optional(),
   responseTime: z.number().optional(),
 }).openapi('ISBNdbTestResult');
@@ -80,7 +80,7 @@ export const WikidataTestResultSchema = z.object({
   success: z.boolean(),
   endpoint: z.string(),
   responseTime: z.number().optional(),
-  data: z.object({}).passthrough().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
   error: z.string().optional(),
 }).openapi('WikidataTestResult');
 

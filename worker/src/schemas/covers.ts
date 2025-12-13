@@ -104,7 +104,7 @@ const CoverURLsSchema = z.object({
     description: 'Small cover URL (128x192)',
     example: 'https://alexandria.ooheynerds.com/api/covers/OL45804W/small',
   }),
-});
+}).openapi('CoverURLs');
 
 /**
  * Cover Metadata Schema
@@ -130,7 +130,7 @@ const CoverMetadataSchema = z.object({
     description: 'OpenLibrary work key',
     example: '/works/OL45804W',
   }),
-});
+}).openapi('CoverMetadata');
 
 /**
  * Process Cover Success Response

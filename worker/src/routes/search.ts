@@ -2,9 +2,16 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { AppBindings } from '../env.js';
 import {
   SearchQuerySchema,
-  SearchResponseSchema,
+  SearchSuccessSchema,
   SearchErrorSchema,
+  SearchDataSchema,
 } from '../schemas/search.js';
+import {
+  createSuccessResponse,
+  createErrorResponse,
+  ErrorCode,
+  buildMeta,
+} from '../schemas/response.js';
 import {
   generateCacheKey,
   getCachedResults,
@@ -32,7 +39,7 @@ const searchRoute = createRoute({
       description: 'Search results',
       content: {
         'application/json': {
-          schema: SearchResponseSchema,
+          schema: SearchSuccessSchema,
         },
       },
     },
@@ -66,15 +73,15 @@ app.openapi(searchRoute, async (c) => {
   const isbn = rawIsbn?.replace(/[^0-9X]/gi, '').toUpperCase();
 
   if (!isbn && !title && !author) {
-    return c.json({
-      error: 'Missing query parameter',
-      message: 'Please provide one of: isbn, title, or author.'
-    }, 400);
+    return createErrorResponse(
+      c,
+      ErrorCode.MISSING_PARAMETER,
+      'Please provide one of: isbn, title, or author.'
+    );
   }
 
   const logger = c.get('logger');
   const sql = c.get('sql');
-  const start = Date.now();
 
   logger.debug('Search request received', { isbn, title, author, limit, offset, nocache });
 
@@ -84,23 +91,19 @@ app.openapi(searchRoute, async (c) => {
   const cacheKey = generateCacheKey(queryType, queryValue, limit, offset);
 
   // Try to get cached results (skip if nocache=true)
-  let cached = null;
-  let cacheHit = false;
   if (isCacheEnabled(c.env) && !nocache) {
-    cached = await getCachedResults(c.env.CACHE, cacheKey);
+    const cached = await getCachedResults(c.env.CACHE, cacheKey);
     if (cached) {
-      cacheHit = true;
       logger.info('Cache hit', { queryType, cacheKey });
-      // Return cached results with cache metadata
-      // Note: query_duration_ms shows the ORIGINAL query time when cache was populated
-      // This helps users understand the performance benefit of caching
       const cacheAgeSeconds = Math.floor((Date.now() - new Date(cached.cached_at).getTime()) / 1000);
-      return c.json({
-        ...cached,
+
+      // Return cached results with envelope
+      return createSuccessResponse(c, {
+        query: cached.query,
+        results: cached.results,
+        pagination: cached.pagination,
         cache_hit: true,
         cache_age_seconds: cacheAgeSeconds,
-        // Add original_query_duration_ms for clarity, keep query_duration_ms for backwards compat
-        original_query_duration_ms: cached.query_duration_ms,
       });
     }
   }
@@ -110,10 +113,7 @@ app.openapi(searchRoute, async (c) => {
     let total = 0;
 
     if (isbn) {
-      // ISBN validation is now handled by SearchQuerySchema in types.ts
       // OPTIMIZED: Query enriched_editions table with indexed ISBN
-      // Performance: Direct primary key lookup (sub-millisecond)
-      // NOTE: Skip COUNT query for ISBN - it's always 0 or 1 result (unique key)
       const dataResult = await sql`
         SELECT
           ee.title,
@@ -138,7 +138,7 @@ app.openapi(searchRoute, async (c) => {
             '[]'::json
           ) AS authors
         FROM enriched_editions ee
-        LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
+        LEFT JOIN enriched_works ew ON ew.key = ee.work_key
         LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
         LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
         WHERE ee.isbn = ${isbn}
@@ -148,15 +148,10 @@ app.openapi(searchRoute, async (c) => {
         LIMIT 1
       `;
 
-      // ISBN is unique, so total = result count (0 or 1)
       results = dataResult;
       total = results.length;
 
-      // =====================================================================
-      // 🧠 SMART RESOLUTION: Auto-fetch from external APIs on cache miss
-      // =====================================================================
-      // If ISBN search found nothing AND smart resolution is enabled,
-      // fetch from external providers and store in Alexandria DB
+      // Smart Resolution: Auto-fetch from external APIs on cache miss
       if (results.length === 0 && shouldResolveExternally(isbn, c.env)) {
         logger.info('Smart resolution triggered for ISBN', { isbn });
 
@@ -173,8 +168,6 @@ app.openapi(searchRoute, async (c) => {
 
     } else if (title) {
       // OPTIMIZED: Query enriched_editions with ILIKE for fast partial match
-      // Performance: ~60-75ms with GIN trigram index (vs 18+ seconds with similarity operator)
-      // ILIKE pattern matching is precise and leverages the GIN index efficiently
       const titlePattern = `%${title}%`;
       const [countResult, dataResult] = await Promise.all([
         sql`
@@ -224,8 +217,6 @@ app.openapi(searchRoute, async (c) => {
 
     } else if (author) {
       // OPTIMIZED: Query enriched_authors with ILIKE for fast partial match
-      // Performance: Skip COUNT query (expensive 3-way join), fetch data + 1 extra for hasMore detection
-      // ILIKE pattern matching uses GIN trigram index efficiently
       const authorPattern = `%${author}%`;
 
       // Fetch limit+1 to check if more results exist without expensive COUNT
@@ -275,25 +266,20 @@ app.openapi(searchRoute, async (c) => {
       // hasMore = got more than requested (the +1 extra row)
       const hasMoreResults = dataResult.length > limit;
       results = hasMoreResults ? dataResult.slice(0, limit) : dataResult;
-      // Estimate total: if hasMore, we don't know exact count; use offset + results + 1
-      // This is intentionally an estimate for performance reasons
       total = hasMoreResults ? offset + limit + 1 : offset + results.length;
     }
 
-    const queryDuration = Date.now() - start;
-
     // Log query performance
+    const startTime = c.get('startTime') as number;
+    const queryDuration = Date.now() - startTime;
     logger.query(queryType, queryDuration, {
       result_count: results.length,
       cache_hit: false
     });
 
-    // Format results - enriched tables already have cover URLs
+    // Format results
     const formattedResults = results.map((row) => {
-      // Use pre-cached cover URLs from enriched_editions (already in R2 or external)
       const coverUrl = row.cover_url_large || row.cover_url_medium || row.cover_url_small || null;
-
-      // Parse authors array from JSON aggregation (handles both JSON objects and pre-parsed arrays)
       const authorsRaw = row.authors || [];
       const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: { name: string; key: string }) => ({
         name: a.name,
@@ -306,7 +292,7 @@ app.openapi(searchRoute, async (c) => {
         authors,
         isbn: row.isbn,
         coverUrl,
-        coverSource: coverUrl ? 'enriched-cached' : null,
+        coverSource: coverUrl ? 'enriched-cached' as const : null,
         publish_date: row.publish_date,
         publishers: row.publishers,
         pages: row.pages,
@@ -319,9 +305,8 @@ app.openapi(searchRoute, async (c) => {
     // Calculate pagination metadata
     const hasMore = offset + results.length < total;
 
-    const response = {
+    const searchData = {
       query: { isbn, title, author },
-      query_duration_ms: queryDuration,
       results: formattedResults,
       pagination: {
         limit,
@@ -329,7 +314,6 @@ app.openapi(searchRoute, async (c) => {
         total,
         hasMore,
         returnedCount: formattedResults.length,
-        // Author queries use estimated totals for performance (skip expensive COUNT)
         ...(author && { totalEstimated: true })
       },
       cache_hit: false,
@@ -339,13 +323,13 @@ app.openapi(searchRoute, async (c) => {
     if (isCacheEnabled(c.env)) {
       const ttl = getCacheTTL(queryType, c.env);
       c.executionCtx.waitUntil(
-        setCachedResults(c.env.CACHE, cacheKey, response, ttl)
+        setCachedResults(c.env.CACHE, cacheKey, { ...searchData, cached_at: new Date().toISOString() }, ttl)
       );
     }
 
-    // Enhanced CDN caching with stale-while-revalidate for better performance
+    // Enhanced CDN caching
     const ttl = getCacheTTL(queryType, c.env);
-    return c.json(response, 200, {
+    return createSuccessResponse(c, searchData, 200, {
       'Cache-Control': `public, max-age=${ttl}`,
       'CDN-Cache-Control': `public, max-age=${ttl}, stale-while-revalidate=600`,
       'Vary': 'Accept-Encoding'
@@ -359,10 +343,13 @@ app.openapi(searchRoute, async (c) => {
       title,
       author
     });
-    return c.json({
-      error: 'Database query failed',
-      message: e instanceof Error ? e.message : 'Unknown error'
-    }, 500);
+
+    return createErrorResponse(
+      c,
+      ErrorCode.DATABASE_ERROR,
+      'Database query failed',
+      { details: e instanceof Error ? e.message : 'Unknown error' }
+    );
   }
 });
 

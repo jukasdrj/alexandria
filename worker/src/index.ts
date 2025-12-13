@@ -4,7 +4,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import postgres from 'postgres';
 import type { AppBindings, Env } from './env.js';
 import { createOpenAPIApp, registerOpenAPIDoc } from './openapi.js';
-import { errorHandler } from '../middleware/error-handler.js';
+import { errorHandler } from '../middleware/error-handler.js'; // Now uses ResponseEnvelope format
 import { Logger } from '../lib/logger.js';
 import { getDashboardHTML } from '../dashboard.js';
 

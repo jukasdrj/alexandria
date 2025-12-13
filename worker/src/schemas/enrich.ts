@@ -514,15 +514,5 @@ export const BatchDirectResultSchema = z
   })
   .openapi('BatchDirectResult');
 
-/**
- * Error Response Schema
- * Generic error response
- */
-export const ErrorResponseSchema = z
-  .object({
-    success: z.boolean().default(false),
-    error: z.string(),
-    message: z.string().optional(),
-    details: z.array(z.string()).optional(),
-  })
-  .openapi('ErrorResponse');
+// Re-export centralized ErrorResponseSchema
+export { ErrorResponseSchema } from './response.js';

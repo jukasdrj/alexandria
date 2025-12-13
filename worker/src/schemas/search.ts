@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PaginationQuerySchema } from './common.js';
+import { createSuccessSchema, ErrorResponseSchema } from './response.js';
 
 // =================================================================================
 // Search Query Schemas
@@ -54,24 +55,24 @@ export const PaginationMetadataSchema = z.object({
   totalEstimated: z.boolean().optional().describe('For author queries using estimated totals'),
 }).openapi('PaginationMetadata');
 
-export const SearchResponseSchema = z.object({
+// Search data (inner payload)
+export const SearchDataSchema = z.object({
   query: z.object({
     isbn: z.string().optional(),
     title: z.string().optional(),
     author: z.string().optional(),
   }),
-  query_duration_ms: z.number(),
   results: z.array(BookResultSchema),
   pagination: PaginationMetadataSchema,
   cache_hit: z.boolean().optional(),
   cache_age_seconds: z.number().optional(),
-  original_query_duration_ms: z.number().optional(),
-}).openapi('SearchResponse');
+}).openapi('SearchData');
 
-export const SearchErrorSchema = z.object({
-  error: z.string(),
-  message: z.string().optional(),
-}).openapi('SearchError');
+// Success response with envelope
+export const SearchSuccessSchema = createSuccessSchema(SearchDataSchema, 'SearchSuccess');
+
+// Re-export ErrorResponseSchema for convenience
+export { ErrorResponseSchema as SearchErrorSchema };
 
 // =================================================================================
 // Type Exports
@@ -81,5 +82,4 @@ export type SearchQuery = z.infer<typeof SearchQuerySchema>;
 export type AuthorReference = z.infer<typeof AuthorReferenceSchema>;
 export type BookResult = z.infer<typeof BookResultSchema>;
 export type PaginationMetadata = z.infer<typeof PaginationMetadataSchema>;
-export type SearchResponse = z.infer<typeof SearchResponseSchema>;
-export type SearchError = z.infer<typeof SearchErrorSchema>;
+export type SearchData = z.infer<typeof SearchDataSchema>;

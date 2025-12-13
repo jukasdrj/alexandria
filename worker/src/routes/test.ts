@@ -372,7 +372,7 @@ app.openapi(isbndbTestAllRoute, async (c) => {
     };
     return c.json(summary);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Test suite failed',
       message: error instanceof Error ? error.message : String(error)
@@ -387,7 +387,7 @@ app.openapi(isbndbTestBookRoute, async (c) => {
     const result = await testISBNdbBook(isbn, c.env);
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb book test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb book test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Book test failed',
       message: error instanceof Error ? error.message : String(error)
@@ -402,7 +402,7 @@ app.openapi(isbndbTestBooksSearchRoute, async (c) => {
     const result = await testISBNdbBooksSearch(query, { page, pageSize, column }, c.env);
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb books search test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb books search test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Books search test failed',
       message: error instanceof Error ? error.message : String(error)
@@ -417,7 +417,7 @@ app.openapi(isbndbTestAuthorRoute, async (c) => {
     const result = await testISBNdbAuthor(name, c.env);
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb author test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb author test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Author test failed',
       message: error instanceof Error ? error.message : String(error)
@@ -432,7 +432,7 @@ app.openapi(isbndbTestAuthorsSearchRoute, async (c) => {
     const result = await testISBNdbAuthorsSearch(query, { page, pageSize }, c.env);
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb authors search test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb authors search test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Authors search test failed',
       message: error instanceof Error ? error.message : String(error)
@@ -447,7 +447,7 @@ app.openapi(isbndbTestPublisherRoute, async (c) => {
     const result = await testISBNdbPublisher(name, c.env);
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb publisher test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb publisher test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Publisher test failed',
       message: error instanceof Error ? error.message : String(error)
@@ -462,7 +462,7 @@ app.openapi(isbndbTestSubjectRoute, async (c) => {
     const result = await testISBNdbSubject(name, c.env);
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb subject test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb subject test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Subject test failed',
       message: error instanceof Error ? error.message : String(error)
@@ -485,7 +485,7 @@ app.openapi(isbndbTestBatchRoute, async (c) => {
     const result = await testISBNdbBatchBooks(isbns, c.env);
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('ISBNdb batch test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('ISBNdb batch test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Batch test failed',
       message: error instanceof Error ? error.message : String(error)
@@ -508,7 +508,7 @@ app.openapi(jsquashTestRoute, async (c) => {
       return c.json(result);
     }
   } catch (error) {
-    c.get('logger')?.error('jSquash benchmark error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('jSquash benchmark error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Benchmark failed',
       message: error instanceof Error ? error.message : String(error)
@@ -523,7 +523,7 @@ app.openapi(wikidataTestRoute, async (c) => {
     const result = await testWikidataClient();
     return c.json(result);
   } catch (error) {
-    c.get('logger')?.error('Wikidata test error:', { error: error instanceof Error ? error.message : String(error) });
+    c.get('logger')?.error('Wikidata test error', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       error: 'Wikidata test failed',
       message: error instanceof Error ? error.message : String(error)

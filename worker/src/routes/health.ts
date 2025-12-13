@@ -1,26 +1,28 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from 'zod';
 import type { AppBindings } from '../env.js';
+import {
+  createSuccessSchema,
+  ErrorResponseSchema,
+  createSuccessResponse,
+  createErrorResponse,
+  ErrorCode,
+  ResponseMetaSchema,
+} from '../schemas/response.js';
 
 // =================================================================================
-// Response Schemas (defined inline for proper type inference)
+// Health Data Schema
 // =================================================================================
 
-const HealthSuccessSchema = z.object({
-  status: z.literal('ok'),
-  database: z.literal('connected'),
+const HealthDataSchema = z.object({
+  status: z.enum(['ok', 'degraded']),
+  database: z.enum(['connected', 'disconnected']),
   r2_covers: z.enum(['bound', 'not_configured']),
-  hyperdrive_latency_ms: z.number(),
-  timestamp: z.string(),
-}).openapi('HealthSuccess');
+  hyperdrive_latency_ms: z.number().optional(),
+}).openapi('HealthData');
 
-const HealthErrorSchema = z.object({
-  status: z.literal('error'),
-  database: z.literal('disconnected'),
-  r2_covers: z.enum(['bound', 'not_configured']),
-  timestamp: z.string(),
-  message: z.string(),
-}).openapi('HealthError');
+// Success response with envelope
+const HealthSuccessSchema = createSuccessSchema(HealthDataSchema, 'HealthSuccess');
 
 // =================================================================================
 // Health Route Definition
@@ -45,7 +47,7 @@ const healthRoute = createRoute({
       description: 'Service unavailable - database disconnected',
       content: {
         'application/json': {
-          schema: HealthErrorSchema,
+          schema: ErrorResponseSchema,
         },
       },
     },
@@ -59,32 +61,33 @@ const healthRoute = createRoute({
 const app = new OpenAPIHono<AppBindings>();
 
 app.openapi(healthRoute, async (c) => {
+  const r2Status: 'bound' | 'not_configured' = c.env.COVER_IMAGES ? 'bound' : 'not_configured';
+
   try {
     const sql = c.get('sql');
     const start = Date.now();
     await sql`SELECT 1`;
     const latency = Date.now() - start;
 
-    const r2Status: 'bound' | 'not_configured' = c.env.COVER_IMAGES ? 'bound' : 'not_configured';
-
-    return c.json({
+    return createSuccessResponse(c, {
       status: 'ok' as const,
       database: 'connected' as const,
       r2_covers: r2Status,
       hyperdrive_latency_ms: latency,
-      timestamp: new Date().toISOString(),
-    }, 200);
+    });
   } catch (e) {
     const logger = c.get('logger');
     logger.error('Health check DB error', { error: e instanceof Error ? e.message : 'Unknown' });
-    const r2Status: 'bound' | 'not_configured' = c.env.COVER_IMAGES ? 'bound' : 'not_configured';
-    return c.json({
-      status: 'error' as const,
-      database: 'disconnected' as const,
-      r2_covers: r2Status,
-      timestamp: new Date().toISOString(),
-      message: e instanceof Error ? e.message : 'Unknown error',
-    }, 503);
+
+    return createErrorResponse(
+      c,
+      ErrorCode.DATABASE_ERROR,
+      'Database connection failed',
+      {
+        r2_covers: r2Status,
+        details: e instanceof Error ? e.message : 'Unknown error',
+      }
+    );
   }
 });
 

@@ -1,34 +1,11 @@
 import { z } from 'zod';
 
 // =================================================================================
-// Common Response Schemas
+// Re-export centralized response schemas
 // =================================================================================
 
-export const ErrorResponseSchema = z.object({
-  success: z.literal(false),
-  error: z.object({
-    type: z.enum(['validation', 'not_found', 'timeout', 'rate_limit', 'upstream', 'database', 'internal']),
-    message: z.string(),
-    request_id: z.string().optional(),
-  }),
-}).openapi('ErrorResponse');
-
-export const SuccessResponseSchema = z.object({
-  success: z.literal(true),
-}).openapi('SuccessResponse');
-
-// =================================================================================
-// Health Check Schemas
-// =================================================================================
-
-export const HealthResponseSchema = z.object({
-  status: z.enum(['ok', 'error']),
-  database: z.enum(['connected', 'disconnected']),
-  r2_covers: z.enum(['bound', 'not_configured']),
-  hyperdrive_latency_ms: z.number().optional(),
-  timestamp: z.string(),
-  message: z.string().optional(),
-}).openapi('HealthResponse');
+export { ErrorResponseSchema, createSuccessSchema } from './response.js';
+export type { ErrorResponse, ResponseMeta } from './response.js';
 
 // =================================================================================
 // Pagination Schemas
@@ -67,7 +44,5 @@ export const ISBNSchema = z.string()
 // Type Exports
 // =================================================================================
 
-export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
-export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;
 export type PaginationResponse = z.infer<typeof PaginationResponseSchema>;
