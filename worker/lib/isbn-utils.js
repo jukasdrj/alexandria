@@ -172,9 +172,15 @@ export function filterEnglishISBNs(isbns, options = {}) {
 }
 
 /**
+ * @typedef {Object} ISBNValidationResult
+ * @property {string[]} valid - Array of valid normalized ISBNs
+ * @property {string[]} invalid - Array of invalid ISBNs
+ */
+
+/**
  * Validate and normalize a batch of ISBNs
  * @param {string[]} isbns - Array of ISBNs
- * @returns {Object} Object with valid and invalid ISBNs
+ * @returns {ISBNValidationResult} Object with valid and invalid ISBNs
  */
 export function validateISBNBatch(isbns) {
   const valid = [];
@@ -250,9 +256,20 @@ export function partitionISBNs(isbns, batchSize = 100) {
 }
 
 /**
+ * @typedef {Object} ISBNBatchStats
+ * @property {number} total - Total ISBNs in batch
+ * @property {number} valid - Valid ISBNs count
+ * @property {number} invalid - Invalid ISBNs count
+ * @property {number} english - English ISBNs count
+ * @property {number} foreign - Foreign ISBNs count
+ * @property {number} unknown - Unknown language ISBNs count
+ * @property {Record<string, number>} languages - Count by language
+ */
+
+/**
  * Get statistics about ISBN batch composition
  * @param {string[]} isbns - Array of ISBNs
- * @returns {Object} Statistics object
+ * @returns {ISBNBatchStats} Statistics object
  */
 export function getISBNBatchStats(isbns) {
   const stats = {

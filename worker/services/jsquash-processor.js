@@ -34,6 +34,11 @@ const TARGET_SIZES = {
 // WebP encoding quality (0-100)
 const WEBP_QUALITY = 85;
 
+// Minimum size threshold for WebP conversion (5KB)
+// Small images (especially placeholders) often get LARGER after WebP conversion
+// due to format overhead. For these, we store the original format instead.
+const MIN_SIZE_FOR_WEBP = 5000; // 5KB threshold
+
 /**
  * Calculate target dimensions that fit within max bounds while preserving aspect ratio
  * Never upscales - returns source dimensions if smaller than target
@@ -235,6 +240,62 @@ export async function processAndStoreCover(isbn, sourceUrl, env) {
     const sourceWidth = imageData.width;
     const sourceHeight = imageData.height;
     console.log(`[jSquash] Decoded ${imageType} ${sourceWidth}x${sourceHeight} (${buffer.byteLength} bytes)`);
+
+    // Check if image is too small for WebP conversion (would inflate size)
+    if (buffer.byteLength < MIN_SIZE_FOR_WEBP) {
+      console.log(`[jSquash] Image too small for WebP conversion (${buffer.byteLength} < ${MIN_SIZE_FOR_WEBP} bytes), storing original format`);
+
+      // Store original image in all three size slots (no resizing, no WebP conversion)
+      const uploadStart = Date.now();
+      const fileExtension = imageType === 'jpeg' ? 'jpg' : imageType;
+      const contentType = imageType === 'jpeg' ? 'image/jpeg' : `image/${imageType}`;
+
+      const uploadPromises = Object.keys(TARGET_SIZES).map(async (sizeName) => {
+        const r2Key = `isbn/${normalizedISBN}/${sizeName}.${fileExtension}`;
+
+        await env.COVER_IMAGES.put(r2Key, buffer, {
+          httpMetadata: {
+            contentType: contentType,
+            cacheControl: 'public, max-age=31536000, immutable'
+          },
+          customMetadata: {
+            uploadedAt: new Date().toISOString(),
+            sourceUrl: sourceUrl,
+            originalSize: buffer.byteLength.toString(),
+            originalType: imageType,
+            webpSkipped: 'true',
+            reason: 'below_size_threshold'
+          }
+        });
+
+        return { sizeName, key: r2Key, size: buffer.byteLength };
+      });
+
+      const uploadResults = await Promise.all(uploadPromises);
+      metrics.uploadMs = Date.now() - uploadStart;
+      metrics.totalMs = Date.now() - startTime;
+      metrics.webpSkipped = true;
+
+      console.log(`[jSquash] Stored original ${imageType} for ${normalizedISBN}: ${buffer.byteLength} bytes (${metrics.totalMs}ms)`);
+
+      return {
+        status: 'processed',
+        isbn: normalizedISBN,
+        metrics,
+        compression: {
+          originalSize: buffer.byteLength,
+          totalWebpSize: buffer.byteLength * 3, // Stored in all 3 size slots
+          ratio: '0%',
+          webpSkipped: true
+        },
+        urls: {
+          large: `/covers/${normalizedISBN}/large`,
+          medium: `/covers/${normalizedISBN}/medium`,
+          small: `/covers/${normalizedISBN}/small`
+        },
+        r2Keys: uploadResults.map(r => r.key)
+      };
+    }
 
     // 3. Resize to all target sizes and encode as WebP
     // IMPORTANT: We NEVER upscale - if source is smaller, we use source dimensions

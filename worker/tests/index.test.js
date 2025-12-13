@@ -31,8 +31,21 @@ vi.mock('../cover-handlers.js', () => ({
     handleServeCover: vi.fn(),
 }));
 
+// Mock jsquash-processor to avoid WASM import issues in tests
+vi.mock('../services/jsquash-processor.js', () => ({
+    processAndStoreCover: vi.fn(),
+    benchmark: vi.fn(),
+}));
+
+// Mock wikidata-client
+vi.mock('../services/wikidata-client.ts', () => ({
+    testWikidataClient: vi.fn(),
+    fetchWikidataAuthor: vi.fn(),
+    fetchWikidataMultipleBatches: vi.fn(),
+}));
+
 // 2. Import the module under test
-import worker from '../index.js';
+import worker from '../src/index.js';
 import postgres from 'postgres'; // This is now our mocked version
 
 describe('Worker Routes', () => {
@@ -47,7 +60,10 @@ describe('Worker Routes', () => {
             COVER_IMAGES: {
                 get: vi.fn(),
             },
-            CACHE: {}
+            CACHE: {
+                get: vi.fn().mockResolvedValue(null),
+                put: vi.fn().mockResolvedValue(undefined),
+            }
         };
     });
 
@@ -85,8 +101,9 @@ describe('Worker Routes', () => {
         // Let's verify that fetch works without crashing.
         const res = await worker.fetch(req, env);
 
-        // Expect 404 because our mock returns [] (empty results)
-        expect(res.status).toBe(404);
+        // Smart resolution now returns 200 with results from OpenLibrary
+        // even when local DB returns empty (mock returns [])
+        expect(res.status).toBe(200);
     });
 
     describe('GET /covers/:isbn/:size', () => {
@@ -115,14 +132,14 @@ describe('Worker Routes', () => {
         it('should return image if found in R2', async () => {
             env.COVER_IMAGES.get.mockResolvedValue({
                 body: 'image-data',
-                httpMetadata: { contentType: 'image/jpeg' }
+                httpMetadata: { contentType: 'image/webp' }
             });
 
             const req = new Request('http://localhost/covers/9780439064873/small');
             const res = await worker.fetch(req, env);
 
             expect(res.status).toBe(200);
-            expect(res.headers.get('Content-Type')).toBe('image/jpeg');
+            expect(res.headers.get('Content-Type')).toBe('image/webp');
         });
     });
 });

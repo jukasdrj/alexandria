@@ -35,10 +35,18 @@ export async function processCoverQueue(batch, env) {
     messageCount: batch.messages.length
   });
 
+  // Create postgres connection for updating cover URLs after processing
+  const sql = postgres(env.HYPERDRIVE.connectionString, {
+    max: 1,
+    fetch_types: false,
+    prepare: false
+  });
+
   const results = {
     processed: 0,
     cached: 0,
     failed: 0,
+    dbUpdated: 0,
     errors: [],
     compressionStats: {
       totalOriginalBytes: 0,
@@ -114,6 +122,29 @@ export async function processCoverQueue(batch, env) {
           processingMs: result.metrics.totalMs
         });
 
+        // Update enriched_editions with Alexandria R2 URLs (closes the loop!)
+        try {
+          const baseUrl = 'https://alexandria.ooheynerds.com/covers';
+          const updateResult = await sql`
+            UPDATE enriched_editions
+            SET cover_url_large = ${`${baseUrl}/${normalizedISBN}/large`},
+                cover_url_medium = ${`${baseUrl}/${normalizedISBN}/medium`},
+                cover_url_small = ${`${baseUrl}/${normalizedISBN}/small`},
+                cover_source = 'alexandria-r2'
+            WHERE isbn = ${normalizedISBN}
+          `;
+          if (updateResult.count > 0) {
+            results.dbUpdated++;
+            logger.debug('Updated enriched_editions with R2 URLs', { isbn: normalizedISBN });
+          }
+        } catch (dbError) {
+          // Don't fail the cover processing if DB update fails
+          logger.warn('Failed to update enriched_editions with R2 URLs', {
+            isbn: normalizedISBN,
+            error: dbError instanceof Error ? dbError.message : String(dbError)
+          });
+        }
+
       } else {
         results.failed++;
         results.errors.push({ isbn: normalizedISBN, error: result.error || 'Processing failed' });
@@ -149,11 +180,15 @@ export async function processCoverQueue(batch, env) {
     processed: results.processed,
     cached: results.cached,
     failed: results.failed,
+    dbUpdated: results.dbUpdated,
     errorCount: results.errors.length,
     totalOriginalBytes: results.compressionStats.totalOriginalBytes,
     totalWebpBytes: results.compressionStats.totalWebpBytes,
     overallCompression: `${compressionRatio}%`
   });
+
+  // Close database connection
+  await sql.end();
 
   return results;
 }

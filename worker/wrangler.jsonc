@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
 
   "name": "alexandria",
-  "main": "index.ts",
+  "main": "src/index.ts",
   "compatibility_date": "2025-11-20",
   "compatibility_flags": [
     "nodejs_compat_v2"
@@ -153,6 +153,8 @@
     "enabled": true,
     "head_sampling_rate": 1.0
   },
+
+  "logpush": true,
 
   "dev": {
     "ip": "localhost",

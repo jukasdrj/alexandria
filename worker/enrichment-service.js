@@ -6,7 +6,7 @@ import { calculateEditionQuality, calculateWorkQuality, calculateCompleteness, f
 
 /**
  * Enrich an edition in the database
- * @param {import('postgres').Sql} sql - postgres connection
+ * @param {import('postgres').Sql | import('postgres').TransactionSql} sql - postgres connection or transaction
  * @param {import('./types').EnrichEditionRequest} edition - Edition data
  * @param {import('./env').Env} env - Worker environment with COVER_QUEUE binding
  * @returns {Promise<{isbn: string, action: 'created'|'updated', quality_improvement: number, stored_at: string}>}
@@ -243,7 +243,7 @@ export async function enrichEdition(sql, edition, env) {
 
 /**
  * Enrich a work in the database
- * @param {import('postgres').Sql} sql - postgres connection
+ * @param {import('postgres').Sql | import('postgres').TransactionSql} sql - postgres connection or transaction
  * @param {import('./types').EnrichWorkRequest} work - Work data
  * @returns {Promise<{work_key: string, action: 'created'|'updated', quality_improvement: number, stored_at: string}>}
  */
@@ -379,7 +379,7 @@ export async function enrichWork(sql, work) {
 
 /**
  * Enrich an author in the database
- * @param {import('postgres').Sql} sql - postgres connection
+ * @param {import('postgres').Sql | import('postgres').TransactionSql} sql - postgres connection or transaction
  * @param {import('./types').EnrichAuthorRequest} author - Author data
  * @returns {Promise<{author_key: string, action: 'created'|'updated', stored_at: string}>}
  */

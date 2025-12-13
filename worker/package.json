@@ -1,13 +1,13 @@
 {
   "name": "alexandria-worker",
-  "version": "2.1.0",
-  "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types, Zod validation, and intelligent search",
-  "main": "index.ts",
+  "version": "2.2.0",
+  "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types, Zod validation, OpenAPI spec, and intelligent search",
+  "main": "src/index.ts",
   "types": "types.ts",
   "exports": {
     ".": {
-      "types": "./types.ts",
-      "default": "./index.ts"
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
     },
     "./types": {
       "types": "./types.ts",
@@ -15,9 +15,10 @@
     }
   },
   "files": [
-    "index.ts",
+    "src/**/*.ts",
     "types.ts",
     "env.d.ts",
+    "lib/**/*.ts",
     "*.js",
     "*.d.ts",
     "README-INTEGRATION.md"
@@ -38,7 +39,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "echo 'Publishing alexandria-worker v2.1.0 - Combined search & pagination support'"
+    "prepublishOnly": "echo 'Publishing alexandria-worker v2.2.0 - OpenAPI spec + AlexandriaAppType export'"
   },
   "keywords": [
     "cloudflare",
@@ -63,7 +64,7 @@
     "wrangler": "^4.53.0"
   },
   "dependencies": {
-    "@hono/zod-validator": "^0.7.5",
+    "@hono/zod-openapi": "^1.1.5",
     "@jsquash/jpeg": "^1.6.0",
     "@jsquash/png": "^3.1.1",
     "@jsquash/resize": "^2.1.0",

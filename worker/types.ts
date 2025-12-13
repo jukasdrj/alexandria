@@ -110,9 +110,17 @@ export const EnrichAuthorSchema = z.object({
   author_key: z.string(),
   name: z.string(),
   gender: z.string().optional(),
+  gender_qid: z.string().optional(),           // Wikidata Q-ID for gender (e.g., Q6581097 = male)
   nationality: z.string().optional(),
+  citizenship_qid: z.string().optional(),      // Wikidata Q-ID for citizenship
   birth_year: z.number().optional(),
   death_year: z.number().optional(),
+  birth_place: z.string().optional(),          // City/town name
+  birth_place_qid: z.string().optional(),      // Wikidata Q-ID for birth place
+  birth_country: z.string().optional(),        // Country name (e.g., "United States")
+  birth_country_qid: z.string().optional(),    // Wikidata Q-ID for country (e.g., Q30)
+  death_place: z.string().optional(),
+  death_place_qid: z.string().optional(),
   bio: z.string().optional(),
   bio_source: z.string().optional(),
   author_photo_url: z.string().optional(),
@@ -146,20 +154,28 @@ export type QueueEnrichment = z.infer<typeof QueueEnrichmentSchema>;
 // Response Types
 // =================================================================================
 
+/**
+ * Author reference in search results
+ */
+export interface AuthorReference {
+  name: string;
+  key: string;                    // e.g., "/authors/OL7234434A"
+  openlibrary: string;            // e.g., "https://openlibrary.org/authors/OL7234434A"
+}
+
 export interface BookResult {
-  type?: 'edition' | 'work' | 'author';  // Added for combined search
+  type?: 'edition' | 'work' | 'author';  // Present in combined search
   title: string;
-  author: string | null;
+  authors: AuthorReference[];     // Array of author objects with name, key, openlibrary URL
   isbn: string | null;
   coverUrl: string | null;
-  coverSource: 'r2' | 'external' | 'external-fallback' | null;
+  coverSource: 'r2' | 'external' | 'external-fallback' | 'enriched-cached' | null;
   publish_date: string | null;
-  publishers: string[] | null;
-  pages: string | null;
+  publishers: string | null;      // Publisher name as string
+  pages: number | null;           // Page count as number
   work_title: string | null;
   openlibrary_edition: string | null;
   openlibrary_work: string | null;
-  openlibrary_author?: string | null;  // Added for combined search
 }
 
 export interface PaginationMetadata {
@@ -181,6 +197,7 @@ export interface SearchResult {
   count?: number;  // Deprecated - use pagination.total
   results: BookResult[];
   pagination: PaginationMetadata;
+  cache_hit?: boolean;  // Whether result was served from cache
 }
 
 export interface CombinedSearchResult {
@@ -189,6 +206,7 @@ export interface CombinedSearchResult {
   query_duration_ms: number;
   results: BookResult[];
   pagination: PaginationMetadata;
+  cache_hit?: boolean;  // Whether result was served from cache
 }
 
 export interface HealthCheck {
@@ -284,6 +302,45 @@ export interface ErrorResponse {
   details?: unknown;
 }
 
+/**
+ * Full author details including Wikidata diversity data
+ * Returned by GET /api/authors/:key
+ */
+export interface AuthorDetails {
+  author_key: string;             // e.g., "/authors/OL7234434A"
+  name: string;
+
+  // Diversity fields (from Wikidata)
+  gender: string | null;          // e.g., "male", "female"
+  gender_qid: string | null;      // e.g., "Q6581097" (male)
+  nationality: string | null;     // e.g., "United States"
+  citizenship_qid: string | null; // e.g., "Q30"
+
+  // Birth/Death
+  birth_year: number | null;
+  death_year: number | null;
+  birth_place: string | null;     // City/town name
+  birth_place_qid: string | null;
+  birth_country: string | null;   // Country name
+  birth_country_qid: string | null;
+  death_place: string | null;
+  death_place_qid: string | null;
+
+  // Biography
+  bio: string | null;
+  bio_source: string | null;
+
+  // External IDs
+  wikidata_id: string | null;     // e.g., "Q18590295"
+  openlibrary_author_id: string | null;
+  goodreads_author_ids: string[] | null;
+
+  // Metadata
+  author_photo_url: string | null;
+  book_count: number;
+  wikidata_enriched_at: string | null;  // ISO timestamp
+}
+
 // =================================================================================
 // API Client Types (for consumers like bendv3)
 // =================================================================================
@@ -304,7 +361,8 @@ export const ENDPOINTS = {
   HEALTH: '/health',
   STATS: '/api/stats',
   SEARCH: '/api/search',
-  SEARCH_COMBINED: '/api/search/combined',  // New in v2.1.0
+  SEARCH_COMBINED: '/api/search/combined',
+  AUTHOR_DETAILS: '/api/authors/:key',      // Author diversity data
   ENRICH_EDITION: '/api/enrich/edition',
   ENRICH_WORK: '/api/enrich/work',
   ENRICH_AUTHOR: '/api/enrich/author',
@@ -348,6 +406,11 @@ export const API_ROUTES = {
     path: ENDPOINTS.SEARCH_COMBINED,
     requestSchema: CombinedSearchQuerySchema,
   } as APIRoute<CombinedSearchQuery, CombinedSearchResult>,
+
+  authorDetails: {
+    method: 'GET',
+    path: ENDPOINTS.AUTHOR_DETAILS,
+  } as APIRoute<{ key: string }, AuthorDetails>,
 
   health: {
     method: 'GET',

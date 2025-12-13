@@ -181,9 +181,7 @@ export async function getCoverMetadata(env, isbn) {
  *
  * @param {string} isbn - ISBN to process
  * @param {object} env - Worker environment
- * @param {object} options - Processing options
- * @param {boolean} options.force - Force reprocessing even if exists
- * @param {string} options.knownCoverUrl - Optional cover URL to use (skips provider search)
+ * @param {{force?: boolean, knownCoverUrl?: string}} [options] - Processing options
  * @returns {Promise<object>} Processing result
  */
 export async function processCoverImage(isbn, env, options = {}) {

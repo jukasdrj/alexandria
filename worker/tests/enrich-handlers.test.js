@@ -71,9 +71,11 @@ describe('Enrichment Handlers', () => {
 
       const response = await handleEnrichEdition(mockContext);
 
-      expect(enrichmentService.enrichEdition).toHaveBeenCalledWith(mockSql, expect.objectContaining({
-          isbn: '9780439064873'
-      }));
+      expect(enrichmentService.enrichEdition).toHaveBeenCalledWith(
+        mockSql,
+        expect.objectContaining({ isbn: '9780439064873' }),
+        undefined  // env not set in mock context
+      );
       expect(response.status).toBe(201);
       expect(response.data.success).toBe(true);
     });

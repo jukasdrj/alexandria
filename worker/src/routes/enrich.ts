@@ -1,0 +1,612 @@
+/**
+ * Enrichment API Routes
+ *
+ * Handles metadata enrichment from external providers (ISBNdb, Google Books, OpenLibrary)
+ * Includes queue-based async processing and direct batch enrichment
+ */
+
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import type { AppBindings } from '../env.js';
+import {
+  EnrichEditionSchema,
+  EnrichWorkSchema,
+  EnrichAuthorSchema,
+  QueueEnrichmentSchema,
+  QueueBatchSchema,
+  BatchDirectSchema,
+  EnrichmentResultSchema,
+  QueueResultSchema,
+  QueueBatchResultSchema,
+  EnrichmentStatusSchema,
+  BatchDirectResultSchema,
+  ErrorResponseSchema,
+} from '../schemas/enrich.js';
+import {
+  handleEnrichEdition,
+  handleEnrichWork,
+  handleEnrichAuthor,
+  handleQueueEnrichment,
+  handleGetEnrichmentStatus,
+} from '../../enrich-handlers.js';
+import { normalizeISBN, validateISBNBatch } from '../../lib/isbn-utils.js';
+import { enrichEdition, enrichWork } from '../../enrichment-service.js';
+import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
+
+// Create enrichment router
+export const enrichRoutes = new OpenAPIHono<AppBindings>();
+
+// =================================================================================
+// POST /api/enrich/edition - Store edition metadata
+// =================================================================================
+
+const enrichEditionRoute = createRoute({
+  method: 'post',
+  path: '/api/enrich/edition',
+  tags: ['Enrichment'],
+  summary: 'Enrich Edition',
+  description: 'Store or update edition metadata in enriched_editions table. Automatically queues cover download if cover URLs provided.',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: EnrichEditionSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Edition updated successfully',
+      content: {
+        'application/json': {
+          schema: EnrichmentResultSchema,
+        },
+      },
+    },
+    201: {
+      description: 'Edition created successfully',
+      content: {
+        'application/json': {
+          schema: EnrichmentResultSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+enrichRoutes.openapi(enrichEditionRoute, handleEnrichEdition);
+
+// =================================================================================
+// POST /api/enrich/work - Store work metadata
+// =================================================================================
+
+const enrichWorkRoute = createRoute({
+  method: 'post',
+  path: '/api/enrich/work',
+  tags: ['Enrichment'],
+  summary: 'Enrich Work',
+  description: 'Store or update work metadata in enriched_works table',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: EnrichWorkSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Work updated successfully',
+      content: {
+        'application/json': {
+          schema: EnrichmentResultSchema,
+        },
+      },
+    },
+    201: {
+      description: 'Work created successfully',
+      content: {
+        'application/json': {
+          schema: EnrichmentResultSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+enrichRoutes.openapi(enrichWorkRoute, handleEnrichWork);
+
+// =================================================================================
+// POST /api/enrich/author - Store author metadata
+// =================================================================================
+
+const enrichAuthorRoute = createRoute({
+  method: 'post',
+  path: '/api/enrich/author',
+  tags: ['Enrichment'],
+  summary: 'Enrich Author',
+  description: 'Store or update author biographical data in enriched_authors table',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: EnrichAuthorSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Author updated successfully',
+      content: {
+        'application/json': {
+          schema: EnrichmentResultSchema,
+        },
+      },
+    },
+    201: {
+      description: 'Author created successfully',
+      content: {
+        'application/json': {
+          schema: EnrichmentResultSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+enrichRoutes.openapi(enrichAuthorRoute, handleEnrichAuthor);
+
+// =================================================================================
+// POST /api/enrich/queue - Queue background enrichment
+// =================================================================================
+
+const queueEnrichmentRoute = createRoute({
+  method: 'post',
+  path: '/api/enrich/queue',
+  tags: ['Enrichment'],
+  summary: 'Queue Enrichment',
+  description: 'Queue background enrichment job for async processing',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: QueueEnrichmentSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Job queued successfully',
+      content: {
+        'application/json': {
+          schema: QueueResultSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+enrichRoutes.openapi(queueEnrichmentRoute, handleQueueEnrichment);
+
+// =================================================================================
+// POST /api/enrich/queue/batch - Batch queue enrichment
+// =================================================================================
+
+const queueBatchRoute = createRoute({
+  method: 'post',
+  path: '/api/enrich/queue/batch',
+  tags: ['Enrichment'],
+  summary: 'Batch Queue Enrichment',
+  description: 'Queue multiple enrichment jobs (max 100 per request). Each ISBN is queued for async processing through Cloudflare Queues.',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: QueueBatchSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Batch queued',
+      content: {
+        'application/json': {
+          schema: QueueBatchResultSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+enrichRoutes.openapi(queueBatchRoute, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { books } = body;
+
+    if (!Array.isArray(books) || books.length === 0) {
+      return c.json({ success: false, error: 'books array required' }, 400);
+    }
+
+    if (books.length > 100) {
+      return c.json({ success: false, error: 'Max 100 books per request' }, 400);
+    }
+
+    const logger = c.get('logger');
+    const queued: string[] = [];
+    const failed: Array<{ isbn: string; error: string }> = [];
+
+    for (const book of books) {
+      const { isbn, priority = 'normal', source = 'unknown', title, author } = book;
+
+      // Validate ISBN using utility
+      const normalizedISBN = normalizeISBN(isbn);
+      if (!normalizedISBN) {
+        failed.push({ isbn: isbn || 'undefined', error: 'Invalid ISBN format' });
+        continue;
+      }
+
+      try {
+        // Queue enrichment processing
+        await c.env.ENRICHMENT_QUEUE.send({
+          isbn: normalizedISBN,
+          entity_type: 'edition',
+          entity_key: normalizedISBN,
+          providers_to_try: ['isbndb', 'google-books', 'openlibrary'],
+          priority,
+          source,
+          title,
+          author,
+          queued_at: new Date().toISOString(),
+        });
+
+        queued.push(normalizedISBN);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        logger.error('Queue send failed', { isbn: normalizedISBN, error: message });
+        failed.push({ isbn: normalizedISBN, error: message });
+      }
+    }
+
+    return c.json({
+      queued: queued.length,
+      failed: failed.length,
+      errors: failed,
+    });
+  } catch (error) {
+    const logger = c.get('logger');
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Batch queue operation failed', { error: message });
+    return c.json(
+      {
+        success: false,
+        error: 'Queue operation failed',
+        message,
+      },
+      500
+    );
+  }
+});
+
+// =================================================================================
+// GET /api/enrich/status/:id - Check enrichment status
+// =================================================================================
+
+const enrichmentStatusRoute = createRoute({
+  method: 'get',
+  path: '/api/enrich/status/{id}',
+  tags: ['Enrichment'],
+  summary: 'Get Enrichment Status',
+  description: 'Check the status of a queued enrichment job',
+  responses: {
+    200: {
+      description: 'Job status retrieved',
+      content: {
+        'application/json': {
+          schema: EnrichmentStatusSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Job not found',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+enrichRoutes.openapi(enrichmentStatusRoute, handleGetEnrichmentStatus);
+
+// =================================================================================
+// POST /api/enrich/batch-direct - Direct batch enrichment
+// =================================================================================
+
+const batchDirectRoute = createRoute({
+  method: 'post',
+  path: '/api/enrich/batch-direct',
+  tags: ['Enrichment'],
+  summary: 'Batch Direct Enrichment',
+  description: `Direct batch enrichment that bypasses queue for maximum efficiency. Fetches metadata for up to 1000 ISBNs in a single ISBNdb Premium API call (10x more efficient than queue).
+
+**Use Cases:**
+- Bulk author bibliography harvesting
+- Large imports (> 100 ISBNs)
+- High-priority batch operations
+
+**Queue Alternative:** For < 100 ISBNs, use /api/enrich/queue/batch for async processing.`,
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: BatchDirectSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Batch processed successfully',
+      content: {
+        'application/json': {
+          schema: BatchDirectResultSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+enrichRoutes.openapi(batchDirectRoute, async (c) => {
+  const startTime = Date.now();
+  const logger = c.get('logger');
+
+  try {
+    const body = await c.req.json();
+    const { isbns, source = 'batch-direct' } = body;
+
+    // Validate input
+    if (!Array.isArray(isbns) || isbns.length === 0) {
+      return c.json({ success: false, error: 'isbns array required' }, 400);
+    }
+
+    if (isbns.length > 1000) {
+      return c.json({ success: false, error: 'Max 1000 ISBNs per request (ISBNdb Premium limit)' }, 400);
+    }
+
+    // Normalize and validate ISBNs using utility
+    const { valid: normalizedISBNs, invalid: invalidISBNs } = validateISBNBatch(isbns);
+
+    if (normalizedISBNs.length === 0) {
+      return c.json({ success: false, error: 'No valid ISBNs provided', invalid: invalidISBNs }, 400);
+    }
+
+    logger.info('Starting batch direct enrichment', {
+      count: normalizedISBNs.length,
+      source,
+    });
+
+    // Fetch all ISBNs in a single ISBNdb API call (10x efficiency!)
+    const batchStartTime = Date.now();
+    const enrichmentData = await fetchISBNdbBatch(normalizedISBNs, c.env);
+    const batchDuration = Date.now() - batchStartTime;
+
+    logger.info('ISBNdb batch complete', {
+      found: enrichmentData.size,
+      requested: normalizedISBNs.length,
+      duration_ms: batchDuration,
+    });
+
+    // Get database connection
+    const sql = c.get('sql');
+
+    // Store results in enriched tables
+    const results = {
+      requested: normalizedISBNs.length,
+      found: enrichmentData.size,
+      enriched: 0,
+      failed: 0,
+      not_found: normalizedISBNs.length - enrichmentData.size,
+      covers_queued: 0,
+      errors: [] as Array<{ isbn: string; error: string }>,
+      api_calls: 1, // Single batch call!
+      duration_ms: 0,
+    };
+
+    for (const [isbn, externalData] of enrichmentData) {
+      try {
+        // Generate a work key for grouping editions
+        const workKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
+
+        // First, create the enriched_work so FK constraint is satisfied
+        await enrichWork(sql, {
+          work_key: workKey,
+          title: externalData.title,
+          description: externalData.description,
+          subject_tags: externalData.subjects,
+          primary_provider: 'isbndb',
+        });
+
+        // Then enrich the edition (stores metadata + cover URLs)
+        await enrichEdition(
+          sql,
+          {
+            isbn,
+            title: externalData.title,
+            subtitle: externalData.subtitle,
+            publisher: externalData.publisher,
+            publication_date: externalData.publicationDate,
+            page_count: externalData.pageCount,
+            format: externalData.binding,
+            language: externalData.language,
+            primary_provider: 'isbndb',
+            cover_urls: externalData.coverUrls,
+            cover_source: 'isbndb',
+            work_key: workKey,
+            subjects: externalData.subjects,
+            dewey_decimal: externalData.deweyDecimal,
+            binding: externalData.binding,
+            related_isbns: externalData.relatedISBNs,
+          },
+          c.env
+        );
+
+        results.enriched++;
+
+        // Queue cover download if we have a cover URL
+        if (externalData.coverUrls?.original || externalData.coverUrls?.large) {
+          try {
+            await c.env.COVER_QUEUE.send({
+              isbn,
+              work_key: workKey,
+              provider_url: externalData.coverUrls.original || externalData.coverUrls.large,
+              priority: 'normal',
+              source,
+            });
+            results.covers_queued++;
+          } catch (queueError) {
+            // Don't fail enrichment if cover queue fails
+            logger.warn('Cover queue failed', { isbn, error: queueError });
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        results.failed++;
+        results.errors.push({ isbn, error: message });
+        logger.error('Edition enrichment failed', { isbn, error: message });
+      }
+    }
+
+    results.duration_ms = Date.now() - startTime;
+
+    logger.info('Batch direct complete', {
+      enriched: results.enriched,
+      failed: results.failed,
+      not_found: results.not_found,
+      duration_ms: results.duration_ms,
+    });
+
+    return c.json(results);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Batch direct operation failed', { error: message });
+    return c.json(
+      {
+        success: false,
+        error: 'Batch enrichment failed',
+        message,
+      },
+      500
+    );
+  }
+});

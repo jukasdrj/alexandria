@@ -309,6 +309,13 @@ export async function smartResolveISBN(
       publish_date: externalData.publicationDate || null,
       publishers: externalData.publisher ? [externalData.publisher] : null,
       pages: externalData.pageCount || null,
+      work_title: externalData.title,
+      openlibrary_edition: externalData.editionKey
+        ? `https://openlibrary.org${externalData.editionKey}`
+        : null,
+      openlibrary_work: externalData.workKey
+        ? `https://openlibrary.org${externalData.workKey}`
+        : null,
       _enriched: true,
       _provider: externalData.provider,
       _storage_failed: true,
