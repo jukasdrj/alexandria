@@ -17,7 +17,6 @@
   "files": [
     "src/**/*.ts",
     "types.ts",
-    "env.d.ts",
     "lib/**/*.ts",
     "*.js",
     "*.d.ts",

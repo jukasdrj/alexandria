@@ -10,7 +10,7 @@
  * 3. OpenLibrary (free, fallback)
  */
 
-import type { Env } from '../env.d.js';
+import type { Env } from '../src/env.js';
 
 // =================================================================================
 // Validation Utilities

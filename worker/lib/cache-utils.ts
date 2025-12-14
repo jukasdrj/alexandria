@@ -7,7 +7,7 @@
  * - Cache key: hash of normalized query params
  */
 
-import type { Env } from './env.d.js';
+import type { Env } from '../src/env.js';
 
 export interface CacheConfig {
   ttlSeconds: number;

@@ -6,7 +6,7 @@
  */
 
 import type { Sql } from 'postgres';
-import type { Env } from '../env.d.js';
+import type { Env } from '../src/env.js';
 import type { ExternalBookData } from './external-apis.js';
 import { resolveExternalISBN } from './external-apis.js';
 import { enrichEdition, enrichWork, enrichAuthor } from '../src/services/enrichment-service.js';

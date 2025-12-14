@@ -4,10 +4,14 @@
  * Comprehensive tester for all ISBNdb API v2 endpoints.
  * Used to verify API access and document capabilities.
  *
+ * This service is specifically for testing/validation purposes and is exposed
+ * via /api/test/isbndb endpoints. It is not abandoned code - it provides
+ * critical API verification and documentation functionality.
+ *
  * @module services/isbndb-test
  */
 
-import type { Env } from '../env.d.js';
+import type { Env } from '../src/env.js';
 
 interface ISBNdbTestResult {
   endpoint: string;

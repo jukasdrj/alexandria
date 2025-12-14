@@ -15,7 +15,7 @@
  * @module services/batch-isbndb
  */
 
-import type { Env } from '../env.d.js';
+import type { Env } from '../src/env.js';
 import type { ExternalBookData } from './external-apis.js';
 import { shouldQueryISBNdb, deduplicateISBNs, normalizeISBN, getISBNBatchStats } from '../lib/isbn-utils.js';
 
