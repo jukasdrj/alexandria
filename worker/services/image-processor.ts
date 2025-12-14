@@ -81,6 +81,8 @@ export interface CoverMetadata extends R2CoverCustomMetadata {
 export interface ProcessCoverOptions {
   force?: boolean;
   knownCoverUrl?: string;
+  /** Source provider for knownCoverUrl (defaults to 'openlibrary') */
+  knownCoverSource?: 'isbndb' | 'google-books' | 'openlibrary';
 }
 
 /**
@@ -305,7 +307,7 @@ export async function processCoverImage(
       console.log(`Using known cover URL for ${normalizedISBN}: ${options.knownCoverUrl}`);
       coverResult = {
         url: options.knownCoverUrl,
-        source: 'openlibrary',  // Assume OpenLibrary since that's typical source
+        source: options.knownCoverSource || 'openlibrary',
         quality: 'high'
       };
     } else {

@@ -383,7 +383,7 @@ app.openapi(coverServeRoute, async (c) => {
 
     if (!object) {
       logger.debug('Cover not found, redirecting to placeholder', { isbn: normalizedISBN });
-      return c.redirect(getPlaceholderCover(), 302);
+      return c.redirect(getPlaceholderCover(c.env), 302);
     }
 
     // Return image with caching headers
