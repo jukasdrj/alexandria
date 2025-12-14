@@ -143,6 +143,11 @@
       "name": "author-harvest-workflow",
       "binding": "AUTHOR_HARVEST",
       "class_name": "AuthorHarvestWorkflow"
+    },
+    {
+      "name": "new-releases-harvest-workflow",
+      "binding": "NEW_RELEASES_HARVEST",
+      "class_name": "NewReleasesHarvestWorkflow"
     }
   ],
 

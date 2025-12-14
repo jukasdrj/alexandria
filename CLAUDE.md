@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues. **Dec 10, 2025**: Upgraded to ISBNdb Premium (3x rate, 10x batch size), added direct batch endpoint for 10x efficiency. **Dec 13, 2025**: Added Cloudflare Workflows for durable bulk author harvesting (auto-recovering, checkpoint-free).
+**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues. **Dec 10, 2025**: Upgraded to ISBNdb Premium (3x rate, 10x batch size), added direct batch endpoint for 10x efficiency. **Dec 13, 2025**: Added Cloudflare Workflows for durable bulk author harvesting (auto-recovering, checkpoint-free). **Dec 14, 2025**: Added NewReleasesHarvestWorkflow with self-spawning continuation for fully automated harvesting.
 
 ## Architecture Flow
 
@@ -783,89 +783,96 @@ bulk-author-harvest.js
                             └─→ isbn/{isbn}/{large,medium,small}.webp
 ```
 
-## Cloudflare Workflows (NEW - Dec 13, 2025)
+## Cloudflare Workflows (Updated Dec 14, 2025)
 
 ### Overview
 
-Cloudflare Workflows provides durable, long-running execution for author harvesting. Migrated from `scripts/bulk-author-harvest.js` to solve:
-- Local machine dependency (laptop must stay running)
-- Manual checkpoint management
-- ISBNdb JWT expiry (cover URLs expire after 2 hours)
-- No auto-recovery from crashes
+Cloudflare Workflows provides durable, long-running execution for harvesting operations. Two workflows available:
 
-### Workflow: `AuthorHarvestWorkflow`
+1. **AuthorHarvestWorkflow** - Bulk author bibliography harvesting by tier
+2. **NewReleasesHarvestWorkflow** - New book releases by date range (self-spawning)
+
+Benefits over local scripts:
+- No local machine dependency (runs on Cloudflare edge)
+- Automatic retry on transient failures
+- Durable execution (survives Worker restarts)
+- ISBNdb JWT handled within 2-hour window
+
+### Workflow 1: `AuthorHarvestWorkflow`
 
 **Binding**: `AUTHOR_HARVEST`
 **Class**: `AuthorHarvestWorkflow` (in `worker/src/workflows/author-harvest.ts`)
 
-### API Endpoints
-
 ```bash
-# Start a harvest workflow
+# Start author harvest
 curl -X POST https://alexandria.ooheynerds.com/api/harvest/start \
   -H "Content-Type: application/json" \
   -d '{"tier": "top-100"}'
 
-# Response:
-# {
-#   "success": true,
-#   "data": {
-#     "instance_id": "abc123",
-#     "status": "started",
-#     "tier": "top-100",
-#     "monitor_url": "/api/harvest/status/abc123"
-#   }
-# }
-
-# Check workflow status
+# Check status
 curl https://alexandria.ooheynerds.com/api/harvest/status/{instance_id}
-
-# List workflows (placeholder - Cloudflare doesn't have native list API yet)
-curl https://alexandria.ooheynerds.com/api/harvest/list
 ```
 
-### Available Tiers
+| Tier | Authors | Est. Steps |
+|------|---------|------------|
+| `top-10` | 10 | ~50 |
+| `top-100` | 100 | ~550 |
+| `top-1000` | 1,000 | ~5,500 |
 
-| Tier | Authors | Est. Steps | Cost |
-|------|---------|------------|------|
-| `top-10` | 10 | ~50 | $0 (testing) |
-| `top-100` | 100 | ~550 | $0 (free tier) |
-| `top-1000` | 1,000 | ~5,500 | $0 (free tier) |
-| `1000-5000` | 4,000 | ~22,000 | $0 (free tier) |
-| `5000-20000` | 15,000 | ~82,500 | $0 (free tier) |
+### Workflow 2: `NewReleasesHarvestWorkflow` (NEW - Dec 14, 2025)
 
-Free tier: 100,000 steps/month.
+**Binding**: `NEW_RELEASES_HARVEST`
+**Class**: `NewReleasesHarvestWorkflow` (in `worker/src/workflows/new-releases-harvest.ts`)
 
-### Workflow Features
-
-- **Automatic retry**: 3 retries with exponential backoff on transient failures
-- **Rate limiting**: 500ms between authors (safe for ISBNdb 3 req/sec)
-- **Batching**: 10 authors per workflow step to minimize subrequest overhead
-- **50-author limit**: Per workflow invocation (due to 1000 subrequest limit)
-- **Quota detection**: Stops gracefully on ISBNdb quota exhaustion
-- **Progress visibility**: Status via `/api/harvest/status/:id`
-- **Durable execution**: Survives Worker restarts
-- **Continuation support**: Returns `next_offset` for multi-workflow processing
-
-### Critical Constraint: 1000 Subrequest Limit
-
-Cloudflare Workflows has a **1000 subrequest limit per workflow invocation**. This includes:
-- ISBNdb API calls (~1 per author)
-- Database operations (~5 per author)
-- Queue sends (~5 per author)
-
-To stay under this limit, each workflow processes **max 50 authors**. For larger tiers, start multiple workflows with offset:
+Harvests new book releases from ISBNdb by publication date. **Fully automated with self-spawning continuation** - just start it and walk away.
 
 ```bash
-# Process authors 0-49
-curl -X POST .../api/harvest/start -d '{"tier": "top-100"}'
-# Returns next_offset: 50
+# Start new releases harvest (Nov-Dec 2025)
+curl -X POST https://alexandria.ooheynerds.com/api/harvest/new-releases \
+  -H "Content-Type: application/json" \
+  -d '{"start_month": "2025-11", "end_month": "2025-12"}'
 
-# Process authors 50-99
-curl -X POST .../api/harvest/start -d '{"tier": "top-100", "offset": 50}'
+# Check status
+curl https://alexandria.ooheynerds.com/api/harvest/new-releases/{instance_id}
 ```
 
-See: [Cloudflare Workers Subrequest Limits](https://developers.cloudflare.com/workers/platform/limits/#how-many-subrequests-can-i-make)
+**Parameters**:
+- `start_month` (required): Start month in YYYY-MM format
+- `end_month` (required): End month in YYYY-MM format
+- `max_pages_per_month` (default: 100): Pages to fetch per month (100 books/page)
+- `skip_existing` (default: true): Skip ISBNs already in Alexandria
+
+### Self-Spawning Continuation Pattern (Dec 14, 2025)
+
+The NewReleasesHarvestWorkflow implements **self-spawning continuation** for fully automated processing:
+
+```typescript
+// When workflow hits its limit, it spawns its own successor
+if (results.status === 'continuation_needed' && results.next_month) {
+  await step.do('spawn-continuation', async () => {
+    await this.env.NEW_RELEASES_HARVEST.create({
+      id: `new-releases-${results.next_month}-${Date.now()}`,
+      params: { ...params, resume_from_month, resume_from_page }
+    });
+  });
+  results.continuation_spawned = true;
+}
+```
+
+**Result**: Start one workflow, it chains through all months automatically. No manual intervention needed.
+
+### Workflow Limits (Optimized Dec 14, 2025)
+
+| Limit | AuthorHarvest | NewReleasesHarvest |
+|-------|---------------|-------------------|
+| Items per workflow | 40 authors | **150 books** |
+| Subrequests/item | ~14 | ~6 |
+| Pages fetched | N/A | **100/month** (default) |
+| Continuation | Manual (next_offset) | **Auto (self-spawn)** |
+
+**Subrequest Budget** (1000 limit per workflow):
+- NewReleasesHarvest: 150 books × 6 subrequests = 900 (safe margin)
+- AuthorHarvest: 40 authors × 14 subrequests = 560 (safe margin)
 
 ### wrangler.jsonc Configuration
 
@@ -875,6 +882,11 @@ See: [Cloudflare Workers Subrequest Limits](https://developers.cloudflare.com/wo
     "name": "author-harvest-workflow",
     "binding": "AUTHOR_HARVEST",
     "class_name": "AuthorHarvestWorkflow"
+  },
+  {
+    "name": "new-releases-harvest-workflow",
+    "binding": "NEW_RELEASES_HARVEST",
+    "class_name": "NewReleasesHarvestWorkflow"
   }
 ]
 ```
@@ -882,11 +894,14 @@ See: [Cloudflare Workers Subrequest Limits](https://developers.cloudflare.com/wo
 ### Monitoring
 
 ```bash
-# Check workflow status
+# Check author harvest status
 curl https://alexandria.ooheynerds.com/api/harvest/status/{instance_id}
 
+# Check new releases status
+curl https://alexandria.ooheynerds.com/api/harvest/new-releases/{instance_id}
+
 # View workflow logs
-npx wrangler tail alexandria --format pretty | grep -E "AuthorHarvest"
+npx wrangler tail alexandria --format pretty | grep -E "(AuthorHarvest|NewReleasesHarvest)"
 
 # Cloudflare Dashboard
 # Workers & Pages > alexandria > Workflows tab
@@ -902,10 +917,12 @@ alex/
 │   │   ├── env.ts             # Environment type definitions
 │   │   ├── routes/            # API route handlers
 │   │   │   ├── harvest.ts     # Workflow trigger endpoints (/api/harvest/*)
+│   │   │   ├── books.ts       # ISBNdb book search endpoints
 │   │   │   ├── authors.ts     # Author API endpoints
 │   │   │   └── ...            # Other route modules
 │   │   └── workflows/
-│   │       └── author-harvest.ts  # AuthorHarvestWorkflow (Cloudflare Workflows)
+│   │       ├── author-harvest.ts       # AuthorHarvestWorkflow (tier-based)
+│   │       └── new-releases-harvest.ts # NewReleasesHarvestWorkflow (self-spawning)
 │   ├── wrangler.jsonc         # Wrangler config (Hyperdrive, R2, KV, Secrets, Queues, Workflows)
 │   ├── services/
 │   │   ├── image-processor.js # ISBN-based cover processing pipeline
@@ -953,9 +970,10 @@ alex/
       { "binding": "COVER_QUEUE" }          // Cover processing queue
     ]
   },
-  "workflows": [{
-    "binding": "AUTHOR_HARVEST"             // AuthorHarvestWorkflow for bulk harvesting
-  }]
+  "workflows": [
+    { "binding": "AUTHOR_HARVEST" },        // AuthorHarvestWorkflow (tier-based)
+    { "binding": "NEW_RELEASES_HARVEST" }   // NewReleasesHarvestWorkflow (self-spawning)
+  ]
 }
 ```
 

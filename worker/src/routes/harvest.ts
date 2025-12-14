@@ -20,7 +20,7 @@ import {
 // Schemas
 // =================================================================================
 
-const TierSchema = z.enum(['top-10', 'top-100', 'top-1000', '1000-5000', '5000-20000']).openapi('HarvestTier');
+const TierSchema = z.enum(['top-10', 'top-100', 'top-1000', '1000-5000', '5000-20000', 'curated']).openapi('HarvestTier');
 
 const StartHarvestRequestSchema = z.object({
   tier: TierSchema.default('top-100').describe('Author tier to harvest'),
@@ -28,12 +28,19 @@ const StartHarvestRequestSchema = z.object({
   limit: z.number().int().positive().max(20000).optional().describe('Override limit from tier default'),
   maxPagesPerAuthor: z.number().int().positive().max(10).default(1).describe('Max ISBNdb pages per author (1 = 100 books)'),
   resumeFromBatch: z.number().int().nonnegative().optional().describe('Resume from specific batch index (batches are 10 authors each)'),
-}).openapi('StartHarvestRequest');
+  curatedAuthors: z.array(z.string()).optional().describe('List of author names for curated harvest (required when tier=curated)'),
+  curatedListName: z.string().optional().describe('Name of the curated list for logging'),
+}).refine(
+  (data) => data.tier !== 'curated' || (data.curatedAuthors && data.curatedAuthors.length > 0),
+  { message: 'curatedAuthors is required when tier is "curated"' }
+).openapi('StartHarvestRequest');
 
 const HarvestStartedDataSchema = z.object({
   instance_id: z.string().describe('Workflow instance ID for status tracking'),
   status: z.literal('started').describe('Workflow start status'),
   tier: TierSchema,
+  list_name: z.string().optional().describe('Name of the curated list (if applicable)'),
+  author_count: z.union([z.number(), z.string()]).optional().describe('Number of authors to process'),
   monitor_url: z.string().describe('URL to monitor workflow progress'),
 }).openapi('HarvestStartedData');
 
@@ -66,8 +73,115 @@ const HarvestStatusSuccessSchema = createSuccessSchema(HarvestStatusDataSchema, 
 const HarvestListSuccessSchema = createSuccessSchema(HarvestListDataSchema, 'HarvestListSuccess');
 
 // =================================================================================
+// New Releases Harvest Schemas
+// =================================================================================
+
+const StartNewReleasesRequestSchema = z.object({
+  start_month: z.string().regex(/^\d{4}-\d{2}$/).describe('Start month (YYYY-MM format)'),
+  end_month: z.string().regex(/^\d{4}-\d{2}$/).describe('End month (YYYY-MM format)'),
+  max_pages_per_month: z.number().int().min(1).max(100).default(100)
+    .describe('Maximum pages per month (100 results per page, default 100)'),
+  skip_existing: z.boolean().default(true)
+    .describe('Skip ISBNs already in Alexandria'),
+  resume_from_month: z.number().int().nonnegative().optional()
+    .describe('Resume from specific month index'),
+  resume_from_page: z.number().int().positive().optional()
+    .describe('Resume from specific page within month'),
+}).openapi('StartNewReleasesRequest');
+
+const NewReleasesStartedDataSchema = z.object({
+  instance_id: z.string().describe('Workflow instance ID'),
+  status: z.literal('started').describe('Workflow start status'),
+  start_month: z.string().describe('Start month'),
+  end_month: z.string().describe('End month'),
+  max_pages_per_month: z.number().describe('Max pages per month'),
+  monitor_url: z.string().describe('URL to monitor workflow progress'),
+}).openapi('NewReleasesStartedData');
+
+const NewReleasesStartedSuccessSchema = createSuccessSchema(NewReleasesStartedDataSchema, 'NewReleasesStartedSuccess');
+
+// =================================================================================
 // Route Definitions
 // =================================================================================
+
+const startNewReleasesRoute = createRoute({
+  method: 'post',
+  path: '/api/harvest/new-releases',
+  tags: ['Workflows'],
+  summary: 'Start new releases harvest workflow',
+  description: `
+Starts a durable Cloudflare Workflow to harvest new book releases from ISBNdb by date range.
+
+Use this to fill the gap between your OpenLibrary dump and today.
+
+**Example - Sep-Dec 2025 releases:**
+\`\`\`json
+{
+  "start_month": "2025-09",
+  "end_month": "2025-12",
+  "max_pages_per_month": 20
+}
+\`\`\`
+
+**Features:**
+- Processes month-by-month for manageable batches
+- Automatic retry on transient failures
+- Rate limiting (350ms between ISBNdb calls)
+- Skips existing ISBNs (deduplication)
+- Cover queue integration
+- Progress persisted across Worker restarts
+  `,
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: StartNewReleasesRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    202: {
+      description: 'Workflow started successfully',
+      content: {
+        'application/json': {
+          schema: NewReleasesStartedSuccessSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Invalid request parameters',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    500: {
+      description: 'Failed to start workflow',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+const getNewReleasesStatusRoute = createRoute({
+  method: 'get',
+  path: '/api/harvest/new-releases/{instanceId}',
+  tags: ['Workflows'],
+  summary: 'Get new releases workflow status',
+  description: 'Returns the current status of a new releases harvest workflow instance.',
+  request: {
+    params: z.object({
+      instanceId: z.string().describe('Workflow instance ID'),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Workflow status retrieved',
+      content: { 'application/json': { schema: HarvestStatusSuccessSchema } },
+    },
+    404: {
+      description: 'Workflow not found',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+});
 
 const startHarvestRoute = createRoute({
   method: 'post',
@@ -77,18 +191,30 @@ const startHarvestRoute = createRoute({
   description: `
 Starts a durable Cloudflare Workflow to harvest author bibliographies from ISBNdb.
 
-**Tiers:**
+**Tiers (top-N by OpenLibrary work count):**
 - \`top-10\`: First 10 authors (testing)
 - \`top-100\`: First 100 authors (validation)
 - \`top-1000\`: First 1000 authors (~1 day)
 - \`1000-5000\`: Authors 1000-5000
 - \`5000-20000\`: Authors 5000-20000
+- \`curated\`: Custom author list (requires \`curatedAuthors\` array)
+
+**Curated List Example:**
+\`\`\`json
+{
+  "tier": "curated",
+  "curatedAuthors": ["Brandon Sanderson", "Patrick Rothfuss", "Sarah J. Maas"],
+  "curatedListName": "fantasy-authors"
+}
+\`\`\`
 
 **Features:**
 - Automatic retry on transient failures
-- Rate limiting (1.5s between authors)
+- Rate limiting (500ms between authors)
 - ISBNdb quota exhaustion detection
 - Progress persisted across Worker restarts
+- Work deduplication (no duplicate works created)
+- Author-work linking (proper database relationships)
   `,
   request: {
     body: {
@@ -196,9 +322,11 @@ app.openapi(startHarvestRoute, async (c) => {
 
   try {
     const body = c.req.valid('json');
-    const { tier, offset, limit, maxPagesPerAuthor, resumeFromBatch } = body;
+    const { tier, offset, limit, maxPagesPerAuthor, resumeFromBatch, curatedAuthors, curatedListName } = body;
 
-    logger.info('Starting author harvest workflow', { tier, offset, limit, maxPagesPerAuthor });
+    const listName = curatedListName || tier;
+    const authorCount = tier === 'curated' && curatedAuthors ? curatedAuthors.length : 'tier-based';
+    logger.info('Starting author harvest workflow', { tier, listName, authorCount, offset, limit, maxPagesPerAuthor });
 
     // Create workflow instance
     const instance = await c.env.AUTHOR_HARVEST.create({
@@ -208,15 +336,19 @@ app.openapi(startHarvestRoute, async (c) => {
         limit,
         maxPagesPerAuthor,
         resumeFromBatch,
+        curatedAuthors,
+        curatedListName,
       },
     });
 
-    logger.info('Workflow started', { instanceId: instance.id, tier });
+    logger.info('Workflow started', { instanceId: instance.id, tier, listName });
 
     return createSuccessResponse(c, {
       instance_id: instance.id,
       status: 'started' as const,
       tier,
+      list_name: listName,
+      author_count: authorCount,
       monitor_url: `/api/harvest/status/${instance.id}`,
     }, 202);
   } catch (error) {
@@ -294,6 +426,99 @@ app.openapi(listWorkflowsRoute, async (c) => {
       c,
       ErrorCode.INTERNAL_ERROR,
       'Failed to list workflows',
+      { details: error instanceof Error ? error.message : 'Unknown error' }
+    );
+  }
+});
+
+// =================================================================================
+// New Releases Harvest Route Handlers
+// =================================================================================
+
+// POST /api/harvest/new-releases - Start new releases workflow
+app.openapi(startNewReleasesRoute, async (c) => {
+  const logger = c.get('logger');
+
+  try {
+    const body = c.req.valid('json');
+    const { start_month, end_month, max_pages_per_month, skip_existing, resume_from_month, resume_from_page } = body;
+
+    logger.info('Starting new releases harvest workflow', {
+      start_month,
+      end_month,
+      max_pages_per_month,
+      skip_existing,
+    });
+
+    // Create workflow instance
+    const instance = await c.env.NEW_RELEASES_HARVEST.create({
+      params: {
+        start_month,
+        end_month,
+        max_pages_per_month,
+        skip_existing,
+        resume_from_month,
+        resume_from_page,
+      },
+    });
+
+    logger.info('New releases workflow started', { instanceId: instance.id, start_month, end_month });
+
+    return createSuccessResponse(c, {
+      instance_id: instance.id,
+      status: 'started' as const,
+      start_month,
+      end_month,
+      max_pages_per_month,
+      monitor_url: `/api/harvest/new-releases/${instance.id}`,
+    }, 202);
+  } catch (error) {
+    logger.error('Failed to start new releases workflow', {
+      error: error instanceof Error ? error.message : 'Unknown',
+    });
+
+    return createErrorResponse(
+      c,
+      ErrorCode.INTERNAL_ERROR,
+      'Failed to start new releases workflow',
+      { details: error instanceof Error ? error.message : 'Unknown error' }
+    );
+  }
+});
+
+// GET /api/harvest/new-releases/:instanceId - Get workflow status
+app.openapi(getNewReleasesStatusRoute, async (c) => {
+  const logger = c.get('logger');
+  const { instanceId } = c.req.valid('param');
+
+  try {
+    const instance = await c.env.NEW_RELEASES_HARVEST.get(instanceId);
+    const status = await instance.status();
+
+    return createSuccessResponse(c, {
+      instance_id: instanceId,
+      workflow_status: status,
+    });
+  } catch (error) {
+    logger.error('Failed to get new releases workflow status', {
+      instanceId,
+      error: error instanceof Error ? error.message : 'Unknown',
+    });
+
+    const errorMessage = error instanceof Error ? error.message : '';
+    if (errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+      return createErrorResponse(
+        c,
+        ErrorCode.NOT_FOUND,
+        'Workflow instance not found',
+        { instanceId }
+      );
+    }
+
+    return createErrorResponse(
+      c,
+      ErrorCode.INTERNAL_ERROR,
+      'Failed to get workflow status',
       { details: error instanceof Error ? error.message : 'Unknown error' }
     );
   }

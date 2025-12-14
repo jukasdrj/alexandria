@@ -16,6 +16,7 @@ import { enrichRoutes } from './routes/enrich.js';
 import coversRoutes from './routes/covers.js';
 import coversLegacyRoutes from './routes/covers-legacy.js';
 import authorsRoutes from './routes/authors.js';
+import booksRoutes from './routes/books.js';
 import testRoutes from './routes/test.js';
 import harvestRoutes from './routes/harvest.js';
 
@@ -24,6 +25,7 @@ import { processCoverQueue, processEnrichmentQueue } from './services/queue-hand
 
 // Workflow exports (must be exported at module level for Cloudflare to discover)
 export { AuthorHarvestWorkflow } from './workflows/author-harvest.js';
+export { NewReleasesHarvestWorkflow } from './workflows/new-releases-harvest.js';
 
 // =================================================================================
 // Application Setup
@@ -110,6 +112,7 @@ const subRouters = [
   coversRoutes,
   coversLegacyRoutes,
   authorsRoutes,
+  booksRoutes,
   testRoutes,
   harvestRoutes,
 ];

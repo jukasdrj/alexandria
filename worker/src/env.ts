@@ -30,6 +30,7 @@ export interface Env {
 
   // Workflow bindings
   AUTHOR_HARVEST: Workflow;
+  NEW_RELEASES_HARVEST: Workflow;
 
   // Environment variables (from wrangler.jsonc vars)
   DB_MAX_CONNECTIONS: string;

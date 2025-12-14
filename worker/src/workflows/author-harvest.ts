@@ -20,6 +20,7 @@ import postgres from 'postgres';
 import type { Env } from '../env.js';
 import { fetchAuthorBibliography } from '../services/isbndb-author.js';
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
+import { formatPgArray } from '../services/utils.js';
 
 // Cloudflare Workflows has a 1000 subrequest limit per INVOCATION (not per step)
 // Each author = ~1 ISBNdb call + ~8 DB operations + ~5 queue sends = ~14 subrequests
@@ -147,15 +148,17 @@ export async function findOrCreateWork(
       authorNames.slice(0, 3).map(name => findOrCreateAuthor(sql, name)) // Limit to first 3 authors
     );
 
-    const existingWork = await sql`
+    // Format author keys as PostgreSQL array literal for ANY() clause
+    const authorKeysArray = formatPgArray(authorKeys);
+    const existingWork = authorKeysArray ? await sql`
       SELECT ew.work_key, similarity(LOWER(ew.title), ${title.toLowerCase()}) as sim
       FROM enriched_works ew
       JOIN work_authors_enriched wae ON ew.work_key = wae.work_key
-      WHERE wae.author_key = ANY(${authorKeys})
+      WHERE wae.author_key = ANY(${authorKeysArray}::text[])
         AND similarity(LOWER(ew.title), ${title.toLowerCase()}) > 0.8
       ORDER BY sim DESC
       LIMIT 1
-    `;
+    ` : [];
     if (existingWork.length > 0) {
       const workKey = (existingWork[0] as { work_key: string }).work_key;
       workKeyCache.set(isbn, workKey);
@@ -189,12 +192,13 @@ const TIERS = {
   'top-1000': { offset: 0, limit: 1000 },
   '1000-5000': { offset: 1000, limit: 4000 },
   '5000-20000': { offset: 5000, limit: 15000 },
+  'curated': { offset: 0, limit: 0 }, // Special tier for curated lists
 } as const;
 
 type TierName = keyof typeof TIERS;
 
 export interface AuthorHarvestParams {
-  /** Tier to process (top-10, top-100, top-1000, etc.) */
+  /** Tier to process (top-10, top-100, top-1000, curated, etc.) */
   tier: TierName;
   /** Override offset from tier default */
   offset?: number;
@@ -204,6 +208,10 @@ export interface AuthorHarvestParams {
   maxPagesPerAuthor?: number;
   /** Resume from specific batch index (for crash recovery) */
   resumeFromBatch?: number;
+  /** Curated list of author names (used when tier='curated') */
+  curatedAuthors?: string[];
+  /** Name of the curated list for logging */
+  curatedListName?: string;
 }
 
 interface Author {
@@ -261,11 +269,18 @@ export class AuthorHarvestWorkflow extends WorkflowEntrypoint<Env, AuthorHarvest
       limit: overrideLimit,
       maxPagesPerAuthor = 1,
       resumeFromBatch = 0,
+      curatedAuthors,
+      curatedListName,
     } = event.payload;
 
     // Validate tier
     if (!TIERS[tier]) {
       throw new Error(`Invalid tier: ${tier}. Valid tiers: ${Object.keys(TIERS).join(', ')}`);
+    }
+
+    // Validate curated list if tier is 'curated'
+    if (tier === 'curated' && (!curatedAuthors || curatedAuthors.length === 0)) {
+      throw new Error('curatedAuthors array is required when tier is "curated"');
     }
 
     const tierConfig = TIERS[tier];
@@ -280,9 +295,12 @@ export class AuthorHarvestWorkflow extends WorkflowEntrypoint<Env, AuthorHarvest
     let totalCoversQueued = 0;
     const errors: Array<{ author: string; error: string }> = [];
 
-    // Step 1: Fetch author list from Alexandria API
+    // For curated lists, use the provided author names directly
+    const listName = curatedListName || tier;
+
+    // Step 1: Fetch author list (from DB or use curated list)
     const authors = await step.do(
-      `fetch-authors-${tier}`,
+      `fetch-authors-${listName}`,
       {
         retries: {
           limit: 3,
@@ -292,6 +310,22 @@ export class AuthorHarvestWorkflow extends WorkflowEntrypoint<Env, AuthorHarvest
         timeout: '2 minutes',
       },
       async () => {
+        // For curated lists, use the provided author names directly
+        if (tier === 'curated' && curatedAuthors) {
+          console.log(`[AuthorHarvestWorkflow] Using curated list: ${listName} (${curatedAuthors.length} authors)`);
+
+          // Apply offset and limit to curated list if provided
+          const startIdx = offset;
+          const endIdx = limit > 0 ? offset + limit : curatedAuthors.length;
+          const slicedAuthors = curatedAuthors.slice(startIdx, endIdx);
+
+          return slicedAuthors.map(name => ({
+            author_name: name.trim(),
+            work_count: 0, // Unknown for curated lists
+          }));
+        }
+
+        // For tier-based selection, query the database
         console.log(`[AuthorHarvestWorkflow] Querying authors directly via Hyperdrive (offset=${offset}, limit=${limit})`);
 
         // Use Hyperdrive directly instead of HTTP to bypass Cloudflare Access
@@ -302,6 +336,9 @@ export class AuthorHarvestWorkflow extends WorkflowEntrypoint<Env, AuthorHarvest
         });
 
         try {
+          // Query authors sorted by work count with comprehensive filters
+          // Excludes: government entities, publishers, auto-generated content farms,
+          // corporate authors, and bad data entries
           const results = await sql`
             SELECT
               a.key AS author_key,
@@ -310,11 +347,24 @@ export class AuthorHarvestWorkflow extends WorkflowEntrypoint<Env, AuthorHarvest
             FROM authors a
             JOIN author_works aw ON aw.author_key = a.key
             WHERE a.data->>'name' IS NOT NULL
+              AND LENGTH(a.data->>'name') > 3
+              -- Exclude institutional/corporate authors (regex pattern)
+              AND a.data->>'name' !~* '^(United States|Great Britain|Anonymous|Congress|House|Senate|Committee|Department|Ministry|Government|Office|Board|Bureau|Commission|Council|Agency|Institute|Corporation|Company|Ltd|Inc|Corp|Association|Society|Foundation|University|College|Library|Museum|Press|Publishing|Rand McNally|ICON Group|Philip M\. Parker|\[name missing\]|Scott Foresman|McGraw|Houghton|Pearson|Cengage|Wiley|Springer|Elsevier|Oxford University|Cambridge University|Harvard University)'
+              -- Exclude common junk patterns
               AND a.data->>'name' NOT LIKE '%Staff%'
-              AND a.data->>'name' NOT LIKE '%Press%'
-              AND a.data->>'name' NOT LIKE '%Publishing%'
               AND a.data->>'name' NOT LIKE '%Collectif%'
-              AND LENGTH(COALESCE(a.data->>'name', '')) > 3
+              AND a.data->>'name' NOT LIKE '%Congress%'
+              AND a.data->>'name' NOT LIKE '%Parliament%'
+              AND a.data->>'name' NOT LIKE '%Government%'
+              AND a.data->>'name' NOT LIKE '%Ministry%'
+              AND a.data->>'name' NOT LIKE '%Committee%'
+              AND a.data->>'name' NOT LIKE '%Commission%'
+              AND a.data->>'name' NOT LIKE '%Department%'
+              AND a.data->>'name' NOT LIKE '%Accounting Office%'
+              AND a.data->>'name' NOT LIKE '%Monetary Fund%'
+              AND a.data->>'name' NOT LIKE '%(Firm)%'
+              -- Exclude auto-generated content farms
+              AND a.data->>'name' NOT IN ('Various', 'various', 'Anonymous', 'Etchbooks', 'Blue Cloud Novelty', 'Suzanne Marshall', 'Viele Termine Publikationen', 'Irb Media', 'Global Doggy', 'Distinctive Journals', 'Gilad Soffer', 'Nick Snels', 'Diego Steiger', 'Julien Coallier', 'Livia Isoma', 'Alex Medvedev', 'Ronald Russell', 'James McFee', 'Hôtel Drouot', 'Sotheby''s (Firm)', 'Christie''s (Firm)', 'Scotland', 'Organisation for Economic Co-operation and Development')
             GROUP BY a.key, a.data->>'name'
             ORDER BY work_count DESC
             OFFSET ${offset}
@@ -649,12 +699,10 @@ export class AuthorHarvestWorkflow extends WorkflowEntrypoint<Env, AuthorHarvest
             await sql`
               UPDATE enriched_editions
               SET
-                cover_urls = ${JSON.stringify({
-                  original: book.image_original,
-                  large: book.image,
-                  medium: book.image,
-                  small: book.image,
-                })},
+                cover_url_original = ${book.image_original || null},
+                cover_url_large = ${book.image || null},
+                cover_url_medium = ${book.image || null},
+                cover_url_small = ${book.image || null},
                 cover_source = 'isbndb',
                 updated_at = NOW()
               WHERE isbn = ${book.isbn}
