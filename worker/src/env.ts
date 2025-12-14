@@ -28,10 +28,6 @@ export interface Env {
   ENRICHMENT_QUEUE: Queue;
   COVER_QUEUE: Queue;
 
-  // Workflow bindings
-  AUTHOR_HARVEST: Workflow;
-  NEW_RELEASES_HARVEST: Workflow;
-
   // Environment variables (from wrangler.jsonc vars)
   DB_MAX_CONNECTIONS: string;
   DB_CONNECTION_TIMEOUT_MS: string;

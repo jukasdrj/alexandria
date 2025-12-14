@@ -136,27 +136,6 @@
     ]
   },
 
-  // Cloudflare Workflows for durable, long-running tasks
-  // See: https://developers.cloudflare.com/workflows/
-  "workflows": [
-    {
-      "name": "author-harvest-workflow",
-      "binding": "AUTHOR_HARVEST",
-      "class_name": "AuthorHarvestWorkflow"
-    },
-    {
-      "name": "new-releases-harvest-workflow",
-      "binding": "NEW_RELEASES_HARVEST",
-      "class_name": "NewReleasesHarvestWorkflow"
-    }
-  ],
-
-  "triggers": {
-    "crons": [
-      "* * * * *"
-    ]
-  },
-
   "limits": {
     "cpu_ms": 300000
   },

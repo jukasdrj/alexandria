@@ -9,7 +9,7 @@
 import postgres from 'postgres';
 import type { Env } from '../env.js';
 import { processAndStoreCover, coversExist } from '../../services/jsquash-processor.js';
-import { fetchBestCover } from '../../services/cover-fetcher.js';
+import { fetchBestCover, fetchISBNdbCover } from '../../services/cover-fetcher.js';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 import { enrichEdition, enrichWork } from './enrichment-service.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
@@ -115,11 +115,37 @@ export async function processCoverQueue(
       }
 
       // Process with jSquash: download -> decode -> resize -> WebP -> R2
-      const result = (await processAndStoreCover(
+      let result = (await processAndStoreCover(
         normalizedISBN,
         coverUrl,
         env
       )) as CoverProcessingResult;
+
+      // JWT Expiry Recovery (Issue #96): If download failed with 401/403,
+      // the ISBNdb image_original JWT likely expired. Re-fetch fresh URL from ISBNdb.
+      if (result.status === 'error' && result.error?.match(/HTTP (401|403)/)) {
+        logger.info('JWT expired, re-fetching fresh cover URL from ISBNdb', {
+          isbn: normalizedISBN,
+          originalError: result.error,
+        });
+
+        const freshCover = await fetchISBNdbCover(normalizedISBN, env);
+        if (freshCover?.url) {
+          logger.info('Got fresh cover URL from ISBNdb, retrying download', {
+            isbn: normalizedISBN,
+            newUrl: freshCover.url.substring(0, 50) + '...',
+          });
+
+          // Retry with fresh URL
+          result = (await processAndStoreCover(
+            normalizedISBN,
+            freshCover.url,
+            env
+          )) as CoverProcessingResult;
+        } else {
+          logger.warn('Failed to get fresh cover URL from ISBNdb', { isbn: normalizedISBN });
+        }
+      }
 
       if (result.status === 'processed') {
         results.processed++;

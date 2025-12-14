@@ -16,7 +16,7 @@ import {
 } from '../schemas/authors.js';
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
 import { fetchWikidataMultipleBatches } from '../../services/wikidata-client.js';
-import { findOrCreateWork, linkWorkToAuthors } from '../workflows/author-harvest.js';
+import { findOrCreateWork, linkWorkToAuthors } from '../services/work-utils.js';
 
 // =================================================================================
 // ISBNdb Types

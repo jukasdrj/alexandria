@@ -16,7 +16,7 @@ import {
   ErrorCode,
 } from '../schemas/response.js';
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
-import { findOrCreateWork, linkWorkToAuthors } from '../workflows/author-harvest.js';
+import { findOrCreateWork, linkWorkToAuthors } from '../services/work-utils.js';
 
 // =================================================================================
 // Types

@@ -22,6 +22,131 @@ import {
 import { smartResolveISBN, shouldResolveExternally } from '../../services/smart-enrich.js';
 
 // =================================================================================
+// OpenLibrary Fallback Queries
+// =================================================================================
+
+/**
+ * Fallback to OpenLibrary core tables when enriched tables return no results.
+ * This ensures the 54M+ OpenLibrary editions are searchable, not just enriched ones.
+ */
+async function fallbackISBNSearch(sql: any, isbn: string) {
+  return sql`
+    SELECT
+      e.data->>'title' AS title,
+      ei.isbn,
+      e.data->>'publish_date' AS publish_date,
+      e.data->>'publishers' AS publishers,
+      (e.data->>'number_of_pages')::int AS pages,
+      w.data->>'title' AS work_title,
+      e.key AS edition_key,
+      e.work_key,
+      COALESCE(
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'name', a.data->>'name',
+            'key', a.key
+          )
+        ) FILTER (WHERE a.key IS NOT NULL),
+        '[]'::json
+      ) AS authors
+    FROM edition_isbns ei
+    JOIN editions e ON e.key = ei.edition_key
+    LEFT JOIN works w ON w.key = e.work_key
+    LEFT JOIN author_works aw ON aw.work_key = w.key
+    LEFT JOIN authors a ON a.key = aw.author_key
+    WHERE ei.isbn = ${isbn}
+    GROUP BY e.key, ei.isbn, e.data, w.data, e.work_key
+    LIMIT 1
+  `;
+}
+
+async function fallbackTitleSearch(sql: any, title: string, limit: number, offset: number) {
+  const titlePattern = `%${title}%`;
+
+  const [countResult, dataResult] = await Promise.all([
+    sql`
+      SELECT COUNT(*)::int AS total
+      FROM editions e
+      WHERE e.data->>'title' ILIKE ${titlePattern}
+    `,
+    sql`
+      SELECT
+        e.data->>'title' AS title,
+        (SELECT ei.isbn FROM edition_isbns ei WHERE ei.edition_key = e.key LIMIT 1) AS isbn,
+        e.data->>'publish_date' AS publish_date,
+        e.data->>'publishers' AS publishers,
+        (e.data->>'number_of_pages')::int AS pages,
+        w.data->>'title' AS work_title,
+        e.key AS edition_key,
+        e.work_key,
+        COALESCE(
+          json_agg(
+            DISTINCT jsonb_build_object(
+              'name', a.data->>'name',
+              'key', a.key
+            )
+          ) FILTER (WHERE a.key IS NOT NULL),
+          '[]'::json
+        ) AS authors
+      FROM editions e
+      LEFT JOIN works w ON w.key = e.work_key
+      LEFT JOIN author_works aw ON aw.work_key = w.key
+      LEFT JOIN authors a ON a.key = aw.author_key
+      WHERE e.data->>'title' ILIKE ${titlePattern}
+      GROUP BY e.key, e.data, w.data, e.work_key
+      ORDER BY e.data->>'title'
+      LIMIT ${limit}
+      OFFSET ${offset}
+    `
+  ]);
+
+  return { total: countResult[0]?.total || 0, results: dataResult };
+}
+
+async function fallbackAuthorSearch(sql: any, author: string, limit: number, offset: number) {
+  const authorPattern = `%${author}%`;
+
+  const dataResult = await sql`
+    WITH matching_editions AS (
+      SELECT DISTINCT e.key AS edition_key
+      FROM authors a
+      JOIN author_works aw ON aw.author_key = a.key
+      JOIN editions e ON e.work_key = aw.work_key
+      WHERE a.data->>'name' ILIKE ${authorPattern}
+      LIMIT ${limit + 1}
+      OFFSET ${offset}
+    )
+    SELECT
+      e.data->>'title' AS title,
+      (SELECT ei.isbn FROM edition_isbns ei WHERE ei.edition_key = e.key LIMIT 1) AS isbn,
+      e.data->>'publish_date' AS publish_date,
+      e.data->>'publishers' AS publishers,
+      (e.data->>'number_of_pages')::int AS pages,
+      w.data->>'title' AS work_title,
+      e.key AS edition_key,
+      e.work_key,
+      COALESCE(
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'name', all_authors.data->>'name',
+            'key', all_authors.key
+          )
+        ) FILTER (WHERE all_authors.key IS NOT NULL),
+        '[]'::json
+      ) AS authors
+    FROM matching_editions me
+    JOIN editions e ON e.key = me.edition_key
+    LEFT JOIN works w ON w.key = e.work_key
+    LEFT JOIN author_works all_aw ON all_aw.work_key = w.key
+    LEFT JOIN authors all_authors ON all_authors.key = all_aw.author_key
+    GROUP BY e.key, e.data, w.data, e.work_key
+    ORDER BY e.data->>'title'
+  `;
+
+  return dataResult;
+}
+
+// =================================================================================
 // Search Route Definition
 // =================================================================================
 
@@ -138,7 +263,7 @@ app.openapi(searchRoute, async (c) => {
             '[]'::json
           ) AS authors
         FROM enriched_editions ee
-        LEFT JOIN enriched_works ew ON ew.key = ee.work_key
+        LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
         LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
         LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
         WHERE ee.isbn = ${isbn}
@@ -163,6 +288,17 @@ app.openapi(searchRoute, async (c) => {
           total = 1;
         } else {
           logger.warn('Smart resolution failed - no external data found', { isbn });
+        }
+      }
+
+      // Fallback to OpenLibrary core tables if still no results
+      if (results.length === 0) {
+        logger.info('Falling back to OpenLibrary core tables for ISBN', { isbn });
+        const fallbackResults = await fallbackISBNSearch(sql, isbn);
+        if (fallbackResults.length > 0) {
+          logger.info('OpenLibrary fallback found result', { isbn });
+          results = fallbackResults;
+          total = 1;
         }
       }
 
@@ -214,6 +350,17 @@ app.openapi(searchRoute, async (c) => {
 
       total = countResult[0]?.total || 0;
       results = dataResult;
+
+      // Fallback to OpenLibrary core tables if no enriched results
+      if (results.length === 0) {
+        logger.info('Falling back to OpenLibrary core tables for title search', { title });
+        const fallback = await fallbackTitleSearch(sql, title, limit, offset);
+        if (fallback.results.length > 0) {
+          logger.info('OpenLibrary fallback found results', { title, count: fallback.results.length });
+          results = fallback.results;
+          total = fallback.total;
+        }
+      }
 
     } else if (author) {
       // OPTIMIZED: Query enriched_authors with ILIKE for fast partial match
@@ -267,6 +414,18 @@ app.openapi(searchRoute, async (c) => {
       const hasMoreResults = dataResult.length > limit;
       results = hasMoreResults ? dataResult.slice(0, limit) : dataResult;
       total = hasMoreResults ? offset + limit + 1 : offset + results.length;
+
+      // Fallback to OpenLibrary core tables if no enriched results
+      if (results.length === 0) {
+        logger.info('Falling back to OpenLibrary core tables for author search', { author });
+        const fallbackData = await fallbackAuthorSearch(sql, author, limit, offset);
+        if (fallbackData.length > 0) {
+          const fallbackHasMore = fallbackData.length > limit;
+          results = fallbackHasMore ? fallbackData.slice(0, limit) : fallbackData;
+          total = fallbackHasMore ? offset + limit + 1 : offset + results.length;
+          logger.info('OpenLibrary fallback found results', { author, count: results.length });
+        }
+      }
     }
 
     // Log query performance

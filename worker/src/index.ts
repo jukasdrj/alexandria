@@ -18,14 +18,9 @@ import coversLegacyRoutes from './routes/covers-legacy.js';
 import authorsRoutes from './routes/authors.js';
 import booksRoutes from './routes/books.js';
 import testRoutes from './routes/test.js';
-import harvestRoutes from './routes/harvest.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue } from './services/queue-handlers.js';
-
-// Workflow exports (must be exported at module level for Cloudflare to discover)
-export { AuthorHarvestWorkflow } from './workflows/author-harvest.js';
-export { NewReleasesHarvestWorkflow } from './workflows/new-releases-harvest.js';
 
 // =================================================================================
 // Application Setup
@@ -114,7 +109,6 @@ const subRouters = [
   authorsRoutes,
   booksRoutes,
   testRoutes,
-  harvestRoutes,
 ];
 
 // Register route modules
@@ -206,11 +200,5 @@ export default {
         console.error(`Unknown queue: ${batch.queue}`);
         batch.messages.forEach((msg: Message) => msg.ack());
     }
-  },
-
-  // Scheduled handler (cron)
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    console.log(`[Cron] Triggered at ${new Date(event.scheduledTime).toISOString()}`);
-    // Add scheduled tasks here if needed
   },
 };
