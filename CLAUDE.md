@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues. **Dec 10, 2025**: Upgraded to ISBNdb Premium (3x rate, 10x batch size), added direct batch endpoint for 10x efficiency.
+**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues. **Dec 10, 2025**: Upgraded to ISBNdb Premium (3x rate, 10x batch size), added direct batch endpoint for 10x efficiency. **Dec 13, 2025**: Added Cloudflare Workflows for durable bulk author harvesting (auto-recovering, checkpoint-free).
 
 ## Architecture Flow
 
@@ -29,7 +29,8 @@ Cover Images:
 → Worker receives provider URL (OpenLibrary, ISBNdb, Google Books)
 → Fast-fail immediate processing (1 retry) OR queue for background
 → Downloads, validates, stores in R2 (bookstrack-covers-processed bucket)
-→ Serves via /api/covers/:work_key/:size or /covers/:isbn/:size
+→ Storage: isbn/{isbn}/{size}.webp (CONSOLIDATED - Issue #95)
+→ Serves via /covers/:isbn/:size
 ```
 
 **IMPORTANT**:
@@ -104,6 +105,35 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 # Port: 5432 | DB: openlibrary | User: openlibrary
 # Password: in docs/CREDENTIALS.md (gitignored)
 ```
+
+### Log Management (Logpush to R2)
+```bash
+# Setup Logpush (one-time)
+./scripts/setup-logpush.sh
+
+# Manage Logpush jobs
+./scripts/logpush-management.sh list              # List all jobs
+./scripts/logpush-management.sh get <job_id>      # Get job details
+./scripts/logpush-management.sh list-logs         # List log files in R2
+./scripts/logpush-management.sh download <path>   # Download log file
+./scripts/logpush-management.sh test              # Generate test traffic
+
+# Real-time logs (7-day retention)
+npm run tail
+
+# Long-term logs (R2 storage, permanent)
+npx wrangler r2 object list alexandria-logs --limit 20
+```
+
+**Logpush Configuration** (COMPLETE - Dec 12, 2025):
+- **Dataset**: Workers Trace Events
+- **Destination**: R2 bucket `alexandria-logs`
+- **Fields**: EventTimestampMs, EventType, Outcome, ScriptName, Exceptions, Logs, CPUTimeMs, WallTimeMs
+- **Batching**: Every 30 seconds or 5MB (whichever first)
+- **Format**: JSONL (newline-delimited JSON), gzip compressed
+- **Retention**: Workers Logs UI (7 days) + R2 (permanent)
+- **Cost**: ~$1.50/month for 10K requests/day
+- **Documentation**: `docs/LOGPUSH-SETUP.md`
 
 ## Development Workflow
 
@@ -484,19 +514,24 @@ Use DLQs for debugging and manual reprocessing.
 ### R2 Storage
 - **Bucket**: `bookstrack-covers-processed`
 - **Binding**: `COVER_IMAGES`
-- **Structure**: `covers/{work_key}/{hash}/original` or `isbn/{isbn}/original.{ext}`
+- **Structure**: `isbn/{isbn}/{size}.webp` (CONSOLIDATED - Issue #95)
+  - Primary: `isbn/{isbn}/large.webp`, `isbn/{isbn}/medium.webp`, `isbn/{isbn}/small.webp`
+  - Fallback: `isbn/{isbn}/original.{ext}` (legacy originals)
+
+**IMPORTANT**: All cover storage now uses ISBN-based paths. Work-key based paths (`covers/{work_key}/`) are DEPRECATED.
 
 ### Endpoints
 
-**Work-based (new)**:
-- `POST /api/covers/process` - Process cover from provider URL
-- `GET /api/covers/:work_key/:size` - Serve cover (large/medium/small)
-
-**ISBN-based (legacy)**:
-- `POST /covers/:isbn/process` - Trigger cover processing from providers
-- `GET /covers/:isbn/:size` - Serve cover image
+**Primary (ISBN-based)**:
+- `POST /api/covers/process` - Process cover from provider URL (requires `isbn` + `provider_url`)
+- `GET /covers/:isbn/:size` - Serve cover image (large/medium/small)
 - `GET /covers/:isbn/status` - Check if cover exists
+- `POST /covers/:isbn/process` - Trigger cover processing from providers
 - `POST /covers/batch` - Process multiple ISBNs (max 10)
+- `POST /api/covers/queue` - Queue cover processing (max 100)
+
+**Deprecated**:
+- `GET /api/covers/:work_key/:size` - Returns HTTP 410 (deprecated, use ISBN-based endpoint)
 
 ### Domain Whitelist (Security)
 Only these domains are allowed for cover downloads:
@@ -505,24 +540,41 @@ Only these domains are allowed for cover downloads:
 - `images.isbndb.com`
 - `images-na.ssl-images-amazon.com`
 - `m.media-amazon.com`
+- `pictures.abebooks.com`
 
 ### Processing Pipeline
 ```javascript
-// Work-based: POST /api/covers/process
+// Process cover from provider URL (requires ISBN)
 const response = await fetch('https://alexandria.ooheynerds.com/api/covers/process', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    work_key: '/works/OL45804W',
+    isbn: '9780439064873',  // REQUIRED - used as storage key
     provider_url: 'https://covers.openlibrary.org/b/id/8091323-L.jpg',
-    isbn: '9780439064873'  // optional, for logging
+    work_key: '/works/OL45804W'  // optional, for metadata
   })
 });
 
-// ISBN-based: POST /covers/:isbn/process
+// Direct ISBN-based processing
 const response = await fetch('https://alexandria.ooheynerds.com/covers/9780439064873/process', {
   method: 'POST'
 });
+
+// Serve cover by ISBN
+const imageUrl = 'https://alexandria.ooheynerds.com/covers/9780439064873/large';
+```
+
+### Migration Script
+Audit and clean up duplicate covers stored under legacy work-key paths:
+```bash
+# Audit R2 storage for duplicates
+node scripts/audit-cover-storage.js
+
+# Delete duplicates (dry run first)
+node scripts/audit-cover-storage.js --delete-duplicates --dry-run
+
+# Actually delete duplicates
+node scripts/audit-cover-storage.js --delete-duplicates
 ```
 
 ## Sample Query (Test First!)
@@ -731,18 +783,130 @@ bulk-author-harvest.js
                             └─→ isbn/{isbn}/{large,medium,small}.webp
 ```
 
+## Cloudflare Workflows (NEW - Dec 13, 2025)
+
+### Overview
+
+Cloudflare Workflows provides durable, long-running execution for author harvesting. Migrated from `scripts/bulk-author-harvest.js` to solve:
+- Local machine dependency (laptop must stay running)
+- Manual checkpoint management
+- ISBNdb JWT expiry (cover URLs expire after 2 hours)
+- No auto-recovery from crashes
+
+### Workflow: `AuthorHarvestWorkflow`
+
+**Binding**: `AUTHOR_HARVEST`
+**Class**: `AuthorHarvestWorkflow` (in `worker/src/workflows/author-harvest.ts`)
+
+### API Endpoints
+
+```bash
+# Start a harvest workflow
+curl -X POST https://alexandria.ooheynerds.com/api/harvest/start \
+  -H "Content-Type: application/json" \
+  -d '{"tier": "top-100"}'
+
+# Response:
+# {
+#   "success": true,
+#   "data": {
+#     "instance_id": "abc123",
+#     "status": "started",
+#     "tier": "top-100",
+#     "monitor_url": "/api/harvest/status/abc123"
+#   }
+# }
+
+# Check workflow status
+curl https://alexandria.ooheynerds.com/api/harvest/status/{instance_id}
+
+# List workflows (placeholder - Cloudflare doesn't have native list API yet)
+curl https://alexandria.ooheynerds.com/api/harvest/list
+```
+
+### Available Tiers
+
+| Tier | Authors | Est. Steps | Cost |
+|------|---------|------------|------|
+| `top-10` | 10 | ~50 | $0 (testing) |
+| `top-100` | 100 | ~550 | $0 (free tier) |
+| `top-1000` | 1,000 | ~5,500 | $0 (free tier) |
+| `1000-5000` | 4,000 | ~22,000 | $0 (free tier) |
+| `5000-20000` | 15,000 | ~82,500 | $0 (free tier) |
+
+Free tier: 100,000 steps/month.
+
+### Workflow Features
+
+- **Automatic retry**: 3 retries with exponential backoff on transient failures
+- **Rate limiting**: 500ms between authors (safe for ISBNdb 3 req/sec)
+- **Batching**: 10 authors per workflow step to minimize subrequest overhead
+- **50-author limit**: Per workflow invocation (due to 1000 subrequest limit)
+- **Quota detection**: Stops gracefully on ISBNdb quota exhaustion
+- **Progress visibility**: Status via `/api/harvest/status/:id`
+- **Durable execution**: Survives Worker restarts
+- **Continuation support**: Returns `next_offset` for multi-workflow processing
+
+### Critical Constraint: 1000 Subrequest Limit
+
+Cloudflare Workflows has a **1000 subrequest limit per workflow invocation**. This includes:
+- ISBNdb API calls (~1 per author)
+- Database operations (~5 per author)
+- Queue sends (~5 per author)
+
+To stay under this limit, each workflow processes **max 50 authors**. For larger tiers, start multiple workflows with offset:
+
+```bash
+# Process authors 0-49
+curl -X POST .../api/harvest/start -d '{"tier": "top-100"}'
+# Returns next_offset: 50
+
+# Process authors 50-99
+curl -X POST .../api/harvest/start -d '{"tier": "top-100", "offset": 50}'
+```
+
+See: [Cloudflare Workers Subrequest Limits](https://developers.cloudflare.com/workers/platform/limits/#how-many-subrequests-can-i-make)
+
+### wrangler.jsonc Configuration
+
+```jsonc
+"workflows": [
+  {
+    "name": "author-harvest-workflow",
+    "binding": "AUTHOR_HARVEST",
+    "class_name": "AuthorHarvestWorkflow"
+  }
+]
+```
+
+### Monitoring
+
+```bash
+# Check workflow status
+curl https://alexandria.ooheynerds.com/api/harvest/status/{instance_id}
+
+# View workflow logs
+npx wrangler tail alexandria --format pretty | grep -E "AuthorHarvest"
+
+# Cloudflare Dashboard
+# Workers & Pages > alexandria > Workflows tab
+```
+
 ## File Structure
 
 ```
 alex/
 ├── worker/                    # Cloudflare Worker code
-│   ├── index.ts               # Main worker + Hono routes (TypeScript)
-│   ├── wrangler.jsonc         # Wrangler config (Hyperdrive, R2, KV, Secrets, Queues)
-│   ├── cover-handlers.js      # Work-based cover processing (POST /api/covers/process)
-│   ├── image-utils.js         # Image download, validation, hashing utilities
-│   ├── enrich-handlers.js     # Enrichment API handlers
-│   ├── enrichment-service.js  # Enrichment business logic
-│   ├── queue-handlers.js      # Queue consumer handlers (cover + enrichment)
+│   ├── src/
+│   │   ├── index.ts           # Main worker + Hono routes (TypeScript)
+│   │   ├── env.ts             # Environment type definitions
+│   │   ├── routes/            # API route handlers
+│   │   │   ├── harvest.ts     # Workflow trigger endpoints (/api/harvest/*)
+│   │   │   ├── authors.ts     # Author API endpoints
+│   │   │   └── ...            # Other route modules
+│   │   └── workflows/
+│   │       └── author-harvest.ts  # AuthorHarvestWorkflow (Cloudflare Workflows)
+│   ├── wrangler.jsonc         # Wrangler config (Hyperdrive, R2, KV, Secrets, Queues, Workflows)
 │   ├── services/
 │   │   ├── image-processor.js # ISBN-based cover processing pipeline
 │   │   ├── cover-fetcher.js   # Multi-provider cover URL fetching
@@ -784,10 +948,14 @@ alex/
     { "binding": "COVER_ANALYTICS" }        // Cover processing stats
   ],
   "queues": {
-    "producers": [{
-      "binding": "ENRICHMENT_QUEUE"         // Background processing queue
-    }]
-  }
+    "producers": [
+      { "binding": "ENRICHMENT_QUEUE" },    // Metadata enrichment queue
+      { "binding": "COVER_QUEUE" }          // Cover processing queue
+    ]
+  },
+  "workflows": [{
+    "binding": "AUTHOR_HARVEST"             // AuthorHarvestWorkflow for bulk harvesting
+  }]
 }
 ```
 

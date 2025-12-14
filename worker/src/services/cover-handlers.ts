@@ -4,24 +4,21 @@
 
 import type { Context } from 'hono';
 import type { AppBindings } from '../env.js';
-import {
-  downloadImage,
-  hashURL,
-  normalizeImageURL,
-  PLACEHOLDER_COVER,
-  SIZES,
-} from './image-utils.js';
+import { downloadImage, PLACEHOLDER_COVER } from './image-utils.js';
 
 /**
  * POST /api/covers/process
  *
  * Process a cover image from a provider URL
  *
+ * STORAGE: Uses isbn/{isbn}/ path (unified with jSquash processor)
+ * This consolidates all cover storage to a single path scheme.
+ *
  * Request body:
  * {
- *   "work_key": "/works/OL45804W",
+ *   "work_key": "/works/OL45804W",  // optional, for metadata
  *   "provider_url": "https://covers.openlibrary.org/b/id/12345-L.jpg",
- *   "isbn": "9780439064873" // optional, for logging
+ *   "isbn": "9780439064873" // REQUIRED - used as primary storage key
  * }
  */
 export async function handleProcessCover(c: Context<AppBindings>): Promise<Response> {
@@ -34,17 +31,19 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
     }>();
     const { work_key, provider_url, isbn } = body;
 
-    if (!work_key || !provider_url) {
+    // ISBN is now required (used as storage key)
+    if (!isbn || !provider_url) {
       return c.json(
         {
           success: false,
-          error: 'Missing required fields: work_key, provider_url',
+          error: 'Missing required fields: isbn, provider_url',
         },
         400
       );
     }
 
-    console.log(`[CoverProcessor] Processing cover for ${work_key} from ${provider_url}`);
+    const normalizedISBN = isbn.replace(/[-\s]/g, '');
+    console.log(`[CoverProcessor] Processing cover for ISBN ${normalizedISBN} from ${provider_url}`);
 
     // 2. Download and validate original image
     const { buffer: originalImage, contentType } = await downloadImage(provider_url);
@@ -52,14 +51,15 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
       `[CoverProcessor] Downloaded ${originalImage.byteLength} bytes (${contentType})`
     );
 
-    // 3. Generate R2 key (use URL hash for deduplication)
-    const urlHash = await hashURL(normalizeImageURL(provider_url));
-    const workKeyClean = work_key.replace(/^\/works\//, ''); // Remove /works/ prefix
-    const r2Key = `covers/${workKeyClean}/${urlHash}`;
+    // 3. Determine file extension from content type
+    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
 
-    // 4. Upload to R2 (bookstrack-covers-processed bucket)
+    // 4. Upload to R2 using ISBN-based path (unified with jSquash processor)
+    // Storage path: isbn/{isbn}/original.{ext}
     const env = c.env;
-    await env.COVER_IMAGES.put(`${r2Key}/original`, originalImage, {
+    const r2Key = `isbn/${normalizedISBN}/original.${ext}`;
+
+    await env.COVER_IMAGES.put(r2Key, originalImage, {
       httpMetadata: {
         contentType: contentType,
         cacheControl: 'public, max-age=31536000, immutable', // 1 year
@@ -68,19 +68,19 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
         uploadedAt: new Date().toISOString(),
         originalSize: originalImage.byteLength.toString(),
         sourceUrl: provider_url,
-        workKey: work_key,
-        isbn: isbn || 'unknown',
+        workKey: work_key || 'unknown',
+        isbn: normalizedISBN,
       },
     });
 
-    console.log(`[CoverProcessor] Uploaded to R2: ${r2Key}/original`);
+    console.log(`[CoverProcessor] Uploaded to R2: ${r2Key}`);
 
-    // 5. Generate CDN URLs (served via Worker endpoints)
-    const cdnBase = 'https://alexandria.ooheynerds.com/api/covers';
+    // 5. Generate CDN URLs (served via /covers/:isbn/:size endpoint)
+    const cdnBase = 'https://alexandria.ooheynerds.com/covers';
     const urls = {
-      large: `${cdnBase}/${workKeyClean}/large`,
-      medium: `${cdnBase}/${workKeyClean}/medium`,
-      small: `${cdnBase}/${workKeyClean}/small`,
+      large: `${cdnBase}/${normalizedISBN}/large`,
+      medium: `${cdnBase}/${normalizedISBN}/medium`,
+      small: `${cdnBase}/${normalizedISBN}/small`,
     };
 
     // 6. Return success response
@@ -92,7 +92,8 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
         originalSize: originalImage.byteLength,
         r2Key,
         sourceUrl: provider_url,
-        workKey: work_key,
+        workKey: work_key || null,
+        isbn: normalizedISBN,
       },
     });
   } catch (error) {
@@ -119,58 +120,30 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
 /**
  * GET /api/covers/:work_key/:size
  *
- * Serve a processed cover image with on-the-fly resizing
+ * DEPRECATED: This endpoint is deprecated in favor of /covers/:isbn/:size
  *
- * Example: GET /api/covers/OL45804W/medium
+ * Cover storage has been consolidated to ISBN-based paths (Issue #95).
+ * Use the ISBN-based endpoint: GET /covers/{isbn}/{size}
+ *
+ * Example: GET /covers/9780439064873/medium
  */
 export async function handleServeCover(c: Context<AppBindings>): Promise<Response> {
-  try {
-    const work_key = c.req.param('work_key');
-    const size = c.req.param('size') as keyof typeof SIZES;
+  const work_key = c.req.param('work_key');
+  const size = c.req.param('size');
 
-    if (!SIZES[size]) {
-      return c.json({ error: 'Invalid size. Use: large, medium, or small' }, 400);
-    }
-
-    const env = c.env;
-
-    // Find the original image in R2 (bookstrack-covers-processed bucket)
-    const prefix = `covers/${work_key}/`;
-    const objects = await env.COVER_IMAGES.list({ prefix, limit: 1 });
-
-    if (objects.objects.length === 0) {
-      // No cover found, redirect to placeholder
-      return c.redirect(PLACEHOLDER_COVER);
-    }
-
-    // Get the hash directory, then fetch original
-    const hashDir = objects.objects[0].key.replace('/original', '');
-    const originalKey = `${hashDir}/original`;
-    const originalImage = await env.COVER_IMAGES.get(originalKey);
-
-    if (!originalImage) {
-      return c.redirect(PLACEHOLDER_COVER);
-    }
-
-    // Get image data
-    const imageData = await originalImage.arrayBuffer();
-    const contentType = originalImage.httpMetadata?.contentType || 'image/jpeg';
-
-    // Get dimensions for requested size
-    const dimensions = SIZES[size];
-
-    // Return image with CF Image Resizing headers
-    // Note: Actual resizing happens at Cloudflare edge if Image Resizing is enabled
-    return new Response(imageData, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=2592000, immutable', // 30 days
-        'X-Image-Width': dimensions.width.toString(),
-        'X-Image-Height': dimensions.height.toString(),
+  // Return deprecation notice with guidance
+  return c.json(
+    {
+      error: 'Endpoint deprecated',
+      message: `GET /api/covers/{work_key}/{size} is deprecated. Cover storage is now ISBN-based.`,
+      migration: {
+        deprecated: `/api/covers/${work_key}/${size}`,
+        use_instead: '/covers/{isbn}/{size}',
+        example: '/covers/9780439064873/large',
+        documentation: 'https://alexandria.ooheynerds.com/docs#covers',
       },
-    });
-  } catch (error) {
-    console.error('[CoverServer] Error:', error);
-    return c.redirect(PLACEHOLDER_COVER);
-  }
+      issue: 'https://github.com/ooheynerds/alexandria/issues/95',
+    },
+    410 // HTTP 410 Gone - resource no longer available
+  );
 }

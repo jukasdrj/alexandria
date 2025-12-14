@@ -13,20 +13,22 @@ import { z } from 'zod';
 /**
  * Process Cover Schema
  * Processes a cover image from a provider URL and stores in R2
+ *
+ * Storage: Uses isbn/{isbn}/ path (consolidated - Issue #95)
  */
 export const ProcessCoverSchema = z
   .object({
-    work_key: z.string().openapi({
-      description: 'OpenLibrary work key',
-      example: '/works/OL45804W',
+    isbn: z.string().openapi({
+      description: 'ISBN-10 or ISBN-13 (REQUIRED - used as storage key)',
+      example: '9780439064873',
     }),
     provider_url: z.string().url().openapi({
       description: 'Provider cover image URL',
       example: 'https://covers.openlibrary.org/b/id/8091323-L.jpg',
     }),
-    isbn: z.string().optional().openapi({
-      description: 'ISBN-10 or ISBN-13 (optional, for logging)',
-      example: '9780439064873',
+    work_key: z.string().optional().openapi({
+      description: 'OpenLibrary work key (optional, for metadata)',
+      example: '/works/OL45804W',
     }),
   })
   .openapi('ProcessCoverRequest');
@@ -90,24 +92,26 @@ export const ServeCoverParamsSchema = z.object({
 
 /**
  * Cover URLs Schema
+ * Uses ISBN-based paths (consolidated - Issue #95)
  */
 const CoverURLsSchema = z.object({
   large: z.string().url().openapi({
     description: 'Large cover URL (512x768)',
-    example: 'https://alexandria.ooheynerds.com/api/covers/OL45804W/large',
+    example: 'https://alexandria.ooheynerds.com/covers/9780439064873/large',
   }),
   medium: z.string().url().openapi({
     description: 'Medium cover URL (256x384)',
-    example: 'https://alexandria.ooheynerds.com/api/covers/OL45804W/medium',
+    example: 'https://alexandria.ooheynerds.com/covers/9780439064873/medium',
   }),
   small: z.string().url().openapi({
     description: 'Small cover URL (128x192)',
-    example: 'https://alexandria.ooheynerds.com/api/covers/OL45804W/small',
+    example: 'https://alexandria.ooheynerds.com/covers/9780439064873/small',
   }),
 }).openapi('CoverURLs');
 
 /**
  * Cover Metadata Schema
+ * Uses ISBN-based storage paths (consolidated - Issue #95)
  */
 const CoverMetadataSchema = z.object({
   processedAt: z.string().openapi({
@@ -119,16 +123,20 @@ const CoverMetadataSchema = z.object({
     example: 245678,
   }),
   r2Key: z.string().openapi({
-    description: 'R2 storage key',
-    example: 'covers/OL45804W/abc123def456',
+    description: 'R2 storage key (ISBN-based path)',
+    example: 'isbn/9780439064873/original.jpg',
   }),
   sourceUrl: z.string().url().openapi({
     description: 'Original provider URL',
     example: 'https://covers.openlibrary.org/b/id/8091323-L.jpg',
   }),
-  workKey: z.string().openapi({
-    description: 'OpenLibrary work key',
+  workKey: z.string().nullable().openapi({
+    description: 'OpenLibrary work key (optional)',
     example: '/works/OL45804W',
+  }),
+  isbn: z.string().openapi({
+    description: 'ISBN used as storage key',
+    example: '9780439064873',
   }),
 }).openapi('CoverMetadata');
 
