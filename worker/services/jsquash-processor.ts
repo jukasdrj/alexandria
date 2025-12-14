@@ -22,6 +22,9 @@ import PNG_DEC_WASM from '@jsquash/png/codec/pkg/squoosh_png_bg.wasm';
 import WEBP_ENC_WASM from '@jsquash/webp/codec/enc/webp_enc.wasm';
 import RESIZE_WASM from '@jsquash/resize/lib/resize/pkg/squoosh_resize_bg.wasm';
 
+import type { Env } from '../src/env';
+import type { CoverProcessingResult } from '../src/services/types';
+
 // Target sizes for book covers
 // We use MAX dimensions - images will be scaled down proportionally to fit
 // If source is smaller than target, we DON'T upscale - we use source dimensions
@@ -29,7 +32,7 @@ const TARGET_SIZES = {
   large: { maxWidth: 512, maxHeight: 768 },
   medium: { maxWidth: 256, maxHeight: 384 },
   small: { maxWidth: 128, maxHeight: 192 }
-};
+} as const;
 
 // WebP encoding quality (0-100)
 const WEBP_QUALITY = 85;
@@ -40,10 +43,24 @@ const WEBP_QUALITY = 85;
 const MIN_SIZE_FOR_WEBP = 5000; // 5KB threshold
 
 /**
+ * Target dimensions calculation result
+ */
+interface TargetDimensions {
+  width: number;
+  height: number;
+  scaled: boolean;
+}
+
+/**
  * Calculate target dimensions that fit within max bounds while preserving aspect ratio
  * Never upscales - returns source dimensions if smaller than target
  */
-function calculateTargetDimensions(sourceWidth, sourceHeight, maxWidth, maxHeight) {
+function calculateTargetDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxWidth: number,
+  maxHeight: number
+): TargetDimensions {
   // If source is smaller than max, don't upscale
   if (sourceWidth <= maxWidth && sourceHeight <= maxHeight) {
     return { width: sourceWidth, height: sourceHeight, scaled: false };
@@ -78,7 +95,7 @@ let wasmInitialized = false;
  * Initialize all WASM modules
  * Must be called before processing images in CF Workers
  */
-async function initWasm() {
+async function initWasm(): Promise<void> {
   if (wasmInitialized) return;
 
   const startTime = Date.now();
@@ -103,7 +120,7 @@ async function initWasm() {
 /**
  * Validate that URL is from an allowed domain
  */
-function isAllowedDomain(url) {
+function isAllowedDomain(url: string): boolean {
   try {
     const parsed = new URL(url);
     return ALLOWED_DOMAINS.has(parsed.hostname);
@@ -113,9 +130,14 @@ function isAllowedDomain(url) {
 }
 
 /**
+ * Image type detected from buffer
+ */
+type ImageType = 'jpeg' | 'png' | 'webp';
+
+/**
  * Detect image type from ArrayBuffer
  */
-function detectImageType(buffer) {
+function detectImageType(buffer: ArrayBuffer): ImageType | null {
   const view = new Uint8Array(buffer);
 
   // JPEG: starts with FF D8 FF
@@ -140,7 +162,7 @@ function detectImageType(buffer) {
 /**
  * Decode image buffer to ImageData
  */
-async function decodeImage(buffer, type) {
+async function decodeImage(buffer: ArrayBuffer, type: ImageType): Promise<ImageData> {
   switch (type) {
     case 'jpeg':
       return await decodeJpeg(buffer);
@@ -154,7 +176,7 @@ async function decodeImage(buffer, type) {
 /**
  * Resize ImageData to target dimensions
  */
-async function resizeImage(imageData, targetWidth, targetHeight) {
+async function resizeImage(imageData: ImageData, targetWidth: number, targetHeight: number): Promise<ImageData> {
   return await resize(imageData, {
     width: targetWidth,
     height: targetHeight,
@@ -168,16 +190,16 @@ async function resizeImage(imageData, targetWidth, targetHeight) {
  * Process a single cover image
  * Downloads, resizes to 3 sizes, encodes as WebP, stores in R2
  *
- * @param {string} isbn - ISBN for the book
- * @param {string} sourceUrl - URL to download the original image
- * @param {object} env - Worker environment with R2 binding
- * @returns {Promise<object>} Processing result
+ * @param isbn - ISBN for the book
+ * @param sourceUrl - URL to download the original image
+ * @param env - Worker environment with R2 binding
+ * @returns Processing result
  */
-export async function processAndStoreCover(isbn, sourceUrl, env) {
+export async function processAndStoreCover(isbn: string, sourceUrl: string, env: Env): Promise<CoverProcessingResult> {
   const startTime = Date.now();
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
 
-  const metrics = {
+  const metrics: CoverProcessingResult['metrics'] = {
     isbn: normalizedISBN,
     initMs: 0,
     fetchMs: 0,
@@ -299,7 +321,7 @@ export async function processAndStoreCover(isbn, sourceUrl, env) {
 
     // 3. Resize to all target sizes and encode as WebP
     // IMPORTANT: We NEVER upscale - if source is smaller, we use source dimensions
-    const results = {};
+    const results: Record<string, ArrayBuffer> = {};
     metrics.dimensions = {};
 
     for (const [sizeName, targetBounds] of Object.entries(TARGET_SIZES)) {
@@ -313,7 +335,7 @@ export async function processAndStoreCover(isbn, sourceUrl, env) {
       metrics.dimensions[sizeName] = { width: target.width, height: target.height, scaled: target.scaled };
 
       const resizeStart = Date.now();
-      let imageToEncode;
+      let imageToEncode: ImageData;
 
       if (target.scaled) {
         // Source is larger than target - downscale
@@ -330,7 +352,7 @@ export async function processAndStoreCover(isbn, sourceUrl, env) {
       metrics.encodeMs += Date.now() - encodeStart;
 
       results[sizeName] = webpBuffer;
-      metrics.webpSizes[sizeName] = webpBuffer.byteLength;
+      metrics.webpSizes![sizeName] = webpBuffer.byteLength;
     }
 
     // 4. Upload all 3 sizes to R2
@@ -359,7 +381,7 @@ export async function processAndStoreCover(isbn, sourceUrl, env) {
     metrics.uploadMs = Date.now() - uploadStart;
     metrics.totalMs = Date.now() - startTime;
 
-    const totalWebpSize = Object.values(metrics.webpSizes).reduce((a, b) => a + b, 0);
+    const totalWebpSize = Object.values(metrics.webpSizes!).reduce((a, b) => a + b, 0);
     const compressionRatio = ((1 - totalWebpSize / metrics.originalSize) * 100).toFixed(1);
 
     console.log(`[jSquash] Processed ${normalizedISBN}: ${metrics.originalSize} → ${totalWebpSize} bytes (${compressionRatio}% smaller, ${metrics.totalMs}ms)`);
@@ -383,12 +405,13 @@ export async function processAndStoreCover(isbn, sourceUrl, env) {
 
   } catch (error) {
     metrics.totalMs = Date.now() - startTime;
-    console.error(`[jSquash] Failed to process ${normalizedISBN}:`, error.message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[jSquash] Failed to process ${normalizedISBN}:`, errorMessage);
 
     return {
       status: 'error',
       isbn: normalizedISBN,
-      error: error.message,
+      error: errorMessage,
       metrics
     };
   }
@@ -397,7 +420,7 @@ export async function processAndStoreCover(isbn, sourceUrl, env) {
 /**
  * Check if processed WebP covers exist for an ISBN
  */
-export async function coversExist(env, isbn) {
+export async function coversExist(env: Env, isbn: string): Promise<boolean> {
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
 
   // Check for large.webp as indicator
@@ -407,23 +430,16 @@ export async function coversExist(env, isbn) {
 }
 
 /**
- * Get available sizes
- */
-export function getAvailableSizes() {
-  return SIZES;
-}
-
-/**
  * Benchmark function for testing
  * Processes image but cleans up R2 files afterward
  */
-export async function benchmark(sourceUrl, env) {
+export async function benchmark(sourceUrl: string, env: Env): Promise<CoverProcessingResult> {
   const testISBN = 'benchmark-test';
   const result = await processAndStoreCover(testISBN, sourceUrl, env);
 
   // Clean up test files
   if (result.status === 'processed') {
-    for (const key of result.r2Keys) {
+    for (const key of result.r2Keys || []) {
       await env.COVER_IMAGES.delete(key);
     }
   }

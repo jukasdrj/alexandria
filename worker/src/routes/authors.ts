@@ -16,6 +16,7 @@ import {
 } from '../schemas/authors.js';
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
 import { fetchWikidataMultipleBatches } from '../../services/wikidata-client.js';
+import { findOrCreateWork, linkWorkToAuthors } from '../workflows/author-harvest.js';
 
 // =================================================================================
 // ISBNdb Types
@@ -689,17 +690,31 @@ app.openapi(enrichBibliographyRoute, async (c) => {
     // DIRECTLY enrich from the data we already have (NO re-fetch from ISBNdb!)
     for (const book of isbnsToEnrich) {
       try {
-        // Generate a work key for grouping editions
-        const workKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
+        // Find or create work (deduplication via consensus-driven algorithm)
+        // Order: ISBN lookup → Author-scoped fuzzy title → Exact title → Generate new
+        const { workKey, isNew: isNewWork } = await findOrCreateWork(
+          sql,
+          book.isbn,
+          book.title,
+          book.authors
+        );
 
-        // Create enriched_work
-        await enrichWork(sql, {
-          work_key: workKey,
-          title: book.title,
-          description: book.synopsis,
-          subject_tags: book.subjects,
-          primary_provider: 'isbndb',
-        });
+        // Only create enriched_work if it's genuinely new
+        if (isNewWork) {
+          await enrichWork(sql, {
+            work_key: workKey,
+            title: book.title,
+            description: book.synopsis,
+            subject_tags: book.subjects,
+            primary_provider: 'isbndb',
+          });
+        }
+
+        // ALWAYS link work to authors (idempotent via ON CONFLICT DO NOTHING)
+        // This fixes the 99.8% orphaned works bug
+        if (book.authors && book.authors.length > 0) {
+          await linkWorkToAuthors(sql, workKey, book.authors);
+        }
 
         // Create enriched_edition with all the metadata we already have
         // Prefer image_original for highest quality (but it expires in 2hrs!)

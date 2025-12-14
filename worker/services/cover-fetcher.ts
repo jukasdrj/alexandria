@@ -10,19 +10,66 @@
  */
 
 import { fetchWithRetry } from '../lib/fetch-utils.js';
+import type { Env } from '../src/env.js';
 
 const PLACEHOLDER_COVER = 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover';
 
-// Rate limiting: ISBNdb allows 1 request/second on paid plan
-const ISBNDB_RATE_LIMIT_MS = 1000;
+// Rate limiting: ISBNdb Premium allows 3 requests/second
+const ISBNDB_RATE_LIMIT_MS = 350; // 350ms = ~3 req/sec with safety margin
 const RATE_LIMIT_KV_KEY = 'cover_fetcher:isbndb_last_request';
 
 /**
- * Normalize ISBN to 13-digit format (remove hyphens, validate)
- * @param {string} isbn - ISBN-10 or ISBN-13
- * @returns {string|null} Normalized ISBN or null if invalid
+ * Cover URL result from providers
  */
-export function normalizeISBN(isbn) {
+export interface CoverResult {
+  url: string;
+  source: 'isbndb' | 'google-books' | 'openlibrary' | 'placeholder';
+  quality: 'original' | 'high' | 'medium' | 'low' | 'missing';
+  error?: string;
+}
+
+/**
+ * ISBNdb batch book response
+ */
+interface ISBNdbBook {
+  isbn?: string;
+  isbn13?: string;
+  image?: string;
+  image_original?: string;
+}
+
+/**
+ * ISBNdb batch API response
+ */
+interface ISBNdbBatchResponse {
+  books?: ISBNdbBook[];
+}
+
+/**
+ * Google Books API response
+ */
+interface GoogleBooksVolume {
+  volumeInfo?: {
+    imageLinks?: {
+      thumbnail?: string;
+      small?: string;
+      medium?: string;
+      large?: string;
+      extraLarge?: string;
+    };
+  };
+}
+
+interface GoogleBooksResponse {
+  items?: GoogleBooksVolume[];
+}
+
+/**
+ * Normalize ISBN to 13-digit format (remove hyphens, validate)
+ * @param isbn - ISBN-10 or ISBN-13
+ * @returns Normalized ISBN or null if invalid
+ */
+export function normalizeISBN(isbn: string): string | null {
   if (!isbn) return null;
 
   // Remove hyphens and spaces
@@ -42,15 +89,13 @@ export function normalizeISBN(isbn) {
   return null;
 }
 
-
 /**
  * Enforce rate limit for ISBNdb API using KV storage
  * Note: Uses KV for distributed rate limiting across Worker isolates
  * Falls back to in-memory if KV not available (dev mode)
- * @param {object} env - Worker environment (optional, for KV access)
- * @returns {Promise<void>}
+ * @param env - Worker environment (optional, for KV access)
  */
-async function enforceISBNdbRateLimit(env) {
+async function enforceISBNdbRateLimit(env?: Env): Promise<void> {
   const now = Date.now();
 
   // Try KV-based rate limiting if available
@@ -69,7 +114,7 @@ async function enforceISBNdbRateLimit(env) {
       await env.CACHE.put(RATE_LIMIT_KV_KEY, Date.now().toString(), { expirationTtl: 60 });
       return;
     } catch (error) {
-      console.warn('KV rate limiting unavailable, proceeding without:', error.message);
+      console.warn('KV rate limiting unavailable, proceeding without:', (error as Error).message);
     }
   }
 
@@ -79,11 +124,11 @@ async function enforceISBNdbRateLimit(env) {
 
 /**
  * Fetch cover URL from ISBNdb API
- * @param {string} isbn - ISBN to lookup
- * @param {object} env - Worker environment with ISBNDB_API_KEY
- * @returns {Promise<{url: string, source: string, quality: string}|null>}
+ * @param isbn - ISBN to lookup
+ * @param env - Worker environment with ISBNDB_API_KEY
+ * @returns Cover result or null if not found
  */
-export async function fetchISBNdbCover(isbn, env) {
+export async function fetchISBNdbCover(isbn: string, env: Env): Promise<CoverResult | null> {
   const normalizedISBN = normalizeISBN(isbn);
   if (!normalizedISBN) return null;
 
@@ -98,7 +143,8 @@ export async function fetchISBNdbCover(isbn, env) {
     // Enforce rate limit (uses KV if available)
     await enforceISBNdbRateLimit(env);
 
-    const response = await fetchWithRetry(`https://api2.isbndb.com/book/${normalizedISBN}`, {
+    // Use Premium endpoint for 3x rate limit
+    const response = await fetchWithRetry(`https://api.premium.isbndb.com/book/${normalizedISBN}`, {
       headers: {
         'Authorization': apiKey,
         'User-Agent': 'Alexandria/1.0 (covers)'
@@ -118,7 +164,7 @@ export async function fetchISBNdbCover(isbn, env) {
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as { book?: ISBNdbBook };
     const imageUrl = data?.book?.image;
 
     if (!imageUrl) {
@@ -133,24 +179,27 @@ export async function fetchISBNdbCover(isbn, env) {
     };
 
   } catch (error) {
-    console.error('ISBNdb fetch error:', error.message);
+    console.error('ISBNdb fetch error:', (error as Error).message);
     return null;
   }
 }
 
 /**
- * Fetch cover URLs from ISBNdb in batch (up to 100 ISBNs)
- * @param {string[]} isbns - ISBNs to lookup (max 100)
- * @param {object} env - Worker environment with ISBNDB_API_KEY
- * @returns {Promise<Map<string, {url: string, source: string, quality: string}>>}
+ * Fetch cover URLs from ISBNdb in batch (up to 1000 ISBNs on Premium plan)
+ * @param isbns - ISBNs to lookup (max 1000)
+ * @param env - Worker environment with ISBNDB_API_KEY
+ * @returns Map of ISBN to cover result
  */
-export async function fetchISBNdbCoversBatch(isbns, env) {
+export async function fetchISBNdbCoversBatch(
+  isbns: string[],
+  env: Env
+): Promise<Map<string, CoverResult>> {
   if (!isbns || isbns.length === 0) return new Map();
 
-  // Enforce batch limit (ISBNdb Basic plan: 100 ISBNs max)
-  if (isbns.length > 100) {
-    console.warn(`ISBNdb batch limit exceeded: ${isbns.length} ISBNs (max 100)`);
-    isbns = isbns.slice(0, 100);
+  // Enforce batch limit (ISBNdb Premium plan: 1000 ISBNs max)
+  if (isbns.length > 1000) {
+    console.warn(`ISBNdb batch limit exceeded: ${isbns.length} ISBNs (max 1000)`);
+    isbns = isbns.slice(0, 1000);
   }
 
   try {
@@ -160,10 +209,11 @@ export async function fetchISBNdbCoversBatch(isbns, env) {
       return new Map();
     }
 
-    // Enforce rate limit (1 req/sec)
+    // Enforce rate limit (3 req/sec on Premium)
     await enforceISBNdbRateLimit(env);
 
-    const response = await fetchWithRetry('https://api2.isbndb.com/books', {
+    // Use Premium endpoint
+    const response = await fetchWithRetry('https://api.premium.isbndb.com/books', {
       method: 'POST',
       headers: {
         'Authorization': apiKey,
@@ -177,8 +227,8 @@ export async function fetchISBNdbCoversBatch(isbns, env) {
       return new Map();
     }
 
-    const { books } = await response.json();
-    const results = new Map();
+    const { books } = await response.json() as ISBNdbBatchResponse;
+    const results = new Map<string, CoverResult>();
 
     if (books && Array.isArray(books)) {
       books.forEach(book => {
@@ -196,24 +246,24 @@ export async function fetchISBNdbCoversBatch(isbns, env) {
     console.log(`[ISBNdb Batch] Fetched ${results.size}/${isbns.length} cover URLs`);
     return results;
   } catch (error) {
-    console.error('ISBNdb batch fetch error:', error.message);
+    console.error('ISBNdb batch fetch error:', (error as Error).message);
     return new Map();
   }
 }
 
 /**
  * Fetch cover URL from Google Books API
- * @param {string} isbn - ISBN to lookup
- * @param {object} env - Worker environment with GOOGLE_BOOKS_API_KEY
- * @returns {Promise<{url: string, source: string, quality: string}|null>}
+ * @param isbn - ISBN to lookup
+ * @param env - Worker environment with GOOGLE_BOOKS_API_KEY
+ * @returns Cover result or null if not found
  */
-export async function fetchGoogleBooksCover(isbn, env) {
+export async function fetchGoogleBooksCover(isbn: string, env: Env): Promise<CoverResult | null> {
   const normalizedISBN = normalizeISBN(isbn);
   if (!normalizedISBN) return null;
 
   try {
     // Get API key from Secrets Store (async) - optional but increases quota
-    let apiKey = null;
+    let apiKey: string | null = null;
     try {
       apiKey = await env.GOOGLE_BOOKS_API_KEY.get();
     } catch (e) {
@@ -237,7 +287,7 @@ export async function fetchGoogleBooksCover(isbn, env) {
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as GoogleBooksResponse;
 
     if (!data.items || data.items.length === 0) {
       console.log(`Google Books: No results for ISBN ${normalizedISBN}`);
@@ -260,7 +310,7 @@ export async function fetchGoogleBooksCover(isbn, env) {
     imageUrl = imageUrl.replace(/&zoom=\d/, '') + '&zoom=3';
 
     // Determine quality based on available size
-    let quality = 'low';
+    let quality: 'high' | 'medium' | 'low' = 'low';
     if (imageLinks.extraLarge || imageLinks.large) {
       quality = 'high';
     } else if (imageLinks.medium) {
@@ -274,17 +324,17 @@ export async function fetchGoogleBooksCover(isbn, env) {
     };
 
   } catch (error) {
-    console.error('Google Books fetch error:', error.message);
+    console.error('Google Books fetch error:', (error as Error).message);
     return null;
   }
 }
 
 /**
  * Fetch cover URL from OpenLibrary
- * @param {string} isbn - ISBN to lookup
- * @returns {Promise<{url: string, source: string, quality: string}|null>}
+ * @param isbn - ISBN to lookup
+ * @returns Cover result or null if not found
  */
-export async function fetchOpenLibraryCover(isbn) {
+export async function fetchOpenLibraryCover(isbn: string): Promise<CoverResult | null> {
   const normalizedISBN = normalizeISBN(isbn);
   if (!normalizedISBN) return null;
 
@@ -321,18 +371,18 @@ export async function fetchOpenLibraryCover(isbn) {
     };
 
   } catch (error) {
-    console.error('OpenLibrary fetch error:', error.message);
+    console.error('OpenLibrary fetch error:', (error as Error).message);
     return null;
   }
 }
 
 /**
  * Fetch best available cover from all providers (fallback chain)
- * @param {string} isbn - ISBN to lookup
- * @param {object} env - Worker environment
- * @returns {Promise<{url: string, source: string, quality: string}>}
+ * @param isbn - ISBN to lookup
+ * @param env - Worker environment
+ * @returns Cover result (placeholder if not found)
  */
-export async function fetchBestCover(isbn, env) {
+export async function fetchBestCover(isbn: string, env: Env): Promise<CoverResult> {
   const normalizedISBN = normalizeISBN(isbn);
   if (!normalizedISBN) {
     return {
@@ -375,8 +425,8 @@ export async function fetchBestCover(isbn, env) {
 
 /**
  * Get placeholder cover URL
- * @returns {string}
+ * @returns Placeholder cover URL
  */
-export function getPlaceholderCover() {
+export function getPlaceholderCover(): string {
   return PLACEHOLDER_COVER;
 }

@@ -17,9 +17,13 @@ import coversRoutes from './routes/covers.js';
 import coversLegacyRoutes from './routes/covers-legacy.js';
 import authorsRoutes from './routes/authors.js';
 import testRoutes from './routes/test.js';
+import harvestRoutes from './routes/harvest.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue } from './services/queue-handlers.js';
+
+// Workflow exports (must be exported at module level for Cloudflare to discover)
+export { AuthorHarvestWorkflow } from './workflows/author-harvest.js';
 
 // =================================================================================
 // Application Setup
@@ -107,6 +111,7 @@ const subRouters = [
   coversLegacyRoutes,
   authorsRoutes,
   testRoutes,
+  harvestRoutes,
 ];
 
 // Register route modules
@@ -152,6 +157,9 @@ app.use('*', async (c, next) => {
 // ✅ GET /api/test/isbndb/* (8 routes) - DONE (Batch 3)
 // ✅ POST /api/test/jsquash - DONE (Batch 3)
 // ✅ GET /api/test/wikidata - DONE (Batch 3)
+// ✅ POST /api/harvest/start - DONE (Workflows)
+// ✅ GET /api/harvest/status/:id - DONE (Workflows)
+// ✅ GET /api/harvest/list - DONE (Workflows)
 // =================================================================================
 
 // =================================================================================

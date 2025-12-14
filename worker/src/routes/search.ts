@@ -18,7 +18,7 @@ import {
   setCachedResults,
   isCacheEnabled,
   getCacheTTL,
-} from '../../cache-utils.js';
+} from '../../lib/cache-utils.js';
 import { smartResolveISBN, shouldResolveExternally } from '../../services/smart-enrich.js';
 
 // =================================================================================

@@ -135,6 +135,16 @@
     ]
   },
 
+  // Cloudflare Workflows for durable, long-running tasks
+  // See: https://developers.cloudflare.com/workflows/
+  "workflows": [
+    {
+      "name": "author-harvest-workflow",
+      "binding": "AUTHOR_HARVEST",
+      "class_name": "AuthorHarvestWorkflow"
+    }
+  ],
+
   "triggers": {
     "crons": [
       "* * * * *"

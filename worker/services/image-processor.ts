@@ -7,11 +7,13 @@
  * @module services/image-processor
  */
 
-import { fetchBestCover, getPlaceholderCover } from './cover-fetcher.js';
+import { fetchBestCover, getPlaceholderCover, type CoverResult } from './cover-fetcher.js';
 import { fetchWithRetry } from '../lib/fetch-utils.js';
+import type { Env } from '../src/env.js';
+import type { ImageSizes, DownloadImageResult } from '../src/services/types.js';
 
 // Image size definitions (width x height for book covers - 2:3 aspect ratio)
-const SIZES = {
+const SIZES: ImageSizes = {
   large: { width: 512, height: 768 },
   medium: { width: 256, height: 384 },
   small: { width: 128, height: 192 }
@@ -31,11 +33,69 @@ const ALLOWED_DOMAINS = new Set([
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
 /**
- * Validate that URL is from an allowed domain
- * @param {string} url - URL to validate
- * @returns {boolean}
+ * Cover metadata from R2
  */
-function isAllowedDomain(url) {
+export interface CoverMetadata {
+  exists: boolean;
+  isbn: string;
+  extension: string;
+  size: number;
+  uploaded: Date;
+  source?: string;
+  sourceUrl?: string;
+  quality?: string;
+  originalSize?: string;
+  hash?: string;
+  [key: string]: unknown; // Allow additional custom metadata
+}
+
+/**
+ * Cover processing options
+ */
+export interface ProcessCoverOptions {
+  force?: boolean;
+  knownCoverUrl?: string;
+}
+
+/**
+ * Cover processing result
+ */
+export interface ProcessCoverResult {
+  status: 'processed' | 'already_exists' | 'no_cover' | 'error';
+  isbn: string;
+  cached?: boolean;
+  source?: string;
+  quality?: string;
+  size?: number;
+  hash?: string;
+  processingTimeMs: number;
+  urls?: {
+    original: string;
+    large: string;
+    medium: string;
+    small: string;
+  };
+  error?: string;
+}
+
+/**
+ * Batch processing result
+ */
+export interface BatchProcessResult {
+  total: number;
+  processed: number;
+  cached: number;
+  failed: number;
+  processingTimeMs: number;
+  results: ProcessCoverResult[];
+}
+
+/**
+ * Validate that URL is from an allowed domain
+ * @param url - URL to validate
+ * @returns True if domain is allowed
+ */
+function isAllowedDomain(url: string): boolean {
   try {
     const parsed = new URL(url);
     return ALLOWED_DOMAINS.has(parsed.hostname);
@@ -44,13 +104,12 @@ function isAllowedDomain(url) {
   }
 }
 
-
 /**
  * Generate SHA-256 hash of data for deduplication
- * @param {ArrayBuffer} data - Data to hash
- * @returns {Promise<string>} Hex hash string
+ * @param data - Data to hash
+ * @returns Hex hash string
  */
-async function hashData(data) {
+async function hashData(data: ArrayBuffer): Promise<string> {
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -58,10 +117,10 @@ async function hashData(data) {
 
 /**
  * Download and validate an image from a URL
- * @param {string} url - Image URL
- * @returns {Promise<{buffer: ArrayBuffer, contentType: string}>}
+ * @param url - Image URL
+ * @returns Image buffer and content type
  */
-async function downloadImage(url) {
+async function downloadImage(url: string): Promise<DownloadImageResult> {
   // Security check
   if (!isAllowedDomain(url)) {
     throw new Error(`Domain not allowed: ${new URL(url).hostname}`);
@@ -100,14 +159,19 @@ async function downloadImage(url) {
 
 /**
  * Store image in R2 with metadata
- * @param {object} env - Worker environment
- * @param {string} key - R2 object key
- * @param {ArrayBuffer} data - Image data
- * @param {string} contentType - Image content type
- * @param {object} metadata - Custom metadata
- * @returns {Promise<void>}
+ * @param env - Worker environment
+ * @param key - R2 object key
+ * @param data - Image data
+ * @param contentType - Image content type
+ * @param metadata - Custom metadata
  */
-async function storeInR2(env, key, data, contentType, metadata = {}) {
+async function storeInR2(
+  env: Env,
+  key: string,
+  data: ArrayBuffer,
+  contentType: string,
+  metadata: Record<string, string> = {}
+): Promise<void> {
   await env.COVER_IMAGES.put(key, data, {
     httpMetadata: {
       contentType: contentType || 'image/jpeg',
@@ -123,11 +187,11 @@ async function storeInR2(env, key, data, contentType, metadata = {}) {
 /**
  * Check if a cover already exists in R2
  * Checks all possible extensions (jpg, png, webp)
- * @param {object} env - Worker environment
- * @param {string} isbn - ISBN to check
- * @returns {Promise<boolean>}
+ * @param env - Worker environment
+ * @param isbn - ISBN to check
+ * @returns True if cover exists
  */
-export async function coverExists(env, isbn) {
+export async function coverExists(env: Env, isbn: string): Promise<boolean> {
   const extensions = ['jpg', 'png', 'webp'];
   for (const ext of extensions) {
     const key = `isbn/${isbn}/original.${ext}`;
@@ -140,11 +204,11 @@ export async function coverExists(env, isbn) {
 /**
  * Get cover metadata from R2
  * Checks all possible extensions (jpg, png, webp)
- * @param {object} env - Worker environment
- * @param {string} isbn - ISBN to check
- * @returns {Promise<object|null>}
+ * @param env - Worker environment
+ * @param isbn - ISBN to check
+ * @returns Cover metadata or null if not found
  */
-export async function getCoverMetadata(env, isbn) {
+export async function getCoverMetadata(env: Env, isbn: string): Promise<CoverMetadata | null> {
   const extensions = ['jpg', 'png', 'webp'];
 
   for (const ext of extensions) {
@@ -179,12 +243,16 @@ export async function getCoverMetadata(env, isbn) {
  * Note: Resizing to multiple sizes is deferred - we store original only
  * and can use Cloudflare Image Resizing on-demand, or add pre-generation later.
  *
- * @param {string} isbn - ISBN to process
- * @param {object} env - Worker environment
- * @param {{force?: boolean, knownCoverUrl?: string}} [options] - Processing options
- * @returns {Promise<object>} Processing result
+ * @param isbn - ISBN to process
+ * @param env - Worker environment
+ * @param options - Processing options
+ * @returns Processing result
  */
-export async function processCoverImage(isbn, env, options = {}) {
+export async function processCoverImage(
+  isbn: string,
+  env: Env,
+  options: ProcessCoverOptions = {}
+): Promise<ProcessCoverResult> {
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
   const startTime = Date.now();
 
@@ -197,13 +265,14 @@ export async function processCoverImage(isbn, env, options = {}) {
         return {
           status: 'already_exists',
           isbn: normalizedISBN,
-          cached: true
+          cached: true,
+          processingTimeMs: Date.now() - startTime
         };
       }
     }
 
     // 2. Fetch best cover URL from providers (or use known URL)
-    let coverResult;
+    let coverResult: CoverResult;
 
     if (options.knownCoverUrl) {
       // Use the provided cover URL directly (avoids redundant API calls)
@@ -225,7 +294,8 @@ export async function processCoverImage(isbn, env, options = {}) {
         status: 'no_cover',
         isbn: normalizedISBN,
         source: 'placeholder',
-        error: coverResult.error || 'No cover found from any provider'
+        error: coverResult.error || 'No cover found from any provider',
+        processingTimeMs: Date.now() - startTime
       };
     }
 
@@ -269,12 +339,12 @@ export async function processCoverImage(isbn, env, options = {}) {
 
   } catch (error) {
     const processingTime = Date.now() - startTime;
-    console.error(`Failed to process cover for ${normalizedISBN}:`, error.message);
+    console.error(`Failed to process cover for ${normalizedISBN}:`, (error as Error).message);
 
     return {
       status: 'error',
       isbn: normalizedISBN,
-      error: error.message,
+      error: (error as Error).message,
       processingTimeMs: processingTime
     };
   }
@@ -284,12 +354,16 @@ export async function processCoverImage(isbn, env, options = {}) {
  * Process multiple covers in batch
  * Limited to prevent Worker CPU timeout
  *
- * @param {string[]} isbns - Array of ISBNs to process
- * @param {object} env - Worker environment
- * @param {number} limit - Max concurrent processing (default 5)
- * @returns {Promise<object>} Batch processing results
+ * @param isbns - Array of ISBNs to process
+ * @param env - Worker environment
+ * @param limit - Max concurrent processing (default 5)
+ * @returns Batch processing results
  */
-export async function processCoverBatch(isbns, env, limit = 5) {
+export async function processCoverBatch(
+  isbns: string[],
+  env: Env,
+  limit: number = 5
+): Promise<BatchProcessResult> {
   const startTime = Date.now();
 
   // Limit batch size to prevent timeout
@@ -299,10 +373,18 @@ export async function processCoverBatch(isbns, env, limit = 5) {
     batch.map(isbn => processCoverImage(isbn, env))
   );
 
-  const processed = results.map((result, index) => ({
-    isbn: batch[index],
-    ...(result.status === 'fulfilled' ? result.value : { status: 'error', error: result.reason?.message })
-  }));
+  const processed = results.map((result, index) => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    } else {
+      return {
+        isbn: batch[index],
+        status: 'error' as const,
+        error: (result.reason as Error)?.message || 'Unknown error',
+        processingTimeMs: 0
+      };
+    }
+  });
 
   return {
     total: batch.length,
@@ -316,14 +398,14 @@ export async function processCoverBatch(isbns, env, limit = 5) {
 
 /**
  * Get available sizes for serving
- * @returns {object}
+ * @returns Image sizes configuration
  */
-export function getAvailableSizes() {
+export function getAvailableSizes(): ImageSizes {
   return SIZES;
 }
 
 /**
  * Get placeholder cover URL
- * @returns {string}
+ * Re-export from cover-fetcher for convenience
  */
 export { getPlaceholderCover };

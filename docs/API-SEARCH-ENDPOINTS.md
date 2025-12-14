@@ -20,7 +20,32 @@ Alexandria provides comprehensive search capabilities across 54.8M book editions
 
 ## Search Endpoints
 
-### 1. Main Search Endpoint
+### 1. Combined Search Endpoint (Recommended)
+
+**Endpoint**: `GET /api/search/combined`
+
+**Description**: Performs an intelligent search across ISBNs, titles, and authors based on the query format. This is the recommended search endpoint for most use cases.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `q` | string | yes | - | The search query. The API automatically detects if it is an ISBN. |
+| `limit` | number | optional | 10 | Results per page (max: 100) |
+| `offset` | number | optional | 0 | Starting position for pagination |
+
+**Example**:
+```bash
+# Intelligent search for an ISBN
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=9780439064873'
+
+# Intelligent search for a title
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=Dune'
+```
+
+---
+
+### 2. Main Search Endpoint
 
 **Endpoint**: `GET /api/search`
 
@@ -498,6 +523,481 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ---
 
+## Batch & Bulk Operations
+
+### 14. Direct Batch Enrichment
+
+**Endpoint**: `POST /api/enrich/batch-direct`
+
+**Description**: Directly enriches up to 1000 ISBNs in a single request, bypassing the queue for maximum efficiency. This endpoint calls the ISBNdb Premium batch API.
+
+**Request Body**:
+```json
+{
+  "isbns": ["9780439064873", "9781492666868", "9780545010221"],
+  "source": "batch-direct"
+}
+```
+
+**Response**:
+```json
+{
+    "requested": 3,
+    "found": 3,
+    "enriched": 3,
+    "failed": 0,
+    "not_found": 0,
+    "covers_queued": 3,
+    "errors": [],
+    "api_calls": 1,
+    "duration_ms": 1521
+}
+```
+
+### 15. Batch Enrichment Queuing
+
+**Endpoint**: `POST /api/enrich/queue/batch`
+
+**Description**: Queues up to 100 books for background enrichment. This is suitable for less urgent processing.
+
+**Request Body**:
+```json
+{
+  "books": [
+    { "isbn": "9780439064873", "priority": "high" },
+    { "isbn": "9780545010221" }
+  ]
+}
+```
+
+**Response**:
+```json
+{
+  "queued": 2,
+  "failed": 0,
+  "errors": []
+}
+```
+
+### 16. Top Authors
+
+**Endpoint**: `GET /api/authors/top`
+
+**Description**: Retrieves the top authors by work count. This is useful for bulk data harvesting and is cached for 24 hours.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | number | optional | 100 | Results per page (max: 1000) |
+| `offset` | number | optional | 0 | Starting position for pagination |
+
+**Response**:
+```json
+{
+  "authors": [
+    {
+      "author_key": "/authors/OL34184A",
+      "author_name": "Agatha Christie",
+      "work_count": 2316
+    }
+  ],
+  "pagination": {
+    "offset": 0,
+    "limit": 1,
+    "returned": 1
+  },
+  "cached": false,
+  "query_duration_ms": 19876
+}
+```
+
+---
+
+## ISBN Validation
+
+### 23. Bulk ISBN Existence Check
+
+**Endpoint**: `POST /api/isbns/check`
+
+**Description**: Checks which ISBNs exist in the enriched_editions table. Useful for validating large ISBN lists before processing. Checks both primary ISBN field and alternate_isbns array.
+
+**Request Body**:
+```json
+{
+  "isbns": ["9780439064873", "9781492666868", "9780545010221"]
+}
+```
+
+**Validation**:
+- ISBNs array is required
+- Maximum 1000 ISBNs per request
+- Returns 400 error if validation fails
+
+**Response**:
+```json
+{
+  "requested": 3,
+  "found": 2,
+  "missing": 1,
+  "existing_isbns": ["9780439064873", "9781492666868"],
+  "missing_isbns": ["9780545010221"],
+  "query_duration_ms": 45
+}
+```
+
+**Example**:
+```bash
+curl -X POST 'https://alexandria.ooheynerds.com/api/isbns/check' \
+  -H 'Content-Type: application/json' \
+  -d '{"isbns": ["9780439064873", "9781492666868", "9780545010221"]}'
+```
+
+**Performance**: ~20-100ms for 1000 ISBNs (depends on match count)
+
+**Use Cases**:
+- Pre-validation before bulk enrichment
+- Checking if ISBNs need processing
+- Filtering out already-enriched books
+
+---
+
+## Author Endpoints
+
+### 24. Author Details
+
+**Endpoint**: `GET /api/authors/:key`
+
+**Description**: Retrieves comprehensive author details including biographical information and Wikidata diversity data (gender, nationality, birth/death information).
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | yes | Author key (with or without `/authors/` prefix) |
+
+**Accepts both formats**:
+- `OL23919A` (short form)
+- `/authors/OL23919A` (full form)
+
+**Response**:
+```json
+{
+  "author_key": "/authors/OL23919A",
+  "name": "J. K. Rowling",
+  "gender": "female",
+  "gender_qid": "Q6581072",
+  "nationality": "United Kingdom",
+  "citizenship_qid": "Q145",
+  "birth_year": 1965,
+  "death_year": null,
+  "birth_place": "Yate",
+  "birth_place_qid": "Q1008225",
+  "birth_country": "United Kingdom",
+  "birth_country_qid": "Q145",
+  "death_place": null,
+  "death_place_qid": null,
+  "bio": "British author, best known for the Harry Potter series...",
+  "bio_source": "wikidata",
+  "wikidata_id": "Q34660",
+  "openlibrary_author_id": "/authors/OL23919A",
+  "goodreads_author_ids": ["1077326"],
+  "wikidata_enriched_at": "2025-12-12T10:30:00Z",
+  "query_duration_ms": 12
+}
+```
+
+**Examples**:
+```bash
+# Using short form
+curl 'https://alexandria.ooheynerds.com/api/authors/OL23919A' | jq .
+
+# Using full form (URL-encoded)
+curl 'https://alexandria.ooheynerds.com/api/authors/%2Fauthors%2FOL23919A' | jq .
+```
+
+**Error Response** (404):
+```json
+{
+  "error": "Author not found",
+  "author_key": "/authors/OL23919A"
+}
+```
+
+**Performance**: ~10-30ms
+
+**Fields Explanation**:
+- **Diversity fields**: Gender, nationality, birth/death locations from Wikidata
+- **QID fields**: Wikidata entity IDs for programmatic access
+- **bio_source**: Indicates data source (wikidata, openlibrary, etc.)
+- **wikidata_enriched_at**: Timestamp of last Wikidata enrichment
+
+---
+
+### 25. Enrich Authors with Wikidata
+
+**Endpoint**: `POST /api/authors/enrich-wikidata`
+
+**Description**: Batch enriches authors with Wikidata diversity and biographical data. Queries Wikidata SPARQL endpoint and updates enriched_authors table.
+
+**Request Body**:
+```json
+{
+  "limit": 100,
+  "force_refresh": false
+}
+```
+
+**Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | number | optional | 100 | Authors to enrich per request (max: 500) |
+| `force_refresh` | boolean | optional | false | Re-enrich already enriched authors |
+
+**Behavior**:
+- Only enriches authors with existing `wikidata_id`
+- Skips authors already enriched (unless `force_refresh: true`)
+- Prioritizes authors with partial data over empty records
+- Processes in batches to respect Wikidata rate limits
+
+**Response**:
+```json
+{
+  "processed": 100,
+  "enriched": 87,
+  "already_enriched": 13,
+  "failed": 0,
+  "errors": [],
+  "duration_ms": 3521,
+  "wikidata_calls": 2
+}
+```
+
+**Example**:
+```bash
+# Enrich 100 authors
+curl -X POST 'https://alexandria.ooheynerds.com/api/authors/enrich-wikidata' \
+  -H 'Content-Type: application/json' \
+  -d '{"limit": 100}'
+
+# Force refresh of already-enriched authors
+curl -X POST 'https://alexandria.ooheynerds.com/api/authors/enrich-wikidata' \
+  -H 'Content-Type: application/json' \
+  -d '{"limit": 50, "force_refresh": true}'
+```
+
+**Performance**: ~3-5 seconds for 100 authors (depends on Wikidata response time)
+
+**Wikidata Fields Retrieved**:
+- Gender (P21)
+- Nationality/Citizenship (P27)
+- Birth date (P569) and place (P19)
+- Death date (P570) and place (P20)
+- Biography/description
+- External identifiers (Goodreads, etc.)
+
+**Rate Limiting**: Respects Wikidata SPARQL rate limits by batching queries
+
+---
+
+### 26. Author Enrichment Status
+
+**Endpoint**: `GET /api/authors/enrich-status`
+
+**Description**: Returns statistics on author enrichment progress, showing how many authors have Wikidata data and diversity fields populated.
+
+**Query Parameters**: None
+
+**Response**:
+```json
+{
+  "total_authors": 15423,
+  "has_wikidata_id": 8934,
+  "wikidata_enriched": 7821,
+  "pending_enrichment": 1113,
+  "diversity_fields": {
+    "has_gender": 6543,
+    "has_nationality": 5234,
+    "has_birth_place": 4876
+  }
+}
+```
+
+**Example**:
+```bash
+curl 'https://alexandria.ooheynerds.com/api/authors/enrich-status' | jq .
+```
+
+**Performance**: ~50-200ms (depends on table size)
+
+**Fields Explanation**:
+- **total_authors**: Total authors in enriched_authors table
+- **has_wikidata_id**: Authors with Wikidata ID linked
+- **wikidata_enriched**: Authors with completed Wikidata enrichment
+- **pending_enrichment**: Authors with Wikidata ID but not yet enriched
+- **diversity_fields**: Count of authors with specific diversity data populated
+
+**Use Cases**:
+- Monitoring enrichment progress
+- Identifying gaps in author data
+- Planning batch enrichment jobs
+
+---
+
+## Advanced Cover Endpoints
+
+### 27. Work-based Cover Retrieval
+
+**Endpoint**: `GET /api/covers/:work_key/:size`
+
+**Description**: Serves cover images by OpenLibrary work key instead of ISBN. Automatically finds and serves the cover associated with the work, with on-the-fly resizing.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `work_key` | string | yes | OpenLibrary work key (without `/works/` prefix) |
+| `size` | string | yes | `large`, `medium`, or `small` |
+
+**Response**: Image binary (JPEG/PNG) or redirect to placeholder
+
+**Headers**:
+- `Content-Type`: `image/jpeg`, `image/png`, or `image/webp`
+- `Cache-Control`: `public, max-age=31536000, immutable`
+- `Access-Control-Allow-Origin`: `*`
+
+**Examples**:
+```bash
+# Large cover for Harry Potter work
+curl 'https://alexandria.ooheynerds.com/api/covers/OL82537W/large' -o cover.jpg
+
+# Medium cover
+curl 'https://alexandria.ooheynerds.com/api/covers/OL82537W/medium' -o cover.jpg
+
+# Small thumbnail
+curl 'https://alexandria.ooheynerds.com/api/covers/OL82537W/small' -o cover.jpg
+```
+
+**Fallback Behavior**:
+1. Check R2 for stored cover under `covers/{work_key}/{hash}/original`
+2. If not found, redirect to placeholder SVG
+
+**Performance**: ~20-50ms (R2 cache hit)
+
+**Size Specifications**:
+- **large**: 800px max dimension
+- **medium**: 400px max dimension
+- **small**: 200px max dimension
+
+**Note**: This endpoint complements the ISBN-based cover endpoints (`/covers/:isbn/:size`) and is preferred when you have the work key but not a specific ISBN.
+
+---
+
+### 28. Batch Cover Queueing
+
+**Endpoint**: `POST /api/covers/queue`
+
+**Description**: Queues multiple cover processing jobs for background processing. Unlike direct processing, this endpoint queues covers to be processed asynchronously by the alexandria-cover-queue.
+
+**Request Body**:
+```json
+{
+  "books": [
+    {
+      "isbn": "9780439064873",
+      "work_key": "/works/OL82537W",
+      "priority": "high",
+      "source": "user_request",
+      "title": "Harry Potter and the Chamber of Secrets",
+      "author": "J. K. Rowling"
+    },
+    {
+      "isbn": "9781492666868",
+      "priority": "normal"
+    }
+  ]
+}
+```
+
+**Parameters per book**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `isbn` | string | yes | ISBN-10 or ISBN-13 |
+| `work_key` | string | optional | OpenLibrary work key |
+| `priority` | string | optional | `high`, `normal`, or `low` (default: `normal`) |
+| `source` | string | optional | Source identifier (default: `unknown`) |
+| `title` | string | optional | Book title (for logging) |
+| `author` | string | optional | Author name (for logging) |
+
+**Validation**:
+- Books array is required
+- Maximum 100 books per request
+- Invalid ISBNs are reported in failed array
+
+**Response**:
+```json
+{
+  "queued": 2,
+  "failed": 0,
+  "results": {
+    "queued": ["9780439064873", "9781492666868"],
+    "failed": []
+  }
+}
+```
+
+**Error Response** (partial failure):
+```json
+{
+  "queued": 1,
+  "failed": 1,
+  "results": {
+    "queued": ["9780439064873"],
+    "failed": [
+      {
+        "isbn": "invalid123",
+        "error": "Invalid ISBN format"
+      }
+    ]
+  }
+}
+```
+
+**Example**:
+```bash
+curl -X POST 'https://alexandria.ooheynerds.com/api/covers/queue' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "books": [
+      {
+        "isbn": "9780439064873",
+        "priority": "high",
+        "source": "bulk_import"
+      },
+      {
+        "isbn": "9781492666868"
+      }
+    ]
+  }'
+```
+
+**Performance**: ~50-100ms (queuing only, processing happens in background)
+
+**Use Cases**:
+- Bulk cover processing for imports
+- Background cover fetching after enrichment
+- Non-blocking cover acquisition
+
+**Queue Processing**:
+- Queued covers are processed by alexandria-cover-queue consumer
+- Queue configuration: max_batch_size=20, max_retries=3
+- Failed jobs move to alexandria-cover-dlq after 3 retries
+- Processing includes download, validation, and storage in R2
+
+**Difference from `/covers/batch`**:
+- `/covers/batch`: Synchronous processing, max 10 ISBNs, immediate response
+- `/api/covers/queue`: Asynchronous queuing, max 100 ISBNs, background processing
+
+---
+
 ## Smart Resolution Feature
 
 ### How It Works
@@ -786,6 +1286,230 @@ curl 'https://alexandria.ooheynerds.com/covers/9780439064873/status' | jq .
 
 # Process cover
 curl -X POST 'https://alexandria.ooheynerds.com/covers/9780439064873/process' | jq .
+
+# Work-based cover retrieval
+curl 'https://alexandria.ooheynerds.com/api/covers/OL82537W/large' -o cover.jpg
+
+# Queue batch covers
+curl -X POST 'https://alexandria.ooheynerds.com/api/covers/queue' \
+  -H 'Content-Type: application/json' \
+  -d '{"books": [{"isbn": "9780439064873", "priority": "high"}]}' | jq .
+```
+
+### ISBN Validation
+```bash
+# Check which ISBNs exist
+curl -X POST 'https://alexandria.ooheynerds.com/api/isbns/check' \
+  -H 'Content-Type: application/json' \
+  -d '{"isbns": ["9780439064873", "9781492666868"]}' | jq .
+```
+
+### Author Endpoints
+```bash
+# Get author details (short form)
+curl 'https://alexandria.ooheynerds.com/api/authors/OL23919A' | jq .
+
+# Get author details (full form, URL-encoded)
+curl 'https://alexandria.ooheynerds.com/api/authors/%2Fauthors%2FOL23919A' | jq .
+
+# Enrich authors with Wikidata
+curl -X POST 'https://alexandria.ooheynerds.com/api/authors/enrich-wikidata' \
+  -H 'Content-Type: application/json' \
+  -d '{"limit": 100}' | jq .
+
+# Check enrichment status
+curl 'https://alexandria.ooheynerds.com/api/authors/enrich-status' | jq .
+```
+
+---
+
+## Admin & Monitoring Endpoints
+
+These endpoints provide administrative functionality and debugging capabilities for the Alexandria system.
+
+### 17. Cover Object Inspection
+
+**Endpoint**: `GET /api/covers/inspect`
+
+**Description**: Debug endpoint to inspect R2 storage objects with metadata. Useful for troubleshooting cover storage issues and analyzing storage usage.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | number | optional | 20 | Number of objects to inspect |
+| `details` | boolean | optional | false | Include full metadata (customMetadata, httpMetadata) |
+
+**Response**:
+```json
+{
+  "objects": [
+    {
+      "key": "isbn/9780439064873/large.webp",
+      "size": 45678,
+      "uploaded": "2025-12-10T15:30:00.000Z",
+      "customMetadata": {
+        "isbn": "9780439064873",
+        "source": "openlibrary"
+      },
+      "httpMetadata": {
+        "contentType": "image/webp"
+      }
+    }
+  ],
+  "count": 1,
+  "truncated": false
+}
+```
+
+**Example**:
+```bash
+# Basic inspection (first 20 objects)
+curl 'https://alexandria.ooheynerds.com/api/covers/inspect'
+
+# Detailed inspection with more results
+curl 'https://alexandria.ooheynerds.com/api/covers/inspect?limit=50&details=true'
+```
+
+---
+
+### 18. Manual Enrichment Queue Drain
+
+**Endpoint**: `POST /api/queue/drain/enrichment`
+
+**Description**: Admin endpoint to manually trigger enrichment queue processing. Pulls messages from the queue and processes them synchronously. Useful for manual queue management and testing.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `batch_size` | number | optional | 10 | Number of messages to pull and process |
+
+**Response**:
+```json
+{
+  "pulled": 10,
+  "processed": 8,
+  "failed": 2,
+  "errors": [
+    {
+      "isbn": "9780000000000",
+      "error": "ISBN not found in any provider"
+    }
+  ]
+}
+```
+
+**Example**:
+```bash
+# Drain 10 messages (default)
+curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/enrichment'
+
+# Drain custom batch size
+curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/enrichment?batch_size=25'
+```
+
+**Note**: This endpoint processes messages synchronously and may take several seconds to complete for large batch sizes.
+
+---
+
+### 19. Manual Cover Queue Drain
+
+**Endpoint**: `POST /api/queue/drain/covers`
+
+**Description**: Admin endpoint to manually trigger cover queue processing. Pulls messages from the queue and processes them synchronously. Useful for manual queue management and testing.
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `batch_size` | number | optional | 20 | Number of messages to pull and process |
+
+**Response**:
+```json
+{
+  "pulled": 20,
+  "processed": 18,
+  "failed": 2,
+  "errors": [
+    {
+      "isbn": "9780000000000",
+      "error": "No cover URL found"
+    }
+  ]
+}
+```
+
+**Example**:
+```bash
+# Drain 20 messages (default)
+curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/covers'
+
+# Drain custom batch size
+curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/covers?batch_size=50'
+```
+
+**Note**: This endpoint processes messages synchronously and may take several seconds to complete for large batch sizes.
+
+---
+
+### 20. Interactive Dashboard
+
+**Endpoint**: `GET /`
+
+**Description**: Root endpoint that returns an interactive HTML dashboard with system statistics, quick links to documentation, and endpoint testing interface.
+
+**Response**: HTML page (not JSON)
+
+**Features**:
+- Real-time database statistics
+- Quick links to all API endpoints
+- OpenAPI/Swagger documentation link
+- System health status
+- R2 storage statistics
+
+**Example**:
+```bash
+# Open in browser
+open https://alexandria.ooheynerds.com/
+
+# Or fetch HTML
+curl 'https://alexandria.ooheynerds.com/'
+```
+
+**Cache**: 1-hour cache (`max-age=3600`)
+
+---
+
+## API Limits Reference
+
+Alexandria enforces the following limits on batch operations to ensure system stability and fair resource usage:
+
+| Endpoint | Limit | Enforcement | Notes |
+|----------|-------|-------------|-------|
+| `POST /api/isbns/check` | 1000 ISBNs max | Returns 400 if exceeded | Checks ISBN existence in enriched_editions |
+| `POST /api/enrich/queue/batch` | 100 books max | Returns 400 if exceeded | Background queue processing |
+| `POST /covers/batch` | 10 ISBNs max | Zod schema validation | Synchronous cover processing |
+| `POST /api/covers/queue` | 100 books max | Returns 400 if exceeded | Background cover queue |
+| `POST /api/enrich/batch-direct` | 1000 ISBNs max | Returns 400 if exceeded | Direct ISBNdb Premium batch call |
+
+**Rationale**:
+
+- **Queue limits (100)**: Cloudflare Queues has a hard limit of 100 messages per batch (`max_batch_size`)
+- **ISBNdb limits (1000)**: ISBNdb Premium supports up to 1000 ISBNs per batch API call
+- **Synchronous limits (10)**: Lower limits for synchronous operations to prevent Worker CPU timeout
+
+**Best Practices**:
+
+1. **Use `/api/enrich/batch-direct` for bulk operations** (up to 1000 ISBNs) - Most efficient for large imports
+2. **Use queue endpoints for background processing** (up to 100 per request) - Non-blocking, reliable
+3. **Use synchronous endpoints for small batches** (up to 10) - Immediate results, good for user-facing operations
+
+**Example Error Response** (400):
+```json
+{
+  "error": "Too many ISBNs (max 1000)"
+}
 ```
 
 ---
@@ -810,6 +1534,8 @@ Alexandria provides a comprehensive book search API with:
 ✅ **Fast queries**: Indexed ISBN lookups in ~10-50ms
 ✅ **Pagination**: Full offset/limit support with total counts
 ✅ **24-hour caching**: Edge caching for all queries
+✅ **Admin endpoints**: Queue management, R2 inspection, interactive dashboard
+✅ **Batch limits**: Up to 1000 ISBNs for direct batch enrichment
 
 **Performance Benchmarks**:
 - ISBN search: ~10-50ms (indexed)
