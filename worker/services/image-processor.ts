@@ -33,20 +33,46 @@ const ALLOWED_DOMAINS = new Set([
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
 /**
- * Cover metadata from R2
+ * R2 custom metadata fields stored with cover images
+ * These fields are stored as strings in R2's customMetadata
+ * All fields are optional because R2 spreads may not include all fields
  */
-export interface CoverMetadata {
-  exists: boolean;
-  isbn: string;
-  extension: string;
-  size: number;
-  uploaded: Date;
+interface R2CoverCustomMetadata {
+  /** ISO timestamp when the cover was uploaded */
+  uploadedAt?: string;
+  /** Provider source (openlibrary, isbndb, google, etc.) */
   source?: string;
+  /** Original provider URL */
   sourceUrl?: string;
+  /** Cover quality rating (high, medium, low) */
   quality?: string;
+  /** Original image size in bytes (as string) */
   originalSize?: string;
+  /** SHA-256 hash for deduplication */
   hash?: string;
-  [key: string]: unknown; // Allow additional custom metadata
+  /** OpenLibrary work key (optional metadata) */
+  workKey?: string;
+  /** Original image type (jpg, png, webp) */
+  originalType?: string;
+  /** Flag if WebP conversion was skipped */
+  webpSkipped?: string;
+}
+
+/**
+ * Cover metadata from R2
+ * Combines R2 object metadata with custom metadata fields
+ */
+export interface CoverMetadata extends R2CoverCustomMetadata {
+  /** Whether the cover exists in R2 */
+  exists: boolean;
+  /** ISBN key used for lookup */
+  isbn: string;
+  /** File extension (jpg, png, webp) */
+  extension: string;
+  /** File size in bytes from R2 */
+  size: number;
+  /** Upload timestamp from R2 */
+  uploaded: Date;
 }
 
 /**

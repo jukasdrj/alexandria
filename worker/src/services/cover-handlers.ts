@@ -4,7 +4,7 @@
 
 import type { Context } from 'hono';
 import type { AppBindings } from '../env.js';
-import { downloadImage, PLACEHOLDER_COVER } from './image-utils.js';
+import { downloadImage, getPlaceholderCover } from './image-utils.js';
 
 /**
  * POST /api/covers/process
@@ -102,14 +102,15 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     // Return placeholder URLs on error
+    const placeholderUrl = getPlaceholderCover(c.env);
     return c.json(
       {
         success: false,
         error: errorMessage,
         urls: {
-          large: PLACEHOLDER_COVER,
-          medium: PLACEHOLDER_COVER,
-          small: PLACEHOLDER_COVER,
+          large: placeholderUrl,
+          medium: placeholderUrl,
+          small: placeholderUrl,
         },
       },
       errorMessage.includes('Domain not allowed') ? 403 : 500

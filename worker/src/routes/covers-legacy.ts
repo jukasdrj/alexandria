@@ -269,10 +269,8 @@ app.openapi(coverStatusRoute, async (c) => {
     logger.info('Cover status - legacy format found', { isbn: normalizedISBN });
 
     return c.json({
-      exists: true,
-      isbn: normalizedISBN,
-      format: 'legacy' as const,
-      ...metadata,
+      ...metadata,  // Spread metadata first
+      format: 'legacy' as const,  // Then override format
       urls: {
         original: `/covers/${normalizedISBN}/original`,
         large: `/covers/${normalizedISBN}/large`,

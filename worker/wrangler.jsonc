@@ -38,6 +38,7 @@
     "MAX_RETRIES": "3",
 
     "OPENLIBRARY_BASE_URL": "https://openlibrary.org",
+    "PLACEHOLDER_COVER_URL": "https://placehold.co/300x450/e0e0e0/666666?text=No+Cover",
     "USER_AGENT": "Alexandria/2.0 (nerd@ooheynerds.com) OpenLibraryWorker/2.0.0",
 
     "LOG_LEVEL": "info",

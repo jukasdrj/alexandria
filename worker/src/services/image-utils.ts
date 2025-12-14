@@ -3,9 +3,22 @@
 // =================================================================================
 
 import type { ImageSizes, DownloadImageResult } from './types.js';
+import type { Env } from '../env.js';
 
-export const PLACEHOLDER_COVER =
-  'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover';
+// Default placeholder cover (used if PLACEHOLDER_COVER_URL not configured)
+const DEFAULT_PLACEHOLDER_COVER = 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover';
+
+/**
+ * Get placeholder cover URL from environment or use default
+ * @param env - Worker environment (optional)
+ * @returns Placeholder cover URL
+ */
+export function getPlaceholderCover(env?: Env): string {
+  return env?.PLACEHOLDER_COVER_URL || DEFAULT_PLACEHOLDER_COVER;
+}
+
+// Export constant for backward compatibility (uses default)
+export const PLACEHOLDER_COVER = DEFAULT_PLACEHOLDER_COVER;
 
 export const ALLOWED_DOMAINS = new Set([
   'books.google.com',

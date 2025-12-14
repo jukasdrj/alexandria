@@ -10,9 +10,20 @@
  */
 
 import { fetchWithRetry } from '../lib/fetch-utils.js';
+import { normalizeISBN } from '../lib/isbn-utils.js';
 import type { Env } from '../src/env.js';
 
-const PLACEHOLDER_COVER = 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover';
+// Default placeholder cover (used if PLACEHOLDER_COVER_URL not configured)
+const DEFAULT_PLACEHOLDER_COVER = 'https://placehold.co/300x450/e0e0e0/666666?text=No+Cover';
+
+/**
+ * Get placeholder cover URL from environment or use default
+ * @param env - Worker environment (optional)
+ * @returns Placeholder cover URL
+ */
+function getPlaceholderURL(env?: Env): string {
+  return env?.PLACEHOLDER_COVER_URL || DEFAULT_PLACEHOLDER_COVER;
+}
 
 // Rate limiting: ISBNdb Premium allows 3 requests/second
 const ISBNDB_RATE_LIMIT_MS = 350; // 350ms = ~3 req/sec with safety margin
@@ -62,31 +73,6 @@ interface GoogleBooksVolume {
 
 interface GoogleBooksResponse {
   items?: GoogleBooksVolume[];
-}
-
-/**
- * Normalize ISBN to 13-digit format (remove hyphens, validate)
- * @param isbn - ISBN-10 or ISBN-13
- * @returns Normalized ISBN or null if invalid
- */
-export function normalizeISBN(isbn: string): string | null {
-  if (!isbn) return null;
-
-  // Remove hyphens and spaces
-  const cleaned = isbn.replace(/[-\s]/g, '').toUpperCase();
-
-  // Validate length (10 or 13 digits, ISBN-10 can end with X)
-  if (cleaned.length === 10) {
-    if (!/^[0-9]{9}[0-9X]$/.test(cleaned)) return null;
-    return cleaned;
-  }
-
-  if (cleaned.length === 13) {
-    if (!/^[0-9]{13}$/.test(cleaned)) return null;
-    return cleaned;
-  }
-
-  return null;
 }
 
 /**
@@ -386,7 +372,7 @@ export async function fetchBestCover(isbn: string, env: Env): Promise<CoverResul
   const normalizedISBN = normalizeISBN(isbn);
   if (!normalizedISBN) {
     return {
-      url: PLACEHOLDER_COVER,
+      url: getPlaceholderURL(env),
       source: 'placeholder',
       quality: 'missing',
       error: 'Invalid ISBN'
@@ -417,7 +403,7 @@ export async function fetchBestCover(isbn: string, env: Env): Promise<CoverResul
   // No cover found anywhere
   console.log(`No cover found for ${normalizedISBN} from any provider`);
   return {
-    url: PLACEHOLDER_COVER,
+    url: getPlaceholderURL(env),
     source: 'placeholder',
     quality: 'missing'
   };
@@ -425,8 +411,9 @@ export async function fetchBestCover(isbn: string, env: Env): Promise<CoverResul
 
 /**
  * Get placeholder cover URL
+ * @param env - Worker environment (optional)
  * @returns Placeholder cover URL
  */
-export function getPlaceholderCover(): string {
-  return PLACEHOLDER_COVER;
+export function getPlaceholderCover(env?: Env): string {
+  return getPlaceholderURL(env);
 }

@@ -49,6 +49,7 @@ export interface Env {
   ENRICHMENT_CONCURRENCY: string;
   MAX_RETRIES: string;
   OPENLIBRARY_BASE_URL: string;
+  PLACEHOLDER_COVER_URL?: string; // Optional: Fallback placeholder image URL
   USER_AGENT: string;
   LOG_LEVEL: string;
   ENABLE_PERFORMANCE_LOGGING: string;
