@@ -14,11 +14,13 @@ import {
   QueueEnrichmentSchema,
   QueueBatchSchema,
   BatchDirectSchema,
+  CoverHarvestSchema,
   EnrichmentResultSchema,
   QueueResultSchema,
   QueueBatchResultSchema,
   EnrichmentStatusSchema,
   BatchDirectResultSchema,
+  CoverHarvestResultSchema,
   ErrorResponseSchema,
 } from '../schemas/enrich.js';
 import {
@@ -587,6 +589,198 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
       {
         success: false,
         error: 'Batch enrichment failed',
+        message,
+      },
+      500
+    );
+  }
+});
+
+// =================================================================================
+// POST /api/harvest/covers - Harvest covers for OpenLibrary editions
+// =================================================================================
+
+const coverHarvestRoute = createRoute({
+  method: 'post',
+  path: '/api/harvest/covers',
+  tags: ['Enrichment'],
+  summary: 'Harvest Covers',
+  description: `Automatically harvest covers for OpenLibrary editions that don't have them.
+
+**How it works:**
+1. Queries the database for editions without covers (English ISBNs only: 978-0, 978-1)
+2. Batches up to 1000 ISBNs in a single ISBNdb API call
+3. Updates editions with cover URLs from ISBNdb
+4. Queues cover downloads for R2 storage
+
+**Efficiency:**
+- 1000 ISBNs per API call (ISBNdb Premium)
+- 15,000 API calls/day = 15M ISBNs/day
+- Could process all 28M editions needing covers in ~2 days
+
+**Usage:**
+Call this endpoint repeatedly with increasing offset to process all editions.`,
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: CoverHarvestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Batch processed successfully',
+      content: {
+        'application/json': {
+          schema: CoverHarvestResultSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Internal server error',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+enrichRoutes.openapi(coverHarvestRoute, async (c) => {
+  const startTime = Date.now();
+  const logger = c.get('logger');
+
+  try {
+    const body = c.req.valid('json');
+    const { batch_size = 1000, offset = 0, queue_covers = false } = body;
+
+    const sql = c.get('sql');
+
+    // Query OpenLibrary editions without covers (English ISBNs only)
+    // Using created_at DESC to process newest first
+    logger.info('Cover harvest: querying editions', { batch_size, offset });
+
+    const editionsResult = await sql`
+      SELECT isbn
+      FROM enriched_editions
+      WHERE primary_provider = 'openlibrary'
+        AND cover_url_large IS NULL
+        AND isbn IS NOT NULL
+        AND LENGTH(isbn) = 13
+        AND (isbn LIKE '9780%' OR isbn LIKE '9781%')
+      ORDER BY created_at DESC
+      OFFSET ${offset}
+      LIMIT ${batch_size}
+    `;
+
+    const isbns = editionsResult.map((row: { isbn: string }) => row.isbn);
+
+    if (isbns.length === 0) {
+      return c.json({
+        queried: 0,
+        found_in_isbndb: 0,
+        covers_queued: 0,
+        editions_updated: 0,
+        no_cover_url: 0,
+        api_calls: 0,
+        duration_ms: Date.now() - startTime,
+        next_offset: offset,
+        message: 'No more editions to process',
+      });
+    }
+
+    logger.info('Cover harvest: fetching from ISBNdb', { isbn_count: isbns.length });
+
+    // Fetch from ISBNdb (single API call for up to 1000 ISBNs)
+    const batchData = await fetchISBNdbBatch(isbns, c.env);
+
+    const results = {
+      queried: isbns.length,
+      found_in_isbndb: batchData.size,
+      covers_queued: 0,
+      editions_updated: 0,
+      no_cover_url: 0,
+      api_calls: 1,
+      duration_ms: 0,
+      next_offset: offset + isbns.length,
+    };
+
+    // Update editions with cover URLs and queue downloads
+    for (const [isbn, data] of batchData) {
+      const coverUrl = data.coverUrls?.original || data.coverUrls?.large;
+
+      if (!coverUrl) {
+        results.no_cover_url++;
+        continue;
+      }
+
+      try {
+        // Update edition with cover URLs (don't overwrite other metadata)
+        await sql`
+          UPDATE enriched_editions
+          SET
+            cover_url_large = ${data.coverUrls?.large || coverUrl},
+            cover_url_medium = ${data.coverUrls?.medium || coverUrl},
+            cover_url_small = ${data.coverUrls?.small || coverUrl},
+            cover_url_original = ${data.coverUrls?.original || null},
+            cover_source = 'isbndb',
+            updated_at = NOW()
+          WHERE isbn = ${isbn}
+        `;
+        results.editions_updated++;
+
+        // Queue cover download only if requested
+        if (queue_covers) {
+          await c.env.COVER_QUEUE.send({
+            isbn,
+            provider_url: coverUrl,
+            priority: 'normal',
+            source: 'cover-harvest',
+          });
+          results.covers_queued++;
+        }
+
+      } catch (error) {
+        logger.error('Cover harvest: update failed', {
+          isbn,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    results.duration_ms = Date.now() - startTime;
+
+    // Get estimated remaining count (cached, not real-time)
+    try {
+      const remainingResult = await sql`
+        SELECT COUNT(*)::int as count
+        FROM enriched_editions
+        WHERE primary_provider = 'openlibrary'
+          AND cover_url_large IS NULL
+          AND isbn IS NOT NULL
+          AND LENGTH(isbn) = 13
+          AND (isbn LIKE '9780%' OR isbn LIKE '9781%')
+      `;
+      (results as Record<string, unknown>).estimated_remaining = remainingResult[0]?.count || 0;
+    } catch {
+      // Ignore count errors
+    }
+
+    logger.info('Cover harvest: complete', results);
+
+    return c.json(results);
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Cover harvest failed', { error: message });
+    return c.json(
+      {
+        success: false,
+        error: 'Cover harvest failed',
         message,
       },
       500

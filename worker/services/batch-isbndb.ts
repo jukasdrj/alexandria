@@ -149,11 +149,12 @@ export async function fetchISBNdbBatch(
       const isbn = book.isbn13 || book.isbn;
       if (!isbn || !book.title) continue;
 
-      // Extract cover URLs (prefer image_original for best quality)
+      // Extract cover URLs (prefer image over image_original to avoid memory issues)
+      // image_original can be 3000x4000+ which crashes jSquash WASM decoder
       let coverUrls: ExternalBookData['coverUrls'];
-      if (book.image_original || book.image) {
+      if (book.image) {
         coverUrls = {
-          original: book.image_original,  // High-quality original (best for R2)
+          original: book.image,  // Use standard image (pre-sized, ~500x700)
           large: book.image,
           medium: book.image,
           small: book.image,

@@ -514,5 +514,85 @@ export const BatchDirectResultSchema = z
   })
   .openapi('BatchDirectResult');
 
+/**
+ * Cover Harvest Request Schema
+ * Harvests covers for existing OpenLibrary editions
+ */
+export const CoverHarvestSchema = z
+  .object({
+    batch_size: z
+      .number()
+      .int()
+      .min(1)
+      .max(1000)
+      .default(1000)
+      .openapi({
+        description: 'Number of ISBNs to process (max 1000 per ISBNdb Premium call)',
+        example: 1000,
+      }),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .openapi({
+        description: 'Offset for pagination (skip first N editions)',
+        example: 0,
+      }),
+    queue_covers: z
+      .boolean()
+      .default(false)
+      .openapi({
+        description: 'Whether to queue cover downloads (default: false - just updates URLs). Set true only if queue is not backed up.',
+        example: false,
+      }),
+  })
+  .openapi('CoverHarvestRequest');
+
+/**
+ * Cover Harvest Result Schema
+ * Results from cover harvesting operation
+ */
+export const CoverHarvestResultSchema = z
+  .object({
+    queried: z.number().int().openapi({
+      description: 'Number of ISBNs queried from database',
+      example: 1000,
+    }),
+    found_in_isbndb: z.number().int().openapi({
+      description: 'Number found in ISBNdb',
+      example: 847,
+    }),
+    covers_queued: z.number().int().openapi({
+      description: 'Number of covers queued for download',
+      example: 823,
+    }),
+    editions_updated: z.number().int().openapi({
+      description: 'Number of editions updated with cover URLs',
+      example: 823,
+    }),
+    no_cover_url: z.number().int().openapi({
+      description: 'Number found in ISBNdb but without cover URL',
+      example: 24,
+    }),
+    api_calls: z.number().int().openapi({
+      description: 'Number of ISBNdb API calls made',
+      example: 1,
+    }),
+    duration_ms: z.number().int().openapi({
+      description: 'Total duration in milliseconds',
+      example: 1250,
+    }),
+    next_offset: z.number().int().openapi({
+      description: 'Offset for next batch (use this for pagination)',
+      example: 1000,
+    }),
+    estimated_remaining: z.number().int().optional().openapi({
+      description: 'Estimated editions still needing covers',
+      example: 28572585,
+    }),
+  })
+  .openapi('CoverHarvestResult');
+
 // Re-export centralized ErrorResponseSchema
 export { ErrorResponseSchema } from './response.js';
