@@ -263,6 +263,14 @@ export async function processAndStoreCover(isbn: string, sourceUrl: string, env:
     const sourceHeight = imageData.height;
     console.log(`[jSquash] Decoded ${imageType} ${sourceWidth}x${sourceHeight} (${buffer.byteLength} bytes)`);
 
+    // Safety check for extremely large dimensions (can crash WASM decoder/resizer)
+    // ISBNdb image_original can be 3000x4000+ which exhausts WASM memory
+    const MAX_DIMENSION = 4096;
+    if (sourceWidth > MAX_DIMENSION || sourceHeight > MAX_DIMENSION) {
+      console.warn(`[jSquash] Image dimensions ${sourceWidth}x${sourceHeight} exceed safe limit ${MAX_DIMENSION}, proceeding with caution`);
+      // Don't throw - let resizer handle it. If it fails, the error will be caught.
+    }
+
     // Check if image is too small for WebP conversion (would inflate size)
     if (buffer.byteLength < MIN_SIZE_FOR_WEBP) {
       console.log(`[jSquash] Image too small for WebP conversion (${buffer.byteLength} < ${MIN_SIZE_FOR_WEBP} bytes), storing original format`);

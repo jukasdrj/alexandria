@@ -48,7 +48,9 @@
 
     "ENABLE_ENRICHMENT_QUEUE": "true",
     "ENABLE_COVER_PROCESSING": "true",
-    "ENABLE_ANALYTICS": "true"
+    "ENABLE_ANALYTICS": "true",
+
+    "BEND_WEBHOOK_URL": "https://api.oooefam.net/v3/webhooks/alexandria/enrichment-complete"
   },
 
   "hyperdrive": [

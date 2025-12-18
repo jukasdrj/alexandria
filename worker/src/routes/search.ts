@@ -40,6 +40,11 @@ async function fallbackISBNSearch(sql: any, isbn: string) {
       w.data->>'title' AS work_title,
       e.key AS edition_key,
       e.work_key,
+      (CASE 
+        WHEN e.data->'covers' IS NOT NULL AND jsonb_array_length(e.data->'covers') > 0 
+        THEN 'https://covers.openlibrary.org/b/id/' || (e.data->'covers'->>0) || '-L.jpg' 
+        ELSE NULL 
+      END) AS cover_url,
       COALESCE(
         json_agg(
           DISTINCT jsonb_build_object(
@@ -79,6 +84,11 @@ async function fallbackTitleSearch(sql: any, title: string, limit: number, offse
         w.data->>'title' AS work_title,
         e.key AS edition_key,
         e.work_key,
+        (CASE 
+          WHEN e.data->'covers' IS NOT NULL AND jsonb_array_length(e.data->'covers') > 0 
+          THEN 'https://covers.openlibrary.org/b/id/' || (e.data->'covers'->>0) || '-L.jpg' 
+          ELSE NULL 
+        END) AS cover_url,
         COALESCE(
           json_agg(
             DISTINCT jsonb_build_object(
@@ -125,6 +135,11 @@ async function fallbackAuthorSearch(sql: any, author: string, limit: number, off
       w.data->>'title' AS work_title,
       e.key AS edition_key,
       e.work_key,
+      (CASE 
+        WHEN e.data->'covers' IS NOT NULL AND jsonb_array_length(e.data->'covers') > 0 
+        THEN 'https://covers.openlibrary.org/b/id/' || (e.data->'covers'->>0) || '-L.jpg' 
+        ELSE NULL 
+      END) AS cover_url,
       COALESCE(
         json_agg(
           DISTINCT jsonb_build_object(
@@ -256,7 +271,14 @@ app.openapi(searchRoute, async (c) => {
             json_agg(
               json_build_object(
                 'name', ea.name,
-                'key', ea.author_key
+                'key', ea.author_key,
+                'gender', ea.gender,
+                'nationality', ea.nationality,
+                'birth_year', ea.birth_year,
+                'death_year', ea.death_year,
+                'bio', ea.bio,
+                'wikidata_id', ea.wikidata_id,
+                'image', ea.author_photo_url
               )
               ORDER BY wae.author_order
             ) FILTER (WHERE ea.author_key IS NOT NULL),
@@ -322,13 +344,23 @@ app.openapi(searchRoute, async (c) => {
             ee.edition_key,
             ee.work_key,
             ee.cover_url_large,
+            ee.cover_url_large,
             ee.cover_url_medium,
             ee.cover_url_small,
+            ee.binding,
+            ee.related_isbns,
             COALESCE(
               json_agg(
                 json_build_object(
                   'name', ea.name,
-                  'key', ea.author_key
+                  'key', ea.author_key,
+                  'gender', ea.gender,
+                  'nationality', ea.nationality,
+                  'birth_year', ea.birth_year,
+                  'death_year', ea.death_year,
+                  'bio', ea.bio,
+                  'wikidata_id', ea.wikidata_id,
+                  'image', ea.author_photo_url
                 )
                 ORDER BY wae.author_order
               ) FILTER (WHERE ea.author_key IS NOT NULL),
@@ -341,7 +373,7 @@ app.openapi(searchRoute, async (c) => {
           WHERE ee.title ILIKE ${titlePattern}
           GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
                    ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
-                   ee.cover_url_medium, ee.cover_url_small
+                   ee.cover_url_medium, ee.cover_url_small, ee.binding, ee.related_isbns
           ORDER BY ee.title
           LIMIT ${limit}
           OFFSET ${offset}
@@ -389,11 +421,20 @@ app.openapi(searchRoute, async (c) => {
           ee.cover_url_large,
           ee.cover_url_medium,
           ee.cover_url_small,
+          ee.binding,
+          ee.related_isbns,
           COALESCE(
             json_agg(
               json_build_object(
                 'name', all_authors.name,
-                'key', all_authors.author_key
+                'key', all_authors.author_key,
+                'gender', all_authors.gender,
+                'nationality', all_authors.nationality,
+                'birth_year', all_authors.birth_year,
+                'death_year', all_authors.death_year,
+                'bio', all_authors.bio,
+                'wikidata_id', all_authors.wikidata_id,
+                'image', all_authors.author_photo_url
               )
               ORDER BY all_wae.author_order
             ) FILTER (WHERE all_authors.author_key IS NOT NULL),
@@ -406,7 +447,7 @@ app.openapi(searchRoute, async (c) => {
         LEFT JOIN enriched_authors all_authors ON all_authors.author_key = all_wae.author_key
         GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
                  ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
-                 ee.cover_url_medium, ee.cover_url_small
+                 ee.cover_url_medium, ee.cover_url_small, ee.binding, ee.related_isbns
         ORDER BY ee.title
       `;
 
@@ -438,12 +479,19 @@ app.openapi(searchRoute, async (c) => {
 
     // Format results
     const formattedResults = results.map((row) => {
-      const coverUrl = row.cover_url_large || row.cover_url_medium || row.cover_url_small || null;
+      const coverUrl = row.cover_url_large || row.cover_url_medium || row.cover_url_small || row.cover_url || row.coverUrl || null;
       const authorsRaw = row.authors || [];
-      const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: { name: string; key: string }) => ({
+      const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: any) => ({
         name: a.name,
         key: a.key,
         openlibrary: a.key ? `https://openlibrary.org${a.key}` : null,
+        gender: a.gender,
+        nationality: a.nationality,
+        birth_year: a.birth_year,
+        death_year: a.death_year,
+        bio: a.bio,
+        wikidata_id: a.wikidata_id,
+        image: a.image,
       }));
 
       return {
@@ -457,7 +505,10 @@ app.openapi(searchRoute, async (c) => {
         pages: row.pages,
         work_title: row.work_title,
         openlibrary_edition: row.edition_key ? `https://openlibrary.org${row.edition_key}` : null,
+
         openlibrary_work: row.work_key ? `https://openlibrary.org${row.work_key}` : null,
+        binding: row.binding || null,
+        related_isbns: row.related_isbns || null,
       };
     });
 

@@ -251,11 +251,33 @@ export async function enrichEdition(
       response_time_ms: Date.now() - startTime,
     });
 
+    // Fire Webhook to Bend if improved and configured
+    if (wasInsert && env?.BEND_WEBHOOK_URL && env?.ALEXANDRIA_WEBHOOK_SECRET) {
+      const webhookPayload = {
+        isbn: row.isbn,
+        type: 'edition',
+        quality_improvement: qualityImprovement
+      };
+      
+      // Fire and forget (no await)
+      fetch(env.BEND_WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-alexandria-webhook-secret': env.ALEXANDRIA_WEBHOOK_SECRET
+        },
+        body: JSON.stringify(webhookPayload)
+      }).catch(err => console.error(`[Enrichment] Webhook failed for ${row.isbn}:`, err));
+      
+      console.log(`[Enrichment] Fired webhook for ${row.isbn}`);
+    }
+
     return {
       isbn: row.isbn,
       action: wasInsert ? 'created' : 'updated',
       quality_improvement: qualityImprovement,
       stored_at: new Date().toISOString(),
+      cover_urls: edition.cover_urls,
     };
   } catch (error) {
     console.error('enrichEdition database error:', error);

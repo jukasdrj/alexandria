@@ -55,6 +55,10 @@ export interface Env {
   ENABLE_ENRICHMENT_QUEUE: string;
   ENABLE_COVER_PROCESSING: string;
   ENABLE_ANALYTICS: string;
+
+  // Webhook Integration
+  BEND_WEBHOOK_URL?: string;
+  ALEXANDRIA_WEBHOOK_SECRET?: string;
 }
 
 // Logger interface for type safety

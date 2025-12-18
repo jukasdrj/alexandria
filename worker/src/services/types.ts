@@ -92,6 +92,7 @@ export interface EnrichmentData {
   action: 'created' | 'updated';
   quality_improvement?: number;
   stored_at: string;
+  cover_urls?: CoverUrls; // NEW: Include cover URLs in response
 }
 
 /**

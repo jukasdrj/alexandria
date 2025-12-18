@@ -30,6 +30,13 @@ export const AuthorReferenceSchema = z.object({
   name: z.string(),
   key: z.string().describe('e.g., "/authors/OL7234434A"'),
   openlibrary: z.string().nullable().describe('e.g., "https://openlibrary.org/authors/OL7234434A"'),
+  gender: z.string().nullable().optional(),
+  nationality: z.string().nullable().optional(),
+  birth_year: z.number().nullable().optional(),
+  death_year: z.number().nullable().optional(),
+  bio: z.string().nullable().optional(),
+  wikidata_id: z.string().nullable().optional(),
+  image: z.string().nullable().optional(),
 }).openapi('AuthorReference');
 
 export const BookResultSchema = z.object({
@@ -44,6 +51,8 @@ export const BookResultSchema = z.object({
   work_title: z.string().nullable(),
   openlibrary_edition: z.string().nullable(),
   openlibrary_work: z.string().nullable(),
+  binding: z.string().nullable().optional(),
+  related_isbns: z.record(z.string(), z.string()).nullable().optional(),
 }).openapi('BookResult');
 
 export const PaginationMetadataSchema = z.object({

@@ -60,7 +60,7 @@ async function fetchWithRetry(
 ): Promise<Response | null> {
   const {
     maxRetries = 3,
-    timeoutMs = 10000, // 10s timeout
+    timeoutMs = 5000, // 5s timeout (reduced from 10s for better responsiveness)
     baseDelayMs = 1000 // 1s base delay
   } = config;
 

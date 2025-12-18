@@ -272,3 +272,23 @@ export function normalizePriority(priority: string | number | undefined): number
   const normalized = priorityMap[priority.toLowerCase()];
   return normalized || 5; // Default to medium if unknown string
 }
+
+/**
+ * Select the best available cover URL from a set of possible sizes
+ * Prioritizes: original -> large -> medium -> small
+ */
+export function selectBestCoverURL(coverUrls?: {
+  small?: string;
+  medium?: string;
+  large?: string;
+  original?: string;
+}): string | null {
+  if (!coverUrls) return null;
+  return (
+    coverUrls.original || 
+    coverUrls.large || 
+    coverUrls.medium || 
+    coverUrls.small || 
+    null
+  );
+}

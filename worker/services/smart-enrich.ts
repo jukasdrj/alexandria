@@ -10,6 +10,7 @@ import type { Env } from '../src/env.js';
 import type { ExternalBookData } from './external-apis.js';
 import { resolveExternalISBN } from './external-apis.js';
 import { enrichEdition, enrichWork, enrichAuthor } from '../src/services/enrichment-service.js';
+import { selectBestCoverURL } from '../src/services/utils.js';
 
 // =================================================================================
 // Database Storage Logic
@@ -282,7 +283,7 @@ export async function smartResolveISBN(
       title: externalData.title,
       author: externalData.authors?.[0] || null, // First author
       isbn: externalData.isbn,
-      coverUrl: externalData.coverUrls?.large || null,
+      coverUrl: selectBestCoverURL(externalData.coverUrls),
       coverSource: 'external-provider',
       publish_date: externalData.publicationDate || null,
       publishers: externalData.publisher ? [externalData.publisher] : null,

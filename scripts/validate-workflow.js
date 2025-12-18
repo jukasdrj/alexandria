@@ -529,8 +529,8 @@ class WorkflowValidator {
     const coverResults = [];
     
     for (const row of withCoverUrls) {
-      // Check cover existence via API HEAD request
-      const coverUrl = `${env.baseUrl}/api/covers/${row.isbn}/original`;
+      // Check cover existence via correct endpoint: /covers/{isbn}/{size}
+      const coverUrl = `${env.baseUrl}/covers/${row.isbn}/large`;
       
       try {
         const response = await fetch(coverUrl, { method: 'HEAD' });
@@ -590,11 +590,13 @@ class WorkflowValidator {
     const coverTests = [];
     
     for (const isbn of CONFIG.testISBNs) {
-      const sizes = ['original', 'large', 'medium', 'small'];
+      // Valid sizes: large, medium, small (not "original")
+      const sizes = ['large', 'medium', 'small'];
       const sizeResults = {};
       
       for (const size of sizes) {
-        const coverUrl = `${env.baseUrl}/api/covers/${isbn}/${size}`;
+        // Correct endpoint: /covers/{isbn}/{size} (not /api/covers/...)
+        const coverUrl = `${env.baseUrl}/covers/${isbn}/${size}`;
         
         try {
           const response = await fetch(coverUrl, { method: 'GET', redirect: 'manual' });
@@ -705,39 +707,43 @@ class WorkflowValidator {
     const testISBN = CONFIG.testISBNs[0];
     const isbnResult = await fetchJSON(`${env.baseUrl}/api/search?isbn=${testISBN}`);
     
-    if (isbnResult.ok && isbnResult.data.results?.length > 0) {
-      const book = isbnResult.data.results[0];
+    // Response structure: { success: true, data: { results: [...] } }
+    const isbnData = isbnResult.data?.data || isbnResult.data;
+    if (isbnResult.ok && isbnData?.results?.length > 0) {
+      const book = isbnData.results[0];
       searchTests.push({
         type: 'isbn',
         query: testISBN,
         found: true,
         title: book.title,
         coverUrl: book.coverUrl,
-        duration_ms: isbnResult.data.query_duration_ms
+        duration_ms: isbnData.query_duration_ms
       });
-      log(`  ISBN search: ✓ "${book.title?.substring(0, 40)}..." in ${isbnResult.data.query_duration_ms}ms`, 'debug');
+      log(`  ISBN search: ✓ "${book.title?.substring(0, 40)}..." in ${isbnData.query_duration_ms}ms`, 'debug');
     } else {
       searchTests.push({
         type: 'isbn',
         query: testISBN,
         found: false,
-        error: isbnResult.data?.error || 'Not found'
+        error: isbnData?.error || 'Not found'
       });
       log(`  ISBN search: ✗ Not found`, 'debug');
     }
     
     // Test title search
     const titleResult = await fetchJSON(`${env.baseUrl}/api/search?title=Harry%20Potter&limit=3`);
+    const titleData = titleResult.data?.data || titleResult.data;
     
-    if (titleResult.ok && titleResult.data.results?.length > 0) {
+    if (titleResult.ok && titleData?.results?.length > 0) {
       searchTests.push({
         type: 'title',
         query: 'Harry Potter',
         found: true,
-        count: titleResult.data.results.length,
-        duration_ms: titleResult.data.query_duration_ms
+        count: titleData.results.length,
+        total: titleData.pagination?.total,
+        duration_ms: titleData.query_duration_ms
       });
-      log(`  Title search: ✓ ${titleResult.data.results.length} results in ${titleResult.data.query_duration_ms}ms`, 'debug');
+      log(`  Title search: ✓ ${titleData.results.length} results (${titleData.pagination?.total} total) in ${titleData.query_duration_ms}ms`, 'debug');
     } else {
       searchTests.push({
         type: 'title',
@@ -747,17 +753,18 @@ class WorkflowValidator {
     }
     
     // Test combined search
-    const combinedResult = await fetchJSON(`${env.baseUrl}/api/search/combined?q=Great%20Gatsby&limit=3`);
+    const combinedResult = await fetchJSON(`${env.baseUrl}/api/search?q=Great%20Gatsby&limit=3`);
+    const combinedData = combinedResult.data?.data || combinedResult.data;
     
-    if (combinedResult.ok && combinedResult.data.results?.length > 0) {
+    if (combinedResult.ok && combinedData?.results?.length > 0) {
       searchTests.push({
         type: 'combined',
         query: 'Great Gatsby',
         found: true,
-        count: combinedResult.data.results.length,
-        duration_ms: combinedResult.data.query_duration_ms
+        count: combinedData.results.length,
+        duration_ms: combinedData.query_duration_ms
       });
-      log(`  Combined search: ✓ ${combinedResult.data.results.length} results`, 'debug');
+      log(`  Combined search: ✓ ${combinedData.results.length} results`, 'debug');
     } else {
       searchTests.push({
         type: 'combined',
