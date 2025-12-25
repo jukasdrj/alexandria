@@ -6,23 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues. **Dec 10, 2025**: Upgraded to ISBNdb Premium (3x rate, 10x batch size), added direct batch endpoint for 10x efficiency. **Dec 13, 2025**: Added Cloudflare Workflows for durable bulk author harvesting (auto-recovering, checkpoint-free). **Dec 14, 2025**: Added NewReleasesHarvestWorkflow with self-spawning continuation for fully automated harvesting.
+**Current Status**: Phase 1 + 2 COMPLETE! Queue-based architecture operational with cover processing and metadata enrichment. Worker live with Hyperdrive + Tunnel database access + R2 cover image storage + Cloudflare Queues. **Dec 10, 2025**: Upgraded to ISBNdb Premium (3x rate, 10x batch size), added direct batch endpoint for 10x efficiency. **Dec 25, 2025**: Removed Cloudflare Workflows in favor of direct synchronous endpoints, added OpenLibrary fallback search, migrated fully to TypeScript with @hono/zod-openapi.
 
 ## Architecture Flow
 
 ```
 Internet → Cloudflare Access (IP bypass: 47.187.18.143/32)
-→ Worker (alexandria.ooheynerds.com, Hono framework)
+→ Worker (alexandria.ooheynerds.com, Hono framework with zod-openapi)
 → Hyperdrive (connection pooling, ID: 00ff424776f4415d95245c3c4c36e854)
 → Cloudflare Access (Service Token auth to tunnel)
 → Tunnel (alexandria-db.ooheynerds.com)
 → Unraid (192.168.1.240:5432, SSL enabled)
 → PostgreSQL (54.8M editions)
 
-Queue-Based Processing (NEW - Dec 3, 2025):
+Queue-Based Processing:
 → bendv3 produces → Cloudflare Queues → Alexandria consumes
-→ Cover Queue: Async cover downloads (2 producers, 1 consumer)
-→ Enrichment Queue: Async metadata enrichment (2 producers, 1 consumer)
+→ Cover Queue: Async cover downloads (max_batch_size: 10, max_concurrency: 5)
+→ Enrichment Queue: Async metadata enrichment (max_batch_size: 100, max_concurrency: 1)
 → Both queues: max_retries=3, dead letter queues, analytics tracking
 
 Cover Images:
@@ -87,6 +87,7 @@ cd worker/
 npm run dev      # Local dev server (localhost:8787)
 npm run deploy   # Deploy to Cloudflare
 npm run tail     # Live Worker logs
+npm run test     # Run vitest tests
 ```
 
 ### Infrastructure Checks
@@ -154,7 +155,7 @@ npx wrangler r2 object list alexandria-logs --limit 20
 4. Check logs: `npm run tail`
 5. Test live: https://alexandria.ooheynerds.com
 
-## Alexandria Search API (COMPLETE ✅)
+## Alexandria Search API (COMPLETE)
 
 **Full Documentation**: `docs/API-SEARCH-ENDPOINTS.md`
 
@@ -191,24 +192,50 @@ curl 'https://alexandria.ooheynerds.com/api/search?title=harry%20potter&limit=10
 curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offset=40'
 ```
 
-### Other Endpoints (All Verified Working ✅)
+### All API Endpoints
+
+**Health & Stats:**
 - **GET /health** - Health check with DB latency
 - **GET /api/stats** - Database statistics (54.8M editions, 49.3M ISBNs, 40.1M works, 14.7M authors)
-- **GET /covers/:isbn/:size** - Cover images (large/medium/small)
-- **POST /api/covers/process** - Work-based cover processing
-- **POST /covers/:isbn/process** - ISBN-based cover processing
+- **GET /openapi.json** - OpenAPI 3.0 specification
+
+**Search:**
+- **GET /api/search** - Unified search (ISBN, title, or author)
+
+**Cover Processing (ISBN-based):**
+- **POST /api/covers/process** - Process cover from provider URL
+- **GET /covers/:isbn/:size** - Serve cover image (large/medium/small)
+- **GET /covers/:isbn/status** - Check cover availability
+- **POST /covers/:isbn/process** - Trigger cover processing from providers
 - **POST /covers/batch** - Batch cover processing (max 10)
-- **GET /covers/:isbn/status** - Cover availability check
+- **POST /api/covers/queue** - Queue cover processing (max 100)
+
+**Enrichment:**
 - **POST /api/enrich/edition** - Store edition metadata
 - **POST /api/enrich/work** - Store work metadata
 - **POST /api/enrich/author** - Store author biographical data
 - **POST /api/enrich/queue** - Queue background enrichment (max 100 per batch)
 - **POST /api/enrich/batch-direct** - Direct batch enrichment (up to 1000 ISBNs, bypasses queue)
 - **GET /api/enrich/status/:id** - Check enrichment status
-- **POST /api/authors/bibliography** - Get author's complete bibliography from ISBNdb
-- **POST /api/authors/enrich-bibliography** - Fetch + enrich author bibliography in one step (most efficient!) ⭐ NEW
 
-## ISBNdb API Integration (COMPLETE ✅)
+**Author Operations:**
+- **GET /api/authors/top** - Get top authors by edition count
+- **GET /api/authors/:key** - Get author by OpenLibrary key
+- **POST /api/authors/bibliography** - Get author's complete bibliography from ISBNdb
+- **POST /api/authors/enrich-bibliography** - Fetch + enrich author bibliography in one step
+- **POST /api/authors/enrich-wikidata** - Enrich author with Wikidata info
+- **GET /api/authors/enrich-status** - Check author enrichment status
+
+**Books & New Releases:**
+- **POST /api/books/search** - Search ISBNdb by date, title, author, or subject
+- **POST /api/books/enrich-new-releases** - Enrich new releases by date range (synchronous)
+
+**Testing:**
+- **GET /api/test/isbndb** - Test ISBNdb connectivity
+- **POST /api/test/isbndb/batch** - Test ISBNdb batch endpoint
+- **POST /api/test/jsquash** - Test jSquash image processing
+
+## ISBNdb API Integration (COMPLETE)
 
 ### Plan: Premium (Paid) - Upgraded Dec 10, 2025
 - **Rate Limit**: 3 requests/second (3x faster than Basic)
@@ -230,9 +257,9 @@ curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offse
 | Pro | $74.95/mo | ~30,000 | 5 req/sec | 1000 ISBNs | api.pro.isbndb.com |
 | Enterprise | Custom | Custom | 10 req/sec | 1000 ISBNs | api.enterprise.isbndb.com |
 
-### Available Endpoints (All Verified Working ✅)
+### Available Endpoints (All Verified Working)
 1. **GET /book/{isbn}** - Single book lookup (includes pricing)
-2. **POST /books** - Batch lookup (up to 1000 ISBNs) ⭐ **Most Efficient**
+2. **POST /books** - Batch lookup (up to 1000 ISBNs)
 3. **GET /books/{query}** - Search with pagination
 4. **GET /author/{name}** - Author bibliography with pagination (default: 20/page, max: 1000)
 5. **GET /authors/{query}** - Author search
@@ -253,23 +280,11 @@ hasMore = booksInResponse === pageSize; // pageSize = 100
 ### Response Size Limit
 ISBNdb has a **6MB response size limit**. If exceeded, returns 500 error. For large batch requests, consider chunking.
 
-### Enrichment Opportunities
-ISBNdb provides rich metadata beyond current usage:
-- **`image_original`** - High-quality covers (better than `image`)
-- **`subjects`** - Genre/topic tags for recommendations
-- **`dimensions_structured`** - Physical book dimensions (H×W×L, weight)
-- **`binding`** - Format (Hardcover, Paperback, etc.)
-- **`related`** - Related ISBNs (ePub, audiobook, etc.)
-- **`dewey_decimal`** - Library classification
-- **`msrp`** - Pricing (single lookups only)
-
-**See**: `docs/ISBNDB-ENRICHMENT.md` for implementation guide
-
 ### Best Practices
 1. **Use batch endpoint** for multiple ISBNs (1 call for 1000 ISBNs vs 1000 calls)
 2. **Use Premium endpoint** (`api.premium.isbndb.com`) for 3x rate limit
 3. **Use `/api/authors/enrich-bibliography`** for author expansion (fetches + enriches in one step)
-4. **Extract `image_original`** for best cover quality
+4. **Extract `image_original`** for best cover quality (falls back to `image` if unavailable)
 5. **Rate limit**: 3 req/sec (Premium), use 350ms delay between requests
 6. **Chunk large lists**: 1000 ISBNs per batch (Premium limit)
 7. **Monitor quota**: Dashboard shows 30-day trailing usage; calls don't roll over
@@ -290,7 +305,7 @@ curl "https://alexandria.ooheynerds.com/api/test/isbndb/batch" \
 
 ---
 
-## Phase 2: Database Integration (COMPLETE ✅)
+## Phase 2: Database Integration (COMPLETE)
 
 ### Hyperdrive Setup (Production)
 Hyperdrive provides connection pooling, query caching, and secure tunnel access.
@@ -332,11 +347,11 @@ npx wrangler hyperdrive create alexandria-db \
 ```
 
 **Worker code** (using Hono + Hyperdrive):
-```javascript
-import { Hono } from 'hono';
+```typescript
+import { OpenAPIHono } from '@hono/zod-openapi';
 import postgres from 'postgres';
 
-const app = new Hono();
+const app = new OpenAPIHono();
 
 // Database middleware - creates request-scoped connection
 app.use('*', async (c, next) => {
@@ -361,7 +376,7 @@ export default app;
 
 **CRITICAL I/O Context Fix**: Connection must be request-scoped (`c.get('sql')`) not global. Global connections cause "Cannot perform I/O on behalf of a different request" errors.
 
-## Queue Architecture (COMPLETE ✅ - Dec 3, 2025)
+## Queue Architecture (COMPLETE)
 
 ### Overview
 Alexandria implements a queue-based architecture for async processing of cover downloads and metadata enrichment. This enables non-blocking operations and better resource utilization.
@@ -379,19 +394,19 @@ Alexandria implements a queue-based architecture for async processing of cover d
   "consumers": [
     {
       "queue": "alexandria-enrichment-queue",
-      "max_batch_size": 10,
-      "max_batch_timeout": 30,
+      "max_batch_size": 100,
+      "max_batch_timeout": 60,
       "max_retries": 3,
       "dead_letter_queue": "alexandria-enrichment-dlq",
-      "max_concurrency": 5
+      "max_concurrency": 1
     },
     {
       "queue": "alexandria-cover-queue",
-      "max_batch_size": 20,
+      "max_batch_size": 10,
       "max_batch_timeout": 10,
       "max_retries": 3,
       "dead_letter_queue": "alexandria-cover-dlq",
-      "max_concurrency": 10
+      "max_concurrency": 5
     }
   ]
 }
@@ -399,7 +414,7 @@ Alexandria implements a queue-based architecture for async processing of cover d
 
 ### Queue Handlers
 
-**File**: `worker/queue-handlers.js`
+**File**: `worker/src/services/queue-handlers.ts`
 
 Contains two queue processors:
 - **`processCoverQueue(batch, env)`**: Processes cover download requests
@@ -416,7 +431,7 @@ Contains two queue processors:
 
 ### Queue Routing
 
-**File**: `worker/index.ts`
+**File**: `worker/src/index.ts`
 
 ```typescript
 async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
@@ -432,36 +447,7 @@ async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
 }
 ```
 
-### Integration with bendv3
-
-bendv3 acts as a **producer** for both queues:
-
-**Cover Queue** (`bendv3/src/services/alexandria-cover-service.ts`):
-```typescript
-// Fast-fail immediate processing, queue on failure
-const result = await processBookCover(request, env, 1) // 1 retry max
-if (!result.success) {
-  await queueCoverProcessing(request, env, 'normal') // Queue for background
-}
-```
-
-**Enrichment Queue** (`bendv3/src/services/enrichment-queue.ts`):
-```typescript
-// Queue single ISBN
-await queueEnrichment({ isbn, priority: 'high', source: 'user_add' }, env)
-
-// Queue batch
-await queueEnrichmentBatch(isbns, { priority: 'low', source: 'import' }, env)
-```
-
-### Queue Statistics
-
-| Queue | Producers | Consumers | Purpose |
-|-------|-----------|-----------|---------|
-| **alexandria-cover-queue** | Alexandria, bendv3 | Alexandria | Async cover downloads |
-| **alexandria-enrichment-queue** | Alexandria, bendv3 | Alexandria | Async metadata enrichment |
-
-### Queue Batch Size Limitation (IMPORTANT - Dec 10, 2025)
+### Queue Batch Size Limitation (IMPORTANT)
 
 **Cloudflare Queues has a hard limit of 100 messages per batch** (`max_batch_size` cannot exceed 100). This creates an efficiency gap with ISBNdb Premium which supports 1000 ISBNs per batch call.
 
@@ -478,8 +464,6 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/batch-direct' \
 **When to use each approach:**
 - **Queue** (`/api/enrich/queue`): Real-time trickle of ISBNs (user actions, imports < 100)
 - **Direct** (`/api/enrich/batch-direct`): Bulk operations (author bibliographies, large imports)
-
-**Future Enhancement (GitHub Issue #82)**: Durable Objects as a batching buffer to aggregate queue messages into optimal ISBNdb batch sizes.
 
 ### Monitoring
 
@@ -509,7 +493,7 @@ Failed messages (after 3 retries) move to:
 
 Use DLQs for debugging and manual reprocessing.
 
-## Cover Image Processing (COMPLETE ✅)
+## Cover Image Processing (COMPLETE)
 
 ### R2 Storage
 - **Bucket**: `bookstrack-covers-processed`
@@ -564,17 +548,126 @@ const response = await fetch('https://alexandria.ooheynerds.com/covers/978043906
 const imageUrl = 'https://alexandria.ooheynerds.com/covers/9780439064873/large';
 ```
 
-### Migration Script
-Audit and clean up duplicate covers stored under legacy work-key paths:
+## New Releases Harvesting (Synchronous)
+
+### Overview
+
+Alexandria provides synchronous endpoints for harvesting new book releases from ISBNdb. This replaced the previous Cloudflare Workflows approach for simpler operation.
+
+### POST /api/books/enrich-new-releases
+
+Enriches books published in a date range directly from ISBNdb.
+
 ```bash
-# Audit R2 storage for duplicates
-node scripts/audit-cover-storage.js
+# Enrich Sep-Dec 2025 releases
+curl -X POST 'https://alexandria.ooheynerds.com/api/books/enrich-new-releases' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_month": "2025-09",
+    "end_month": "2025-12",
+    "max_pages_per_month": 20,
+    "skip_existing": true
+  }'
+```
 
-# Delete duplicates (dry run first)
-node scripts/audit-cover-storage.js --delete-duplicates --dry-run
+**Parameters**:
+- `start_month` (required): Start month in YYYY-MM format
+- `end_month` (required): End month in YYYY-MM format
+- `max_pages_per_month` (default: 20): Pages per month (100 books/page)
+- `subjects` (optional): Array of subjects to filter by
+- `skip_existing` (default: true): Skip ISBNs already in Alexandria
 
-# Actually delete duplicates
-node scripts/audit-cover-storage.js --delete-duplicates
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "start_month": "2025-09",
+    "end_month": "2025-12",
+    "months_processed": 4,
+    "total_books_found": 8000,
+    "already_existed": 2500,
+    "newly_enriched": 5500,
+    "covers_queued": 4200,
+    "failed": 12,
+    "api_calls": 80,
+    "duration_ms": 45000
+  }
+}
+```
+
+### POST /api/books/search
+
+Search ISBNdb directly without enriching.
+
+```bash
+curl -X POST 'https://alexandria.ooheynerds.com/api/books/search' \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "2025-09", "column": "date_published", "max_pages": 10}'
+```
+
+## Bulk Author Harvesting
+
+### Overview
+
+Bulk harvesting of author bibliographies from ISBNdb to enrich Alexandria's catalog with high-quality covers and metadata.
+
+### Strategy (Consensus-Driven)
+
+| Decision | Recommendation | Rationale |
+|----------|----------------|-----------|
+| **Prioritization** | Edition count (not work count) | Better proxy for ISBNdb coverage |
+| **Approach** | Breadth-first (1 page/author) | Faster widespread improvement |
+| **Rate** | 1.5s delay between authors | Safe for 3 req/sec limit |
+| **Fallback** | Use `image` URL if `image_original` expires | 2-hour JWT on high-res URLs |
+
+### Scripts
+
+```bash
+# Dry run - see what would be processed
+node scripts/bulk-author-harvest.js --dry-run --tier top-1000
+
+# Validation run (100 authors)
+node scripts/bulk-author-harvest.js --tier top-100
+
+# Full tier processing
+node scripts/bulk-author-harvest.js --tier top-1000
+node scripts/bulk-author-harvest.js --tier 1000-5000
+node scripts/bulk-author-harvest.js --tier 5000-20000
+
+# Resume from checkpoint
+node scripts/bulk-author-harvest.js --resume
+
+# Single author test
+node scripts/bulk-author-harvest.js --author "Brandon Sanderson"
+```
+
+### Tiers by Edition Count
+
+| Tier | Authors | Est. API Calls | Days to Complete |
+|------|---------|----------------|------------------|
+| top-100 | 100 | 100 | <1 hour |
+| top-1000 | 1,000 | 1,000 | <1 day |
+| 1000-5000 | 4,000 | 4,000 | <1 day |
+| 5000-20000 | 15,000 | 15,000 | 1 day |
+
+### Critical Constraints
+
+1. **ISBNdb Premium Quota**: 15,000 calls/day (resets every 24 hours)
+2. **Image URL Expiry**: `image_original` URLs have 2-hour JWT - queue must process within 2 hours
+3. **Queue Throughput**: Cover queue processes 10 images/batch with 10s timeout
+
+### Pipeline Flow
+
+```
+bulk-author-harvest.js
+    └─→ /api/authors/enrich-bibliography (Alexandria Worker)
+            ├─→ ISBNdb /author/{name} (fetch books)
+            ├─→ enriched_editions (store metadata)
+            ├─→ enriched_works (store work data)
+            └─→ alexandria-cover-queue (queue cover URLs)
+                    └─→ jSquash WASM (download → resize → WebP → R2)
+                            └─→ isbn/{isbn}/{large,medium,small}.webp
 ```
 
 ## Sample Query (Test First!)
@@ -598,49 +691,64 @@ Run via: `./scripts/db-check.sh`
 
 ## Code Patterns
 
-### Adding API Endpoints (Hono Framework)
-```javascript
-// In worker/index.js
-app.get('/api/search', async (c) => {
-  // IMPORTANT: Validate input first
-  const isbn = c.req.query('isbn')?.replace(/[^0-9X]/gi, '').toUpperCase();
+### Adding API Endpoints (Hono + zod-openapi)
 
-  if (!isbn || (isbn.length !== 10 && isbn.length !== 13)) {
-    return c.json({ error: 'Invalid ISBN' }, 400);
-  }
+The codebase uses `@hono/zod-openapi` for type-safe, self-documenting routes:
 
-  // Get request-scoped sql connection
-  const sql = c.get('sql');
+```typescript
+// In worker/src/routes/example.ts
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import { z } from 'zod';
+import type { AppBindings } from '../env.js';
 
-  // YOU MUST wrap queries in try-catch
-  try {
-    const results = await sql`
-      SELECT
-        e.data->>'title' AS title,
-        a.data->>'name' AS author,
-        ei.isbn
-      FROM editions e
-      JOIN edition_isbns ei ON ei.edition_key = e.key
-      LEFT JOIN works w ON w.key = e.work_key
-      LEFT JOIN author_works aw ON aw.work_key = w.key
-      LEFT JOIN authors a ON aw.author_key = a.key
-      WHERE ei.isbn = ${isbn}
-      LIMIT 10
-    `;
+// Define request/response schemas
+const RequestSchema = z.object({
+  isbn: z.string().length(13)
+}).openapi('ExampleRequest');
 
-    return c.json({ results });
-  } catch (error) {
-    console.error('DB error:', error);
-    return c.json({ error: 'Query failed' }, 500);
+const ResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.object({ title: z.string() })
+}).openapi('ExampleResponse');
+
+// Define route with OpenAPI metadata
+const exampleRoute = createRoute({
+  method: 'get',
+  path: '/api/example/:isbn',
+  tags: ['Example'],
+  summary: 'Example endpoint',
+  request: {
+    params: z.object({ isbn: z.string() })
+  },
+  responses: {
+    200: {
+      description: 'Success',
+      content: { 'application/json': { schema: ResponseSchema } }
+    }
   }
 });
+
+const app = new OpenAPIHono<AppBindings>();
+
+app.openapi(exampleRoute, async (c) => {
+  const { isbn } = c.req.valid('param');
+  const sql = c.get('sql');
+  const logger = c.get('logger');
+
+  // Query database
+  const results = await sql`SELECT * FROM enriched_editions WHERE isbn = ${isbn}`;
+
+  return c.json({ success: true, data: results[0] });
+});
+
+export default app;
 ```
 
-**Key Hono Patterns**:
-- Use `c.req.query('param')` for query parameters
-- Use `c.json(data, status)` for JSON responses
+**Key Patterns**:
+- Use `c.req.valid('json')` / `c.req.valid('param')` for validated input
 - Use `c.get('sql')` for request-scoped database connection
-- Middleware applies to routes via `app.use()`
+- Use `c.get('logger')` for structured logging
+- Schemas auto-generate OpenAPI spec at `/openapi.json`
 
 ## Critical Constraints
 
@@ -706,239 +814,85 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 - Consider Hyperdrive for connection pooling
 - Database is optimized, but 50M+ row joins need careful design
 
-## Bulk Author Harvesting (NEW - Dec 11, 2025)
-
-### Overview
-
-Bulk harvesting of author bibliographies from ISBNdb to enrich Alexandria's catalog with high-quality covers and metadata. Based on multi-model consensus analysis.
-
-### Strategy (Consensus-Driven)
-
-| Decision | Recommendation | Rationale |
-|----------|----------------|-----------|
-| **Prioritization** | Edition count (not work count) | Better proxy for ISBNdb coverage |
-| **Approach** | Breadth-first (1 page/author) | Faster widespread improvement |
-| **Rate** | 1.5s delay between authors | Safe for 3 req/sec limit |
-| **Fallback** | Use `image` URL if `image_original` expires | 2-hour JWT on high-res URLs |
-
-### Scripts
-
-```bash
-# Dry run - see what would be processed
-node scripts/bulk-author-harvest.js --dry-run --tier top-1000
-
-# Validation run (100 authors)
-node scripts/bulk-author-harvest.js --tier top-100
-
-# Full tier processing
-node scripts/bulk-author-harvest.js --tier top-1000
-node scripts/bulk-author-harvest.js --tier 1000-5000
-node scripts/bulk-author-harvest.js --tier 5000-20000
-
-# Resume from checkpoint
-node scripts/bulk-author-harvest.js --resume
-
-# Single author test
-node scripts/bulk-author-harvest.js --author "Brandon Sanderson"
-```
-
-### Tiers by Edition Count
-
-| Tier | Authors | Est. API Calls | Days to Complete |
-|------|---------|----------------|------------------|
-| top-100 | 100 | 100 | <1 hour |
-| top-1000 | 1,000 | 1,000 | <1 day |
-| 1000-5000 | 4,000 | 4,000 | <1 day |
-| 5000-20000 | 15,000 | 15,000 | 1 day |
-
-### Critical Constraints
-
-1. **ISBNdb Premium Quota**: 15,000 calls/day (resets every 24 hours)
-2. **Image URL Expiry**: `image_original` URLs have 2-hour JWT - queue must process within 2 hours
-3. **Queue Throughput**: Cover queue processes 50 images/batch with 15s timeout
-
-### Monitoring
-
-```bash
-# Watch queue processing
-npx wrangler tail alexandria --format pretty | grep -E "(Cover|Queue)"
-
-# Check queue depth
-curl https://alexandria.ooheynerds.com/api/queue/status
-
-# View cover analytics
-# Dashboard: Cloudflare > Analytics Engine > alexandria_covers
-```
-
-### Pipeline Flow
-
-```
-bulk-author-harvest.js
-    └─→ /api/authors/enrich-bibliography (Alexandria Worker)
-            ├─→ ISBNdb /author/{name} (fetch books)
-            ├─→ enriched_editions (store metadata)
-            ├─→ enriched_works (store work data)
-            └─→ alexandria-cover-queue (queue cover URLs)
-                    └─→ jSquash WASM (download → resize → WebP → R2)
-                            └─→ isbn/{isbn}/{large,medium,small}.webp
-```
-
-## Cloudflare Workflows (Updated Dec 14, 2025)
-
-### Overview
-
-Cloudflare Workflows provides durable, long-running execution for harvesting operations. Two workflows available:
-
-1. **AuthorHarvestWorkflow** - Bulk author bibliography harvesting by tier
-2. **NewReleasesHarvestWorkflow** - New book releases by date range (self-spawning)
-
-Benefits over local scripts:
-- No local machine dependency (runs on Cloudflare edge)
-- Automatic retry on transient failures
-- Durable execution (survives Worker restarts)
-- ISBNdb JWT handled within 2-hour window
-
-### Workflow 1: `AuthorHarvestWorkflow`
-
-**Binding**: `AUTHOR_HARVEST`
-**Class**: `AuthorHarvestWorkflow` (in `worker/src/workflows/author-harvest.ts`)
-
-```bash
-# Start author harvest
-curl -X POST https://alexandria.ooheynerds.com/api/harvest/start \
-  -H "Content-Type: application/json" \
-  -d '{"tier": "top-100"}'
-
-# Check status
-curl https://alexandria.ooheynerds.com/api/harvest/status/{instance_id}
-```
-
-| Tier | Authors | Est. Steps |
-|------|---------|------------|
-| `top-10` | 10 | ~50 |
-| `top-100` | 100 | ~550 |
-| `top-1000` | 1,000 | ~5,500 |
-
-### Workflow 2: `NewReleasesHarvestWorkflow` (NEW - Dec 14, 2025)
-
-**Binding**: `NEW_RELEASES_HARVEST`
-**Class**: `NewReleasesHarvestWorkflow` (in `worker/src/workflows/new-releases-harvest.ts`)
-
-Harvests new book releases from ISBNdb by publication date. **Fully automated with self-spawning continuation** - just start it and walk away.
-
-```bash
-# Start new releases harvest (Nov-Dec 2025)
-curl -X POST https://alexandria.ooheynerds.com/api/harvest/new-releases \
-  -H "Content-Type: application/json" \
-  -d '{"start_month": "2025-11", "end_month": "2025-12"}'
-
-# Check status
-curl https://alexandria.ooheynerds.com/api/harvest/new-releases/{instance_id}
-```
-
-**Parameters**:
-- `start_month` (required): Start month in YYYY-MM format
-- `end_month` (required): End month in YYYY-MM format
-- `max_pages_per_month` (default: 100): Pages to fetch per month (100 books/page)
-- `skip_existing` (default: true): Skip ISBNs already in Alexandria
-
-### Self-Spawning Continuation Pattern (Dec 14, 2025)
-
-The NewReleasesHarvestWorkflow implements **self-spawning continuation** for fully automated processing:
-
-```typescript
-// When workflow hits its limit, it spawns its own successor
-if (results.status === 'continuation_needed' && results.next_month) {
-  await step.do('spawn-continuation', async () => {
-    await this.env.NEW_RELEASES_HARVEST.create({
-      id: `new-releases-${results.next_month}-${Date.now()}`,
-      params: { ...params, resume_from_month, resume_from_page }
-    });
-  });
-  results.continuation_spawned = true;
-}
-```
-
-**Result**: Start one workflow, it chains through all months automatically. No manual intervention needed.
-
-### Workflow Limits (Optimized Dec 14, 2025)
-
-| Limit | AuthorHarvest | NewReleasesHarvest |
-|-------|---------------|-------------------|
-| Items per workflow | 40 authors | **150 books** |
-| Subrequests/item | ~14 | ~6 |
-| Pages fetched | N/A | **100/month** (default) |
-| Continuation | Manual (next_offset) | **Auto (self-spawn)** |
-
-**Subrequest Budget** (1000 limit per workflow):
-- NewReleasesHarvest: 150 books × 6 subrequests = 900 (safe margin)
-- AuthorHarvest: 40 authors × 14 subrequests = 560 (safe margin)
-
-### wrangler.jsonc Configuration
-
-```jsonc
-"workflows": [
-  {
-    "name": "author-harvest-workflow",
-    "binding": "AUTHOR_HARVEST",
-    "class_name": "AuthorHarvestWorkflow"
-  },
-  {
-    "name": "new-releases-harvest-workflow",
-    "binding": "NEW_RELEASES_HARVEST",
-    "class_name": "NewReleasesHarvestWorkflow"
-  }
-]
-```
-
-### Monitoring
-
-```bash
-# Check author harvest status
-curl https://alexandria.ooheynerds.com/api/harvest/status/{instance_id}
-
-# Check new releases status
-curl https://alexandria.ooheynerds.com/api/harvest/new-releases/{instance_id}
-
-# View workflow logs
-npx wrangler tail alexandria --format pretty | grep -E "(AuthorHarvest|NewReleasesHarvest)"
-
-# Cloudflare Dashboard
-# Workers & Pages > alexandria > Workflows tab
-```
-
 ## File Structure
 
 ```
-alex/
+alexandria/
 ├── worker/                    # Cloudflare Worker code
 │   ├── src/
 │   │   ├── index.ts           # Main worker + Hono routes (TypeScript)
 │   │   ├── env.ts             # Environment type definitions
-│   │   ├── routes/            # API route handlers
-│   │   │   ├── harvest.ts     # Workflow trigger endpoints (/api/harvest/*)
-│   │   │   ├── books.ts       # ISBNdb book search endpoints
+│   │   ├── openapi.ts         # OpenAPI spec configuration
+│   │   ├── routes/            # API route handlers (zod-openapi)
+│   │   │   ├── health.ts      # Health check endpoint
+│   │   │   ├── stats.ts       # Database statistics
+│   │   │   ├── search.ts      # Search endpoints
+│   │   │   ├── covers.ts      # Cover processing (ISBN-based)
+│   │   │   ├── covers-legacy.ts # Deprecated work-key covers
+│   │   │   ├── enrich.ts      # Enrichment endpoints
 │   │   │   ├── authors.ts     # Author API endpoints
-│   │   │   └── ...            # Other route modules
-│   │   └── workflows/
-│   │       ├── author-harvest.ts       # AuthorHarvestWorkflow (tier-based)
-│   │       └── new-releases-harvest.ts # NewReleasesHarvestWorkflow (self-spawning)
-│   ├── wrangler.jsonc         # Wrangler config (Hyperdrive, R2, KV, Secrets, Queues, Workflows)
-│   ├── services/
-│   │   ├── image-processor.js # ISBN-based cover processing pipeline
-│   │   ├── cover-fetcher.js   # Multi-provider cover URL fetching
-│   │   └── batch-isbndb.ts    # ISBNdb Premium batch API (1000 ISBNs/call)
-│   └── package.json           # Dependencies
-├── scripts/                   # Deployment & monitoring scripts
-│   ├── bulk-author-harvest.js           # Bulk author harvesting (edition count priority)
-│   ├── expand-author-bibliographies.js  # CSV-based author enrichment script
-│   └── e2e-author-enrichment-test.js    # E2E test for author pipeline
+│   │   │   ├── books.ts       # ISBNdb search & new releases
+│   │   │   └── test.ts        # Test endpoints
+│   │   ├── schemas/           # Zod schemas for validation
+│   │   │   ├── common.ts      # Shared schemas
+│   │   │   ├── response.ts    # Response envelope schemas
+│   │   │   ├── covers.ts      # Cover schemas
+│   │   │   ├── enrich.ts      # Enrichment schemas
+│   │   │   ├── authors.ts     # Author schemas
+│   │   │   └── search.ts      # Search schemas
+│   │   └── services/          # Business logic
+│   │       ├── queue-handlers.ts    # Queue consumer handlers
+│   │       ├── cover-handlers.ts    # Cover processing logic
+│   │       ├── enrich-handlers.ts   # Enrichment logic
+│   │       ├── enrichment-service.ts # Database enrichment
+│   │       ├── isbndb-author.ts     # ISBNdb author API
+│   │       ├── image-utils.ts       # Image processing helpers
+│   │       ├── work-utils.ts        # Work/edition utilities
+│   │       └── utils.ts             # General utilities
+│   ├── services/              # External API services
+│   │   ├── batch-isbndb.ts    # ISBNdb Premium batch API
+│   │   ├── cover-fetcher.ts   # Multi-provider cover fetching
+│   │   ├── cover-resolver.ts  # Cover URL resolution
+│   │   ├── external-apis.ts   # External API clients
+│   │   ├── image-processor.ts # ISBN-based cover processing
+│   │   ├── jsquash-processor.ts # WebP conversion (jSquash WASM)
+│   │   ├── smart-enrich.ts    # Smart resolution pipeline
+│   │   └── wikidata-client.ts # Wikidata integration
+│   ├── lib/                   # Utility libraries
+│   │   ├── cache-utils.ts     # KV caching helpers
+│   │   ├── fetch-utils.js     # HTTP fetch utilities
+│   │   ├── isbn-utils.js      # ISBN validation/normalization
+│   │   └── logger.js          # Structured logging
+│   ├── middleware/            # Hono middleware
+│   │   └── error-handler.ts   # Global error handling
+│   ├── dashboard.ts           # HTML dashboard at /
+│   ├── types.ts               # Shared TypeScript types
+│   ├── wrangler.jsonc         # Wrangler config (bindings, queues)
+│   └── package.json           # Dependencies (v2.2.0)
+├── scripts/                   # Deployment & utility scripts
+│   ├── bulk-author-harvest.js # Bulk author harvesting
+│   ├── expand-author-bibliographies.js # CSV-based enrichment
+│   ├── e2e-workflow-test.js   # E2E pipeline validation
+│   ├── validate-workflow.js   # Workflow validation
+│   ├── audit-cover-storage.js # R2 storage audit
+│   ├── seed-queues.js         # Queue seeding for testing
+│   └── lib/                   # Script utilities
+│       ├── csv-reader.js
+│       ├── db-client.js
+│       ├── isbndb-client.js
+│       └── checkpoint-manager.js
 ├── docs/                      # Documentation
 │   ├── CREDENTIALS.md         # Passwords (gitignored!)
-│   ├── ARCHITECTURE.md        # System design
-│   └── SETUP.md               # Infrastructure setup
-├── tunnel/config.yml          # Tunnel config reference
-└── TODO.md                    # Development roadmap
+│   ├── API-SEARCH-ENDPOINTS.md
+│   ├── ISBNDB-ENDPOINTS.md
+│   ├── ISBNDB-ENRICHMENT.md
+│   ├── LOGPUSH-SETUP.md
+│   └── CLOUDFLARE-API-VS-WRANGLER.md
+├── migrations/                # Database migrations
+├── CLAUDE.md                  # This file
+├── TODO.md                    # Development roadmap
+├── CHANGELOG.md               # Version history
+└── README.md                  # Project overview
 ```
 
 ## Cloudflare Bindings Reference
@@ -968,12 +922,12 @@ alex/
     "producers": [
       { "binding": "ENRICHMENT_QUEUE" },    // Metadata enrichment queue
       { "binding": "COVER_QUEUE" }          // Cover processing queue
+    ],
+    "consumers": [
+      { "queue": "alexandria-enrichment-queue", "max_batch_size": 100, "max_concurrency": 1 },
+      { "queue": "alexandria-cover-queue", "max_batch_size": 10, "max_concurrency": 5 }
     ]
-  },
-  "workflows": [
-    { "binding": "AUTHOR_HARVEST" },        // AuthorHarvestWorkflow (tier-based)
-    { "binding": "NEW_RELEASES_HARVEST" }   // NewReleasesHarvestWorkflow (self-spawning)
-  ]
+  }
 }
 ```
 
@@ -983,3 +937,4 @@ alex/
 - Tunnel auto-restarts on failure (Docker policy)
 - Worker runs on Cloudflare's global network (300+ locations)
 - See TODO.md for Phase 3+ features (search UI, author queries, optimization)
+- OpenAPI spec available at `/openapi.json` for API documentation
