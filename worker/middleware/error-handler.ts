@@ -1,4 +1,4 @@
-import type { Context, ErrorHandler } from 'hono';
+import type { ErrorHandler } from 'hono';
 import type { AppBindings } from '../src/env.js';
 import {
   ErrorCode,

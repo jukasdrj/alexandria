@@ -7,7 +7,6 @@ import {
   createSuccessResponse,
   createErrorResponse,
   ErrorCode,
-  ResponseMetaSchema,
 } from '../schemas/response.js';
 
 // =================================================================================

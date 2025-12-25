@@ -58,7 +58,7 @@ export async function resolveCoverUrl(
   isbn: string,
   externalUrl: string | null,
   env: Env,
-  ctx?: ExecutionContext
+  _ctx?: ExecutionContext
 ): Promise<CoverResolutionResult> {
   if (!isbn) {
     return { url: PLACEHOLDER_URL, source: 'placeholder', cached: false };

@@ -677,7 +677,7 @@ enrichRoutes.openapi(coverHarvestRoute, async (c) => {
       LIMIT ${batch_size}
     `;
 
-    const isbns = editionsResult.map((row: { isbn: string }) => row.isbn);
+    const isbns = (editionsResult as unknown as Array<{ isbn: string }>).map((row) => row.isbn);
 
     if (isbns.length === 0) {
       return c.json({

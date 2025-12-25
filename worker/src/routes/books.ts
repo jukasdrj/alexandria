@@ -412,7 +412,7 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
           const existingResult = await sql`
             SELECT isbn FROM enriched_editions WHERE isbn IN ${sql(allISBNs)}
           `;
-          const existingSet = new Set(existingResult.map((r: { isbn: string }) => r.isbn));
+          const existingSet = new Set((existingResult as unknown as Array<{ isbn: string }>).map((r) => r.isbn));
           results.already_existed += existingSet.size;
           booksToEnrich = monthBooks.filter(b => {
             const isbn = b.isbn13 || b.isbn;

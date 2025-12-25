@@ -27,9 +27,6 @@ export function generateCacheKey(
   // Normalize the value (lowercase, trim)
   const normalized = value.toLowerCase().trim();
 
-  // Create a deterministic key
-  const params = `${queryType}:${normalized}:${limit}:${offset}`;
-
   // Simple hash for readability (KV keys are limited to 512 bytes)
   return `search:${queryType}:${normalized.slice(0, 50)}:${limit}:${offset}`;
 }

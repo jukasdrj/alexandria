@@ -5,7 +5,6 @@
 import type {
   EnrichEditionRequest,
   EnrichWorkRequest,
-  EnrichAuthorRequest,
   ValidationResult,
   ISBNValidationResult,
 } from './types.js';

@@ -219,9 +219,10 @@ export async function fetchISBNdbCoversBatch(
     if (books && Array.isArray(books)) {
       books.forEach(book => {
         const isbn = book.isbn13 || book.isbn;
-        if (isbn && (book.image_original || book.image)) {
+        const coverUrl = book.image_original || book.image;
+        if (isbn && coverUrl) {
           results.set(isbn, {
-            url: book.image_original || book.image,
+            url: coverUrl,
             source: 'isbndb',
             quality: book.image_original ? 'original' : 'high',
           });
@@ -252,7 +253,7 @@ export async function fetchGoogleBooksCover(isbn: string, env: Env): Promise<Cov
     let apiKey: string | null = null;
     try {
       apiKey = await env.GOOGLE_BOOKS_API_KEY.get();
-    } catch (e) {
+    } catch {
       console.warn('Google Books API key not available, proceeding without');
     }
 

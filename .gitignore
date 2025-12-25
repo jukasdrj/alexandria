@@ -7,6 +7,7 @@ docs/CREDENTIALS.md
 *.json
 !package.json
 !wrangler.json
+!tsconfig.json
 
 # Cloudflare
 .wrangler/

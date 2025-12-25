@@ -17,7 +17,7 @@
 
 import type { Env } from '../src/env.js';
 import type { ExternalBookData } from './external-apis.js';
-import { shouldQueryISBNdb, deduplicateISBNs, normalizeISBN, getISBNBatchStats } from '../lib/isbn-utils.js';
+import { shouldQueryISBNdb, deduplicateISBNs, getISBNBatchStats } from '../lib/isbn-utils.js';
 
 /**
  * ISBNdb batch response structure (Premium API format)
@@ -128,7 +128,7 @@ export async function fetchISBNdbBatch(
       // Consume response body to prevent stalled connection
       try {
         await response.text();
-      } catch (e) {
+      } catch {
         // Ignore
       }
       return results;
