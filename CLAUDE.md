@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Agent Role
+
+**Identity:** Alex (Data Lake) - Librarian & Archivist  
+**Scope:** Book metadata integrity, ingestion, enrichment, and serving  
+**Upstream:** Provides data to bendv3 (API gateway)  
+**Cross-repo docs:** See `~/dev_repos/bendv3/docs/SYSTEM_ARCHITECTURE.md`
+
 ## Project Overview
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
