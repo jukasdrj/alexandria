@@ -276,7 +276,7 @@ export async function smartResolveISBN(
 
   // 2. Store in Alexandria's database
   try {
-    const editionKey = await storeExternalBookData(sql, externalData, env);
+    await storeExternalBookData(sql, externalData, env);
 
     // 3. Return the formatted result (matching /api/search response format)
     return {
@@ -332,7 +332,7 @@ export async function smartResolveISBN(
  * @param env - Worker environment
  * @returns True if smart resolution should be attempted
  */
-export function shouldResolveExternally(isbn: string, env: Env): boolean {
+export function shouldResolveExternally(_isbn: string, _env: Env): boolean {
   // For now, always attempt resolution on cache miss
   // Future: Add rate limiting, user quotas, or API key checks
   return true;

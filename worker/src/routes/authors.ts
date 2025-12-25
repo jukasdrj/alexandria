@@ -870,8 +870,7 @@ app.openapi(enrichWikidataRoute, async (c) => {
         const birth_country_qid = data.birth_country_qid ?? null;
         const death_place = data.death_place ?? null;
         const death_place_qid = data.death_place_qid ?? null;
-        // Postgres array needs to be formatted properly or passed as null
-        const occupations = data.occupations && data.occupations.length > 0 ? data.occupations : null;
+        // TODO: Add occupations to UPDATE query when enriched_authors table has the column
         const image_url = data.image_url ?? null;
 
         await sql`

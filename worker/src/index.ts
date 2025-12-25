@@ -1,8 +1,7 @@
-import { OpenAPIHono } from '@hono/zod-openapi';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import postgres from 'postgres';
-import type { AppBindings, Env } from './env.js';
+import type { Env } from './env.js';
 import { createOpenAPIApp, registerOpenAPIDoc } from './openapi.js';
 import { errorHandler } from '../middleware/error-handler.js'; // Now uses ResponseEnvelope format
 import { Logger } from '../lib/logger.js';
@@ -59,11 +58,7 @@ app.use('*', async (c, next) => {
 
 // Logger middleware
 app.use('*', async (c, next) => {
-  const logger = new Logger({
-    level: c.env.LOG_LEVEL || 'info',
-    structured: c.env.STRUCTURED_LOGGING === 'true',
-    requestId: c.get('requestId'),
-  });
+  const logger = new Logger(c.env, { requestId: c.get('requestId') });
   c.set('logger', logger);
   await next();
 });
@@ -187,7 +182,6 @@ export default {
   fetch: app.fetch,
 
   // Queue consumer handler
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext) {
     switch (batch.queue) {
       case 'alexandria-cover-queue':

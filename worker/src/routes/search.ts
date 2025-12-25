@@ -4,13 +4,11 @@ import {
   SearchQuerySchema,
   SearchSuccessSchema,
   SearchErrorSchema,
-  SearchDataSchema,
 } from '../schemas/search.js';
 import {
   createSuccessResponse,
   createErrorResponse,
   ErrorCode,
-  buildMeta,
 } from '../schemas/response.js';
 import {
   generateCacheKey,

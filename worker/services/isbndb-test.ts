@@ -46,7 +46,7 @@ async function testISBNdbEndpoint(
 
     try {
       data = await response.json();
-    } catch (e) {
+    } catch {
       data = await response.text();
     }
 
@@ -266,7 +266,7 @@ export async function testISBNdbBatchBooks(isbns: string[], env: Env): Promise<I
 
     try {
       data = await response.json();
-    } catch (e) {
+    } catch {
       data = await response.text();
     }
 
