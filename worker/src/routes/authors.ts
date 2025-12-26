@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { AppBindings } from '../env.js';
+import type { DatabaseRow, EnrichedAuthor } from '../types/database.js';
 import {
   TopAuthorsQuerySchema,
   AuthorKeyParamSchema,
@@ -680,7 +681,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
         SELECT isbn FROM enriched_editions
         WHERE isbn IN ${sql(allISBNs)}
       `;
-      const existingSet = new Set(existingResult.map((r: any) => r.isbn));
+      const existingSet = new Set(existingResult.map((r: DatabaseRow) => r.isbn));
       results.already_existed = existingSet.size;
 
       isbnsToEnrich = allBooks.filter(b => !existingSet.has(b.isbn));
@@ -826,7 +827,7 @@ app.openapi(enrichWikidataRoute, async (c) => {
     }
 
     // Extract Q-IDs for Wikidata batch fetch
-    const qids = authorsToEnrich.map((a: any) => a.wikidata_id);
+    const qids = authorsToEnrich.map((a: EnrichedAuthor) => a.wikidata_id);
 
     // Fetch from Wikidata
     const wikidataResults = await fetchWikidataMultipleBatches(qids);

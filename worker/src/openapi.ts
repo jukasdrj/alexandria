@@ -1,4 +1,5 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
+import type { OpenAPIV3_1 } from 'openapi-types';
 import type { AppBindings } from './env.js';
 
 // =================================================================================
@@ -77,7 +78,7 @@ export const registerOpenAPIDoc = (
   app.get('/openapi.json', (c) => {
     try {
       // Start with base config
-      const mergedDoc: any = {
+      const mergedDoc: OpenAPIV3_1.Document = {
         ...openAPIConfig,
         paths: {},
         components: {

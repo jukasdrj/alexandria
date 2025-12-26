@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { AppBindings } from '../env.js';
+import type { SqlClient, EditionSearchResult, AuthorSearchResult, WorkSearchResult, DatabaseRow } from '../types/database.js';
 import {
   SearchQuerySchema,
   SearchSuccessSchema,
@@ -27,7 +28,7 @@ import { smartResolveISBN, shouldResolveExternally } from '../../services/smart-
  * Fallback to OpenLibrary core tables when enriched tables return no results.
  * This ensures the 54M+ OpenLibrary editions are searchable, not just enriched ones.
  */
-async function fallbackISBNSearch(sql: any, isbn: string) {
+async function fallbackISBNSearch(sql: SqlClient, isbn: string): Promise<EditionSearchResult[]> {
   return sql`
     SELECT
       e.data->>'title' AS title,
@@ -63,7 +64,7 @@ async function fallbackISBNSearch(sql: any, isbn: string) {
   `;
 }
 
-async function fallbackTitleSearch(sql: any, title: string, limit: number, offset: number) {
+async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number, offset: number): Promise<EditionSearchResult[]> {
   const titlePattern = `%${title}%`;
 
   const [countResult, dataResult] = await Promise.all([
@@ -111,7 +112,7 @@ async function fallbackTitleSearch(sql: any, title: string, limit: number, offse
   return { total: countResult[0]?.total || 0, results: dataResult };
 }
 
-async function fallbackAuthorSearch(sql: any, author: string, limit: number, offset: number) {
+async function fallbackAuthorSearch(sql: SqlClient, author: string, limit: number, offset: number): Promise<EditionSearchResult[]> {
   const authorPattern = `%${author}%`;
 
   const dataResult = await sql`
@@ -247,7 +248,7 @@ app.openapi(searchRoute, async (c) => {
   }
 
   try {
-    let results: any[] = [];
+    let results: EditionSearchResult[] = [];
     let total = 0;
 
     if (isbn) {
@@ -479,7 +480,7 @@ app.openapi(searchRoute, async (c) => {
     const formattedResults = results.map((row) => {
       const coverUrl = row.cover_url_large || row.cover_url_medium || row.cover_url_small || row.cover_url || row.coverUrl || null;
       const authorsRaw = row.authors || [];
-      const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: any) => ({
+      const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: DatabaseRow) => ({
         name: a.name,
         key: a.key,
         openlibrary: a.key ? `https://openlibrary.org${a.key}` : null,

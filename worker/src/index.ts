@@ -6,6 +6,7 @@ import { createOpenAPIApp, registerOpenAPIDoc } from './openapi.js';
 import { errorHandler } from '../middleware/error-handler.js'; // Now uses ResponseEnvelope format
 import { Logger } from '../lib/logger.js';
 import { getDashboardHTML } from '../dashboard.js';
+import type { MessageBatch, Message, CoverQueueMessage, EnrichmentQueueMessage } from './services/types.js';
 
 // Route imports
 import healthRoutes from './routes/health.js';
@@ -185,11 +186,9 @@ export default {
   async queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext) {
     switch (batch.queue) {
       case 'alexandria-cover-queue':
-        // Cast to expected type for cover queue handler
-        return await processCoverQueue(batch as any, env);
+        return await processCoverQueue(batch as MessageBatch<CoverQueueMessage>, env);
       case 'alexandria-enrichment-queue':
-        // Cast to expected type for enrichment queue handler
-        return await processEnrichmentQueue(batch as any, env);
+        return await processEnrichmentQueue(batch as MessageBatch<EnrichmentQueueMessage>, env);
       default:
         console.error(`Unknown queue: ${batch.queue}`);
         batch.messages.forEach((msg: Message) => msg.ack());
