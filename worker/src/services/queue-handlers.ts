@@ -364,7 +364,7 @@ export async function processEnrichmentQueue(
           description: externalData.description,
           subject_tags: externalData.subjects,
           primary_provider: 'isbndb',
-        });
+        }, logger);
 
         // Then enrich the edition (stores metadata + cover URLs)
         await enrichEdition(
@@ -387,6 +387,7 @@ export async function processEnrichmentQueue(
             binding: externalData.binding,
             related_isbns: externalData.relatedISBNs,
           },
+          logger,
           env
         );
 

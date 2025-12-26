@@ -62,7 +62,7 @@ export async function handleEnrichEdition(c: Context<AppBindings>): Promise<Resp
     const sql = c.get('sql');
 
     // Enrich edition
-    const result = await enrichEdition(sql, body, c.env);
+    const result = await enrichEdition(sql, body, c.get('logger'), c.env);
 
     // Log successful enrichment
     console.log(
@@ -117,7 +117,7 @@ export async function handleEnrichWork(c: Context<AppBindings>): Promise<Respons
     const sql = c.get('sql');
 
     // Enrich work
-    const result = await enrichWork(sql, body);
+    const result = await enrichWork(sql, body, c.get('logger'));
 
     return c.json(
       {

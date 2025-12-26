@@ -437,7 +437,7 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
                 description: book.synopsis,
                 subject_tags: book.subjects,
                 primary_provider: 'isbndb',
-              });
+              }, c.get('logger'));
             }
 
             if (book.authors && book.authors.length > 0) {
@@ -465,7 +465,7 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
               binding: book.binding,
               dewey_decimal: book.dewey_decimal,
               related_isbns: book.related,
-            }, c.env);
+            }, c.get('logger'), c.env);
 
             results.newly_enriched++;
 

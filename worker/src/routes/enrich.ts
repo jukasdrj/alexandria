@@ -520,7 +520,7 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
           description: externalData.description,
           subject_tags: externalData.subjects,
           primary_provider: 'isbndb',
-        });
+        }, c.get('logger'));
 
         // Then enrich the edition (stores metadata + cover URLs)
         await enrichEdition(
@@ -543,6 +543,7 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
             binding: externalData.binding,
             related_isbns: externalData.relatedISBNs,
           },
+          c.get('logger'),
           c.env
         );
 

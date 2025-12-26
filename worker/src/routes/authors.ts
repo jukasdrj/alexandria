@@ -708,7 +708,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
             description: book.synopsis,
             subject_tags: book.subjects,
             primary_provider: 'isbndb',
-          });
+          }, c.get('logger'));
         }
 
         // ALWAYS link work to authors (idempotent via ON CONFLICT DO NOTHING)
@@ -742,7 +742,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
           binding: book.binding,
           dewey_decimal: book.dewey_decimal,
           related_isbns: book.related,
-        }, c.env);
+        }, c.get('logger'), c.env);
 
         results.enriched++;
 
