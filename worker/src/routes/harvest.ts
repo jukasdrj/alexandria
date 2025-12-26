@@ -170,7 +170,7 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
       LIMIT ${BATCH_SIZE}
     `;
 
-    const isbns = editionsResult.map((row: { isbn: string }) => row.isbn);
+    const isbns = (editionsResult as unknown as { isbn: string }[]).map(row => row.isbn);
 
     if (isbns.length === 0) {
       console.log('[CoverHarvest:Scheduled] No editions found needing covers');

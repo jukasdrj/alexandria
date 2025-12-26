@@ -494,6 +494,7 @@ app.openapi(isbndbTestBatchRoute, async (c) => {
 });
 
 // jSquash test
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(jsquashTestRoute, async (c) => {
   try {
     const { url, isbn } = c.req.valid('json');

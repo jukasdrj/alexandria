@@ -96,12 +96,16 @@ export const registerOpenAPIDoc = (
           if (subDoc.paths) {
             const pathCount = Object.keys(subDoc.paths).length;
             console.log(`[OpenAPI] Router ${i} contributed ${pathCount} paths`);
-            Object.assign(mergedDoc.paths, subDoc.paths);
+            Object.assign(mergedDoc.paths || {}, subDoc.paths);
           }
 
           // Merge component schemas
           if (subDoc.components?.schemas) {
-            Object.assign(mergedDoc.components.schemas, subDoc.components.schemas);
+            // Ensure mergedDoc.components exists
+            if (!mergedDoc.components) {
+              mergedDoc.components = { schemas: {} };
+            }
+            Object.assign(mergedDoc.components.schemas || {}, subDoc.components.schemas);
           }
         } catch (e) {
           // Log which router failed with error details

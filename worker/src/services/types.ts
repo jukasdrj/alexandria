@@ -263,3 +263,24 @@ export interface DownloadImageResult {
   buffer: ArrayBuffer;
   contentType: string;
 }
+
+/**
+ * Cloudflare Queue Message interface
+ */
+export interface Message<T = unknown> {
+  id: string;
+  timestamp: Date;
+  body: T;
+  retry(): void;
+  ack(): void;
+}
+
+/**
+ * Cloudflare MessageBatch interface
+ */
+export interface MessageBatch<T = unknown> {
+  queue: string;
+  messages: Message<T>[];
+  retryAll(): void;
+  ackAll(): void;
+}

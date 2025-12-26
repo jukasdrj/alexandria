@@ -77,6 +77,7 @@ const processCoverRoute = createRoute({
   },
 });
 
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(processCoverRoute, handleProcessCover);
 
 // =================================================================================

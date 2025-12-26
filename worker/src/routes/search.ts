@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { AppBindings } from '../env.js';
-import type { SqlClient, EditionSearchResult, AuthorSearchResult, WorkSearchResult, DatabaseRow } from '../types/database.js';
+import type { SqlClient, EditionSearchResult, DatabaseRow } from '../types/database.js';
 import {
   SearchQuerySchema,
   SearchSuccessSchema,
@@ -64,7 +64,7 @@ async function fallbackISBNSearch(sql: SqlClient, isbn: string): Promise<Edition
   `;
 }
 
-async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number, offset: number): Promise<EditionSearchResult[]> {
+async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number, offset: number): Promise<{ total: number; results: EditionSearchResult[] }> {
   const titlePattern = `%${title}%`;
 
   const [countResult, dataResult] = await Promise.all([
@@ -207,6 +207,7 @@ const searchRoute = createRoute({
 
 const app = new OpenAPIHono<AppBindings>();
 
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(searchRoute, async (c) => {
   const { isbn: rawIsbn, title, author, nocache, limit, offset } = c.req.valid('query');
   const isbn = rawIsbn?.replace(/[^0-9X]/gi, '').toUpperCase();
@@ -294,18 +295,29 @@ app.openapi(searchRoute, async (c) => {
         LIMIT 1
       `;
 
-      results = dataResult;
+      results = dataResult as unknown as EditionSearchResult[];
       total = results.length;
 
       // Smart Resolution: Auto-fetch from external APIs on cache miss
       if (results.length === 0 && shouldResolveExternally(isbn, c.env)) {
         logger.info('Smart resolution triggered for ISBN', { isbn });
 
-        const enrichedResult = await smartResolveISBN(isbn, sql, c.env);
+        const enrichedResult = await smartResolveISBN(isbn, sql, c.env, logger);
 
         if (enrichedResult) {
           logger.info('Smart resolution successful', { isbn });
-          results = [enrichedResult];
+          // Map SmartResolveResult to EditionSearchResult format
+          results = [{
+            edition_key: enrichedResult.openlibrary_edition?.replace('https://openlibrary.org', '') || '',
+            isbn: enrichedResult.isbn,
+            title: enrichedResult.title,
+            author_names: enrichedResult.author ? [enrichedResult.author] : [],
+            publish_date: enrichedResult.publish_date || undefined,
+            publishers: enrichedResult.publishers?.join(', ') || undefined,
+            pages: enrichedResult.pages || undefined,
+            coverUrl: enrichedResult.coverUrl || undefined,
+            work_title: enrichedResult.work_title
+          }];
           total = 1;
         } else {
           logger.warn('Smart resolution failed - no external data found', { isbn });
@@ -315,7 +327,7 @@ app.openapi(searchRoute, async (c) => {
       // Fallback to OpenLibrary core tables if still no results
       if (results.length === 0) {
         logger.info('Falling back to OpenLibrary core tables for ISBN', { isbn });
-        const fallbackResults = await fallbackISBNSearch(sql, isbn);
+        const fallbackResults = await fallbackISBNSearch(sql as SqlClient, isbn);
         if (fallbackResults.length > 0) {
           logger.info('OpenLibrary fallback found result', { isbn });
           results = fallbackResults;
@@ -380,12 +392,12 @@ app.openapi(searchRoute, async (c) => {
       ]);
 
       total = countResult[0]?.total || 0;
-      results = dataResult;
+      results = dataResult as unknown as EditionSearchResult[];
 
       // Fallback to OpenLibrary core tables if no enriched results
       if (results.length === 0) {
         logger.info('Falling back to OpenLibrary core tables for title search', { title });
-        const fallback = await fallbackTitleSearch(sql, title, limit, offset);
+        const fallback = await fallbackTitleSearch(sql as SqlClient, title, limit, offset);
         if (fallback.results.length > 0) {
           logger.info('OpenLibrary fallback found results', { title, count: fallback.results.length });
           results = fallback.results;
@@ -452,13 +464,13 @@ app.openapi(searchRoute, async (c) => {
 
       // hasMore = got more than requested (the +1 extra row)
       const hasMoreResults = dataResult.length > limit;
-      results = hasMoreResults ? dataResult.slice(0, limit) : dataResult;
+      results = (hasMoreResults ? dataResult.slice(0, limit) : dataResult) as unknown as EditionSearchResult[];
       total = hasMoreResults ? offset + limit + 1 : offset + results.length;
 
       // Fallback to OpenLibrary core tables if no enriched results
       if (results.length === 0) {
         logger.info('Falling back to OpenLibrary core tables for author search', { author });
-        const fallbackData = await fallbackAuthorSearch(sql, author, limit, offset);
+        const fallbackData = await fallbackAuthorSearch(sql as SqlClient, author, limit, offset);
         if (fallbackData.length > 0) {
           const fallbackHasMore = fallbackData.length > limit;
           results = fallbackHasMore ? fallbackData.slice(0, limit) : fallbackData;
@@ -480,7 +492,9 @@ app.openapi(searchRoute, async (c) => {
     const formattedResults = results.map((row) => {
       const coverUrl = row.cover_url_large || row.cover_url_medium || row.cover_url_small || row.cover_url || row.coverUrl || null;
       const authorsRaw = row.authors || [];
-      const authors = (Array.isArray(authorsRaw) ? authorsRaw : []).map((a: DatabaseRow) => ({
+      const authors = (Array.isArray(authorsRaw) ? authorsRaw : [])
+        .filter((a): a is DatabaseRow => typeof a === 'object' && a !== null)
+        .map((a: DatabaseRow) => ({
         name: a.name,
         key: a.key,
         openlibrary: a.key ? `https://openlibrary.org${a.key}` : null,

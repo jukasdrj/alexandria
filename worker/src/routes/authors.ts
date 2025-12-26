@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { AppBindings } from '../env.js';
-import type { DatabaseRow, EnrichedAuthor } from '../types/database.js';
+import type { DatabaseRow } from '../types/database.js';
 import {
   TopAuthorsQuerySchema,
   AuthorKeyParamSchema,
@@ -827,7 +827,7 @@ app.openapi(enrichWikidataRoute, async (c) => {
     }
 
     // Extract Q-IDs for Wikidata batch fetch
-    const qids = authorsToEnrich.map((a: EnrichedAuthor) => a.wikidata_id);
+    const qids = authorsToEnrich.map((a) => a.wikidata_id).filter(Boolean);
 
     // Fetch from Wikidata
     const wikidataResults = await fetchWikidataMultipleBatches(qids);

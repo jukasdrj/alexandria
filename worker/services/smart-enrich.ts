@@ -7,6 +7,7 @@
 
 import type { Sql } from 'postgres';
 import type { Env } from '../src/env.js';
+import type { Logger } from '../lib/logger.js';
 import type { ExternalBookData } from './external-apis.js';
 import { resolveExternalISBN } from './external-apis.js';
 import { enrichEdition, enrichWork, enrichAuthor } from '../src/services/enrichment-service.js';
@@ -22,10 +23,10 @@ import { selectBestCoverURL } from '../src/services/utils.js';
  *
  * @param sql - PostgreSQL client
  * @param bookData - External book data to store
- * @param env - Worker environment with COVER_QUEUE binding
+ * @param logger - Logger for structured logging
  * @returns The stored edition key
  */
-async function storeExternalBookData(sql: Sql, bookData: ExternalBookData, env: Env): Promise<string> {
+async function storeExternalBookData(sql: Sql, bookData: ExternalBookData, logger: Logger): Promise<string> {
   console.log(`[Smart Enrich] Storing data for ISBN ${bookData.isbn} from ${bookData.provider}`);
 
   // Wrap all database operations in a transaction for atomicity
@@ -166,7 +167,7 @@ async function storeExternalBookData(sql: Sql, bookData: ExternalBookData, env: 
         dewey_decimal: bookData.deweyDecimal,
         binding: bookData.binding,
         related_isbns: bookData.relatedISBNs,
-      }, env);
+      }, logger);
       console.log(`[Smart Enrich] ✓ Enriched edition ${bookData.isbn}`);
 
       // Enrich work
@@ -184,7 +185,7 @@ async function storeExternalBookData(sql: Sql, bookData: ExternalBookData, env: 
         },
         cover_source: bookData.provider,
         openlibrary_work_id: workKey,
-      });
+      }, logger);
       console.log(`[Smart Enrich] ✓ Enriched work ${workKey}`);
 
       // Enrich authors
@@ -250,7 +251,8 @@ export interface SmartResolveResult {
 export async function smartResolveISBN(
   isbn: string,
   sql: Sql,
-  env: Env
+  env: Env,
+  logger: Logger
 ): Promise<SmartResolveResult | null> {
   console.log(`[Smart Resolve] Starting resolution for ISBN: ${isbn}`);
 
@@ -276,7 +278,7 @@ export async function smartResolveISBN(
 
   // 2. Store in Alexandria's database
   try {
-    await storeExternalBookData(sql, externalData, env);
+    await storeExternalBookData(sql, externalData, logger);
 
     // 3. Return the formatted result (matching /api/search response format)
     return {

@@ -1,4 +1,5 @@
 import type { Sql } from 'postgres';
+import type { Logger } from '../lib/logger.js';
 
 // Cloudflare Worker Environment Bindings
 export interface Env {
@@ -61,14 +62,7 @@ export interface Env {
   ALEXANDRIA_WEBHOOK_SECRET?: string;
 }
 
-// Logger interface for type safety
-export interface Logger {
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-  error(msg: string, meta?: Record<string, unknown>): void;
-  debug(msg: string, meta?: Record<string, unknown>): void;
-  query(operation: string, durationMs: number, metadata?: Record<string, unknown>): void;
-}
+// Logger type is imported from lib/logger.js for consistency
 
 // Extend Hono Context with custom variables
 export type Variables = {
