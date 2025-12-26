@@ -4,6 +4,7 @@
 
 import type { Sql, TransactionSql } from 'postgres';
 import type { Env } from '../env.js';
+import { Logger } from '../../lib/logger.js';
 import type {
   EnrichEditionRequest,
   EnrichWorkRequest,
@@ -29,6 +30,7 @@ import {
 export async function enrichEdition(
   sql: Sql | TransactionSql,
   edition: EnrichEditionRequest,
+  logger: Logger,
   env?: Env
 ): Promise<EnrichmentData & { isbn: string; quality_improvement: number }> {
   const startTime = Date.now();
@@ -227,12 +229,16 @@ export async function enrichEdition(
             source: `enrichment-${edition.primary_provider}`,
             queued_at: new Date().toISOString(),
           });
-          console.log(
-            `[Enrichment] Queued cover download for ${row.isbn} from ${edition.primary_provider}`
-          );
+          logger.info('Queued cover download', {
+            isbn: row.isbn,
+            provider: edition.primary_provider,
+          });
         } catch (queueError) {
           // Log but don't fail enrichment
-          console.error(`[Enrichment] Cover queue failed for ${row.isbn}:`, queueError);
+          logger.error('Cover queue failed', {
+            isbn: row.isbn,
+            error: queueError instanceof Error ? queueError.message : String(queueError),
+          });
         }
       }
     }
@@ -267,9 +273,12 @@ export async function enrichEdition(
           'x-alexandria-webhook-secret': env.ALEXANDRIA_WEBHOOK_SECRET
         },
         body: JSON.stringify(webhookPayload)
-      }).catch(err => console.error(`[Enrichment] Webhook failed for ${row.isbn}:`, err));
-      
-      console.log(`[Enrichment] Fired webhook for ${row.isbn}`);
+      }).catch(err => logger.error('Webhook failed', {
+        isbn: row.isbn,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+
+      logger.info('Fired webhook', { isbn: row.isbn });
     }
 
     return {
@@ -280,7 +289,10 @@ export async function enrichEdition(
       cover_urls: edition.cover_urls,
     };
   } catch (error) {
-    console.error('enrichEdition database error:', error);
+    logger.error('enrichEdition database error', {
+      error: error instanceof Error ? error.message : String(error),
+      isbn: edition.isbn,
+    });
 
     // Log failed operation
     await logEnrichmentOperation(sql, {
@@ -304,7 +316,8 @@ export async function enrichEdition(
  */
 export async function enrichWork(
   sql: Sql | TransactionSql,
-  work: EnrichWorkRequest
+  work: EnrichWorkRequest,
+  logger: Logger
 ): Promise<EnrichmentData & { work_key: string }> {
   const startTime = Date.now();
   const qualityScore = calculateWorkQuality(work);
@@ -429,7 +442,10 @@ export async function enrichWork(
       stored_at: new Date().toISOString(),
     };
   } catch (error) {
-    console.error('enrichWork database error:', error);
+    logger.error('enrichWork database error', {
+      error: error instanceof Error ? error.message : String(error),
+      work_key: work.work_key,
+    });
 
     // Log failed operation
     await logEnrichmentOperation(sql, {
