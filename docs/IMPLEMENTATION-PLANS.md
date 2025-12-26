@@ -2,6 +2,18 @@
 
 Detailed plans for three code improvements based on codebase analysis.
 
+> **Note:** This document supersedes `docs/archive/CODE-IMPROVEMENT-PLAN.md`.
+
+---
+
+## Status Summary (2025-12-28)
+
+| Plan | Status | Notes |
+|------|--------|-------|
+| **1. Extract Handler Logic** | 🔴 Not Started | Route files are still large (`authors.ts` > 900 lines). |
+| **2. Replace Console with Logger** | 🟡 In Progress | Some `console.*` replaced, but ~16 calls remain in services. |
+| **3. Eliminate Any Types** | 🟡 In Progress | Some types improved, but `as any` still present (6 instances). |
+
 ---
 
 ## Current State Analysis

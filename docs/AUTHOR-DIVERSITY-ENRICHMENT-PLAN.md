@@ -1,13 +1,23 @@
 # Author Diversity Enrichment Plan
 
-> **Status**: APPROVED
+> **Status**: IMPLEMENTED
 > **Created**: 2025-12-12
-> **Last Updated**: 2025-12-12
+> **Last Updated**: 2025-12-28
 > **Reviewed By**: Grok (code review)
 
 ## Executive Summary
 
 This plan outlines how Alexandria will enrich 8M+ author records with diversity data from Wikidata, enabling downstream consumers (bendv3) to provide diversity-aware book recommendations. The core principle is **Alexandria stores facts, consumers derive meaning**.
+
+---
+
+## Implementation Status
+
+**Fully Implemented in `worker/src/routes/authors.ts` and `worker/services/wikidata-client.ts`.**
+- **Enrichment Endpoint**: `POST /api/authors/enrich-wikidata` is live.
+- **Wikidata Client**: Implements batch fetching with rate limiting.
+- **Database**: `enriched_authors` table schema updated with diversity fields.
+- **API**: `GET /api/authors/:key` returns diversity data (gender, nationality, birth/death).
 
 ---
 
