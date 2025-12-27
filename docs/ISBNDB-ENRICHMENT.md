@@ -12,7 +12,6 @@ Last Updated: 2025-12-28
     - `deweyDecimal`
     - `binding`
     - `relatedISBNs`
-    - `dimensions` (Physical attributes)
 
 - **Storage Layer**: ⚠️ Pending. Database schema updates (`enriched_editions` table) to store these new fields are needed.
 - **API Layer**: ⚠️ Pending. Exposing these fields in the Alexandria API.
