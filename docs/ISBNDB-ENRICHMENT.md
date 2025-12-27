@@ -1,6 +1,22 @@
 # ISBNdb Enrichment Opportunities for Alexandria
 
-Last Updated: 2025-12-03
+Last Updated: 2025-12-28
+
+## Implementation Status
+
+**Status: PARTIALLY IMPLEMENTED**
+
+- **Fetching Layer (`worker/services/external-apis.ts`)**: ✅ Implemented. The `ExternalBookData` interface and `fetchFromISBNdb` function already extract:
+    - `image_original` (High quality covers)
+    - `subjects` (Genre tags)
+    - `deweyDecimal`
+    - `binding`
+    - `relatedISBNs`
+
+- **Storage Layer**: ⚠️ Pending. Database schema updates (`enriched_editions` table) to store these new fields are needed.
+- **API Layer**: ⚠️ Pending. Exposing these fields in the Alexandria API.
+
+---
 
 ## Overview
 
