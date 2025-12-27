@@ -7,7 +7,7 @@ This directory contains Claude Code configuration files that enhance the develop
 ```
 .claude/
 ├── README.md                          # This file
-├── settings.json                      # Project-wide settings
+├── settings.json                      # Hooks, permissions, and project settings
 ├── agents/                            # Specialized AI agents
 │   ├── cloudflare-workers-optimizer.md
 │   └── postgres-optimizer.md
@@ -39,14 +39,19 @@ The following files are denied from Claude Code access for security:
 - `**/*.key`, `**/*.pem`, `**/*.crt` - Certificate files
 
 ### MCP Servers
-- **pal** - Advanced AI capabilities (chat, thinkdeep, planner, consensus, debug, codereview, precommit)
-- **ios-simulator** - iOS simulator control (useful for bendv3 mobile testing)
+- **pal** - Advanced AI capabilities (chat, thinkdeep, planner, consensus, debug, codereview, precommit) - configured globally
 
 ### Attribution (NEW in 2.0.62)
 Customized commit and PR bylines with project-specific format.
 
 ### Hooks
-See **Hooks** section below for complete hook configuration.
+Configured in `settings.json`:
+- **PreToolUse**: Runs pre-commit.sh before git commits
+- **PermissionRequest**: Auto-allows project scripts, npm commands, and wrangler CLI
+
+### Permissions
+Deny rules protect sensitive files:
+- `docs/CREDENTIALS.md`, `.env` files, `.key`/`.pem` files
 
 ## Agents
 
@@ -126,16 +131,14 @@ Performance benchmarks for API endpoints.
 
 Claude Code hooks enable automatic actions on specific events.
 
-### Configured Hooks
+### Configured Hooks (in settings.json)
 
 | Event | Matcher | Action |
 |-------|---------|--------|
-| `PreToolUse` | `git commit` | Runs pre-commit.sh validation |
-| `SessionStart` | (all) | Displays welcome message |
-| `SessionEnd` | (all) | Displays goodbye message |
-| `SubagentStart` | (all) | Notifies subagent launch |
-| `SubagentStop` | (all) | Notifies subagent completion |
+| `PreToolUse` | `Bash(git commit*)` | Runs pre-commit.sh validation |
 | `PermissionRequest` | `Bash(./scripts/*)` | Auto-allows project scripts |
+| `PermissionRequest` | `Bash(cd worker && npm run *)` | Auto-allows npm commands |
+| `PermissionRequest` | `Bash(npx wrangler *)` | Auto-allows wrangler CLI |
 
 ### Available Hook Events (2.0.65)
 
