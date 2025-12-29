@@ -420,72 +420,97 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
           });
         }
 
-        // Enrich new books
-        for (const book of booksToEnrich) {
-          const isbn = book.isbn13 || book.isbn;
-          if (!isbn) continue;
+        // Enrich new books in batches with safe work creation
+        // Request-scoped cache for work creation to prevent duplicates in parallel execution
+        const workCreationPromises = new Map<string, Promise<{ workKey: string; isNew: boolean }>>();
 
-          try {
-            const { workKey, isNew: isNewWork } = await findOrCreateWork(
-              sql, isbn, book.title || 'Unknown', book.authors || []
-            );
+        const chunkSize = 5;
+        for (let i = 0; i < booksToEnrich.length; i += chunkSize) {
+          const chunk = booksToEnrich.slice(i, i + chunkSize);
+          await Promise.all(chunk.map(async (book) => {
+            const isbn = book.isbn13 || book.isbn;
+            if (!isbn) return;
 
-            if (isNewWork) {
-              await enrichWork(sql, {
-                work_key: workKey,
-                title: book.title || 'Unknown',
-                description: book.synopsis,
-                subject_tags: book.subjects,
-                primary_provider: 'isbndb',
-              }, c.get('logger'));
-            }
+            try {
+              // Create a unique key for deduplication based on Title + First Author
+              // This ensures if we have "Dune" (Hardcover) and "Dune" (Paperback) in the same batch,
+              // we don't try to create the Work twice concurrently.
+              const dedupKey = `${(book.title || 'unknown').toLowerCase()}|${(book.authors?.[0] || '').toLowerCase()}`;
 
-            if (book.authors && book.authors.length > 0) {
-              await linkWorkToAuthors(sql, workKey, book.authors);
-            }
-
-            const hasCover = !!(book.image_original || book.image);
-            await enrichEdition(sql, {
-              isbn,
-              title: book.title || 'Unknown',
-              publisher: book.publisher,
-              publication_date: book.date_published,
-              page_count: book.pages,
-              language: book.language,
-              primary_provider: 'isbndb',
-              cover_urls: hasCover ? {
-                original: book.image_original,
-                large: book.image,
-                medium: book.image,
-                small: book.image,
-              } : undefined,
-              cover_source: hasCover ? 'isbndb' : undefined,
-              work_key: workKey,
-              subjects: book.subjects,
-              binding: book.binding,
-              dewey_decimal: book.dewey_decimal,
-              related_isbns: book.related,
-            }, c.get('logger'), c.env);
-
-            results.newly_enriched++;
-
-            if (hasCover) {
-              try {
-                await c.env.COVER_QUEUE.send({
-                  isbn,
-                  work_key: workKey,
-                  provider_url: book.image_original || book.image,
-                  priority: 'normal',
-                  source: 'new_releases',
-                });
-                results.covers_queued++;
-              } catch {
-                // Cover queue failure is non-fatal
+              let workPromise = workCreationPromises.get(dedupKey);
+              if (!workPromise) {
+                workPromise = findOrCreateWork(
+                  sql, isbn, book.title || 'Unknown', book.authors || []
+                );
+                workCreationPromises.set(dedupKey, workPromise);
               }
+
+              const { workKey, isNew: isNewWork } = await workPromise;
+
+              // If isNewWork is true, it means THIS specific call created it, OR a shared promise created it.
+              // We need to be careful: if multiple editions share the promise, they all see isNewWork=true (if it was new).
+              // We should only enrich the work ONCE.
+              // However, enrichWork uses ON CONFLICT DO UPDATE, so it is safe to call multiple times.
+              // The main risk was creating duplicate work keys (which findOrCreateWork handles by checking DB, but parallel calls miss that).
+              // By sharing the promise, we ensure findOrCreateWork is called once per Title/Author pair.
+
+              if (isNewWork) {
+                await enrichWork(sql, {
+                  work_key: workKey,
+                  title: book.title || 'Unknown',
+                  description: book.synopsis,
+                  subject_tags: book.subjects,
+                  primary_provider: 'isbndb',
+                }, c.get('logger'));
+              }
+
+              if (book.authors && book.authors.length > 0) {
+                await linkWorkToAuthors(sql, workKey, book.authors);
+              }
+
+              const hasCover = !!(book.image_original || book.image);
+              await enrichEdition(sql, {
+                isbn,
+                title: book.title || 'Unknown',
+                publisher: book.publisher,
+                publication_date: book.date_published,
+                page_count: book.pages,
+                language: book.language,
+                primary_provider: 'isbndb',
+                cover_urls: hasCover ? {
+                  original: book.image_original,
+                  large: book.image,
+                  medium: book.image,
+                  small: book.image,
+                } : undefined,
+                cover_source: hasCover ? 'isbndb' : undefined,
+                work_key: workKey,
+                subjects: book.subjects,
+                binding: book.binding,
+                dewey_decimal: book.dewey_decimal,
+                related_isbns: book.related,
+              }, c.get('logger'), c.env);
+
+              results.newly_enriched++;
+
+              if (hasCover) {
+                try {
+                  await c.env.COVER_QUEUE.send({
+                    isbn,
+                    work_key: workKey,
+                    provider_url: book.image_original || book.image,
+                    priority: 'normal',
+                    source: 'new_releases',
+                  });
+                  results.covers_queued++;
+                } catch {
+                  // Cover queue failure is non-fatal
+                }
+              }
+            } catch {
+              results.failed++;
             }
-          } catch {
-            results.failed++;
-          }
+          }));
         }
 
         logger.info('[EnrichNewReleases] Month complete', {
