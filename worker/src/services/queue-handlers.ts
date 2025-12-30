@@ -72,7 +72,9 @@ export async function processCoverQueue(
     },
   };
 
-  for (const message of batch.messages) {
+  // OPTIMIZATION: Process covers in parallel using Promise.allSettled()
+  // This significantly improves throughput vs sequential processing
+  const processingPromises = batch.messages.map(async (message) => {
     try {
       const { isbn, provider_url, priority } = message.body;
       const normalizedISBN = isbn?.replace(/[-\s]/g, '') || '';
@@ -87,9 +89,8 @@ export async function processCoverQueue(
       const exists = await coversExist(env, normalizedISBN);
       if (exists) {
         logger.debug('Cover already exists, skipping', { isbn: normalizedISBN });
-        results.cached++;
         message.ack();
-        continue;
+        return { status: 'cached' as const, isbn: normalizedISBN };
       }
 
       // Determine cover URL - use provided URL or fetch from providers
@@ -102,13 +103,12 @@ export async function processCoverQueue(
 
         if (coverResult.source === 'placeholder') {
           logger.warn('No cover found from any provider', { isbn: normalizedISBN });
-          results.failed++;
-          results.errors.push({
+          message.ack(); // Don't retry - no cover exists
+          return {
+            status: 'failed' as const,
             isbn: normalizedISBN,
             error: 'No cover found from any provider',
-          });
-          message.ack(); // Don't retry - no cover exists
-          continue;
+          };
         }
 
         coverUrl = coverResult.url;
@@ -148,10 +148,6 @@ export async function processCoverQueue(
       }
 
       if (result.status === 'processed') {
-        results.processed++;
-        results.compressionStats.totalOriginalBytes += result.metrics.originalSize || 0;
-        results.compressionStats.totalWebpBytes += result.compression?.totalWebpSize || 0;
-
         // Write analytics if binding exists
         if (env.COVER_ANALYTICS) {
           try {
@@ -189,8 +185,14 @@ export async function processCoverQueue(
             WHERE isbn = ${normalizedISBN}
           `;
           if (updateResult.count > 0) {
-            results.dbUpdated++;
             logger.debug('Updated enriched_editions with R2 URLs', { isbn: normalizedISBN });
+            return {
+              status: 'processed' as const,
+              isbn: normalizedISBN,
+              metrics: result.metrics,
+              compression: result.compression,
+              dbUpdated: true,
+            };
           }
         } catch (dbError) {
           // Don't fail the cover processing if DB update fails
@@ -199,16 +201,24 @@ export async function processCoverQueue(
             error: dbError instanceof Error ? dbError.message : String(dbError),
           });
         }
-      } else {
-        results.failed++;
-        results.errors.push({
+
+        return {
+          status: 'processed' as const,
           isbn: normalizedISBN,
-          error: result.error || 'Processing failed',
-        });
+          metrics: result.metrics,
+          compression: result.compression,
+          dbUpdated: false,
+        };
+      } else {
         logger.error('Cover processing failed', {
           isbn: normalizedISBN,
           error: result.error,
         });
+        return {
+          status: 'failed' as const,
+          isbn: normalizedISBN,
+          error: result.error || 'Processing failed',
+        };
       }
 
       // Ack message on success or non-retryable failure
@@ -219,14 +229,47 @@ export async function processCoverQueue(
         isbn: message.body?.isbn || 'unknown',
         error: errorMsg,
       });
-      results.failed++;
-      results.errors.push({
-        isbn: message.body?.isbn || 'unknown',
-        error: errorMsg,
-      });
 
       // Retry on exception (up to max_retries from wrangler.jsonc)
       message.retry();
+      return {
+        status: 'failed' as const,
+        isbn: message.body?.isbn || 'unknown',
+        error: errorMsg,
+      };
+    }
+  });
+
+  // Wait for all covers to process in parallel
+  const processingResults = await Promise.allSettled(processingPromises);
+
+  // Aggregate results
+  for (const result of processingResults) {
+    if (result.status === 'fulfilled') {
+      const coverResult = result.value;
+      if (coverResult.status === 'cached') {
+        results.cached++;
+      } else if (coverResult.status === 'processed') {
+        results.processed++;
+        results.compressionStats.totalOriginalBytes += coverResult.metrics?.originalSize || 0;
+        results.compressionStats.totalWebpBytes += coverResult.compression?.totalWebpSize || 0;
+        if (coverResult.dbUpdated) {
+          results.dbUpdated++;
+        }
+      } else if (coverResult.status === 'failed') {
+        results.failed++;
+        results.errors.push({
+          isbn: coverResult.isbn,
+          error: coverResult.error || 'Processing failed',
+        });
+      }
+    } else {
+      // Promise rejected (shouldn't happen with try/catch, but handle it)
+      results.failed++;
+      results.errors.push({
+        isbn: 'unknown',
+        error: result.reason?.message || String(result.reason),
+      });
     }
   }
 
