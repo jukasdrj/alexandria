@@ -3,15 +3,15 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for src/services/quota-manager.ts</title>
+    <title>Code coverage report for services/jsquash-processor.ts</title>
     <meta charset="utf-8" />
-    <link rel="stylesheet" href="../../prettify.css" />
-    <link rel="stylesheet" href="../../base.css" />
-    <link rel="shortcut icon" type="image/x-icon" href="../../favicon.png" />
+    <link rel="stylesheet" href="../prettify.css" />
+    <link rel="stylesheet" href="../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style type='text/css'>
         .coverage-summary .sorter {
-            background-image: url(../../sort-arrow-sprite.png);
+            background-image: url(../sort-arrow-sprite.png);
         }
     </style>
 </head>
@@ -19,34 +19,34 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="../../index.html">All files</a> / <a href="index.html">src/services</a> quota-manager.ts</h1>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">services</a> jsquash-processor.ts</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">88.34% </span>
+                <span class="strong">91.4% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>91/103</span>
+                <span class='fraction'>117/128</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">91.89% </span>
+                <span class="strong">70.68% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>34/37</span>
+                <span class='fraction'>41/58</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">93.33% </span>
+                <span class="strong">92.85% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>14/15</span>
+                <span class='fraction'>13/14</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">88.34% </span>
+                <span class="strong">91.26% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>91/103</span>
+                <span class='fraction'>115/126</span>
             </div>
         
             
@@ -424,7 +424,102 @@
 <a name='L359'></a><a href='#L359'>359</a>
 <a name='L360'></a><a href='#L360'>360</a>
 <a name='L361'></a><a href='#L361'>361</a>
-<a name='L362'></a><a href='#L362'>362</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L362'></a><a href='#L362'>362</a>
+<a name='L363'></a><a href='#L363'>363</a>
+<a name='L364'></a><a href='#L364'>364</a>
+<a name='L365'></a><a href='#L365'>365</a>
+<a name='L366'></a><a href='#L366'>366</a>
+<a name='L367'></a><a href='#L367'>367</a>
+<a name='L368'></a><a href='#L368'>368</a>
+<a name='L369'></a><a href='#L369'>369</a>
+<a name='L370'></a><a href='#L370'>370</a>
+<a name='L371'></a><a href='#L371'>371</a>
+<a name='L372'></a><a href='#L372'>372</a>
+<a name='L373'></a><a href='#L373'>373</a>
+<a name='L374'></a><a href='#L374'>374</a>
+<a name='L375'></a><a href='#L375'>375</a>
+<a name='L376'></a><a href='#L376'>376</a>
+<a name='L377'></a><a href='#L377'>377</a>
+<a name='L378'></a><a href='#L378'>378</a>
+<a name='L379'></a><a href='#L379'>379</a>
+<a name='L380'></a><a href='#L380'>380</a>
+<a name='L381'></a><a href='#L381'>381</a>
+<a name='L382'></a><a href='#L382'>382</a>
+<a name='L383'></a><a href='#L383'>383</a>
+<a name='L384'></a><a href='#L384'>384</a>
+<a name='L385'></a><a href='#L385'>385</a>
+<a name='L386'></a><a href='#L386'>386</a>
+<a name='L387'></a><a href='#L387'>387</a>
+<a name='L388'></a><a href='#L388'>388</a>
+<a name='L389'></a><a href='#L389'>389</a>
+<a name='L390'></a><a href='#L390'>390</a>
+<a name='L391'></a><a href='#L391'>391</a>
+<a name='L392'></a><a href='#L392'>392</a>
+<a name='L393'></a><a href='#L393'>393</a>
+<a name='L394'></a><a href='#L394'>394</a>
+<a name='L395'></a><a href='#L395'>395</a>
+<a name='L396'></a><a href='#L396'>396</a>
+<a name='L397'></a><a href='#L397'>397</a>
+<a name='L398'></a><a href='#L398'>398</a>
+<a name='L399'></a><a href='#L399'>399</a>
+<a name='L400'></a><a href='#L400'>400</a>
+<a name='L401'></a><a href='#L401'>401</a>
+<a name='L402'></a><a href='#L402'>402</a>
+<a name='L403'></a><a href='#L403'>403</a>
+<a name='L404'></a><a href='#L404'>404</a>
+<a name='L405'></a><a href='#L405'>405</a>
+<a name='L406'></a><a href='#L406'>406</a>
+<a name='L407'></a><a href='#L407'>407</a>
+<a name='L408'></a><a href='#L408'>408</a>
+<a name='L409'></a><a href='#L409'>409</a>
+<a name='L410'></a><a href='#L410'>410</a>
+<a name='L411'></a><a href='#L411'>411</a>
+<a name='L412'></a><a href='#L412'>412</a>
+<a name='L413'></a><a href='#L413'>413</a>
+<a name='L414'></a><a href='#L414'>414</a>
+<a name='L415'></a><a href='#L415'>415</a>
+<a name='L416'></a><a href='#L416'>416</a>
+<a name='L417'></a><a href='#L417'>417</a>
+<a name='L418'></a><a href='#L418'>418</a>
+<a name='L419'></a><a href='#L419'>419</a>
+<a name='L420'></a><a href='#L420'>420</a>
+<a name='L421'></a><a href='#L421'>421</a>
+<a name='L422'></a><a href='#L422'>422</a>
+<a name='L423'></a><a href='#L423'>423</a>
+<a name='L424'></a><a href='#L424'>424</a>
+<a name='L425'></a><a href='#L425'>425</a>
+<a name='L426'></a><a href='#L426'>426</a>
+<a name='L427'></a><a href='#L427'>427</a>
+<a name='L428'></a><a href='#L428'>428</a>
+<a name='L429'></a><a href='#L429'>429</a>
+<a name='L430'></a><a href='#L430'>430</a>
+<a name='L431'></a><a href='#L431'>431</a>
+<a name='L432'></a><a href='#L432'>432</a>
+<a name='L433'></a><a href='#L433'>433</a>
+<a name='L434'></a><a href='#L434'>434</a>
+<a name='L435'></a><a href='#L435'>435</a>
+<a name='L436'></a><a href='#L436'>436</a>
+<a name='L437'></a><a href='#L437'>437</a>
+<a name='L438'></a><a href='#L438'>438</a>
+<a name='L439'></a><a href='#L439'>439</a>
+<a name='L440'></a><a href='#L440'>440</a>
+<a name='L441'></a><a href='#L441'>441</a>
+<a name='L442'></a><a href='#L442'>442</a>
+<a name='L443'></a><a href='#L443'>443</a>
+<a name='L444'></a><a href='#L444'>444</a>
+<a name='L445'></a><a href='#L445'>445</a>
+<a name='L446'></a><a href='#L446'>446</a>
+<a name='L447'></a><a href='#L447'>447</a>
+<a name='L448'></a><a href='#L448'>448</a>
+<a name='L449'></a><a href='#L449'>449</a>
+<a name='L450'></a><a href='#L450'>450</a>
+<a name='L451'></a><a href='#L451'>451</a>
+<a name='L452'></a><a href='#L452'>452</a>
+<a name='L453'></a><a href='#L453'>453</a>
+<a name='L454'></a><a href='#L454'>454</a>
+<a name='L455'></a><a href='#L455'>455</a>
+<a name='L456'></a><a href='#L456'>456</a>
+<a name='L457'></a><a href='#L457'>457</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -454,16 +549,148 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">54x</span>
-<span class="cline-any cline-yes">54x</span>
-<span class="cline-any cline-yes">54x</span>
-<span class="cline-any cline-yes">54x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">54x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">45x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">42x</span>
+<span class="cline-any cline-yes">42x</span>
+<span class="cline-any cline-yes">42x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">42x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">22x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -472,52 +699,197 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
 <span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">22x</span>
+<span class="cline-any cline-yes">22x</span>
+<span class="cline-any cline-yes">22x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">22x</span>
+<span class="cline-any cline-yes">22x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">37x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">22x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">19x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-yes">18x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">15x</span>
 <span class="cline-any cline-yes">15x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">22x</span>
-<span class="cline-any cline-yes">22x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">21x</span>
-<span class="cline-any cline-yes">21x</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">45x</span>
+<span class="cline-any cline-yes">45x</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">45x</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -531,27 +903,24 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">60x</span>
-<span class="cline-any cline-yes">60x</span>
+<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">60x</span>
-<span class="cline-any cline-yes">60x</span>
-<span class="cline-any cline-yes">60x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-yes">14x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">60x</span>
-<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">42x</span>
+<span class="cline-any cline-yes">14x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">54x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">54x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -560,200 +929,15 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">103x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">10x</span>
-<span class="cline-any cline-yes">10x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">10x</span>
-<span class="cline-any cline-yes">10x</span>
-<span class="cline-any cline-yes">10x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">173x</span>
-<span class="cline-any cline-yes">173x</span>
-<span class="cline-any cline-yes">173x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">173x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">276x</span>
-<span class="cline-any cline-yes">276x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">16x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">16x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">443x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">8x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">8x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">6x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">6x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">12x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">12x</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">12x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">8x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -768,385 +952,486 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
- * Centralized ISBNdb API Quota Management Service
+ * jSquash Image Processor
  *
- * Manages the ISBNdb Premium daily quota (15,000 calls/day) across all harvesting operations:
- * - Scheduled cron harvesting
- * - Bulk author processing
- * - Direct batch enrichment
- * - Queue-based enrichment
- * - New releases harvesting
+ * Processes cover images using jSquash WASM modules:
+ * - Decodes JPEG/PNG source images
+ * - Resizes to 3 standard sizes (large, medium, small)
+ * - Encodes as WebP
+ * - Stores only the 3 WebP files in R2 (no original)
  *
- * Uses Cloudflare KV for atomic operations and distributed coordination.
+ * @module services/jsquash-processor
  */
 &nbsp;
-export interface QuotaStatus {
-  used_today: number;
-  remaining: number;
-  limit: number;
-  last_reset: string;
-  next_reset_in_hours: number;
-  buffer_remaining: number;
-  can_make_calls: boolean;
-}
+// jSquash modules with init functions for manual WASM initialization
+import decodeJpeg, { init as initJpegDecode } from '@jsquash/jpeg/decode';
+import decodePng, { init as initPngDecode } from '@jsquash/png/decode';
+import encodeWebp, { init as initWebpEncode } from '@jsquash/webp/encode';
+import resize, { initResize } from '@jsquash/resize';
 &nbsp;
-export interface QuotaCheckResult {
-  allowed: boolean;
-  status: QuotaStatus;
-  reason?: string;
-}
+// WASM modules - direct ES module imports for Cloudflare Workers
+import JPEG_DEC_WASM from '@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm';
+import PNG_DEC_WASM from '@jsquash/png/codec/pkg/squoosh_png_bg.wasm';
+import WEBP_ENC_WASM from '@jsquash/webp/codec/enc/webp_enc.wasm';
+import RESIZE_WASM from '@jsquash/resize/lib/resize/pkg/squoosh_resize_bg.wasm';
 &nbsp;
-export class QuotaManager {
-  private kv: KVNamespace;
-  private readonly DAILY_LIMIT = 15000; // ISBNdb Premium quota
-  private readonly SAFETY_BUFFER = 2000; // Keep 2K calls in reserve (use 13K max)
-  private readonly QUOTA_KEY = 'isbndb_daily_calls';
-  private readonly RESET_KEY = 'isbndb_quota_last_reset';
+import type { Env } from '../src/env';
+import type { CoverProcessingResult } from '../src/services/types';
 &nbsp;
-  constructor(kv: KVNamespace) {
-    this.kv = kv;
-  }
+// Target sizes for book covers
+// We use MAX dimensions - images will be scaled down proportionally to fit
+// If source is smaller than target, we DON'T upscale - we use source dimensions
+const TARGET_SIZES = {
+  large: { maxWidth: 512, maxHeight: 768 },
+  medium: { maxWidth: 256, maxHeight: 384 },
+  small: { maxWidth: 128, maxHeight: 192 }
+} as const;
 &nbsp;
-  /**
-   * Check if quota is available and optionally reserve API calls
-   * @param requestCount Number of API calls to reserve (default: 1)
-   * @param reserveQuota Whether to actually reserve the quota (default: false)
-   * @returns QuotaCheckResult with availability and status
-   */
-  async checkQuota(requestCount: number = 1, reserveQuota: boolean = false): Promise&lt;QuotaCheckResult&gt; {
-    try {
-      const status = await this.getQuotaStatus();
+// WebP encoding quality (0-100)
+const WEBP_QUALITY = 85;
 &nbsp;
-      // Check if we have enough quota remaining
-      const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
-      const wouldExceedLimit = (status.used_today + requestCount) &gt; effectiveLimit;
+// Minimum size threshold for WebP conversion (5KB)
+// Small images (especially placeholders) often get LARGER after WebP conversion
+// due to format overhead. For these, we store the original format instead.
+const MIN_SIZE_FOR_WEBP = 5000; // 5KB threshold
 &nbsp;
-      if (wouldExceedLimit) {
-        return {
-          allowed: false,
-          status,
-          reason: `Request would exceed daily limit. Need ${requestCount} calls, but only ${status.buffer_remaining} remaining.`
-        };
-      }
-&nbsp;
-      // If we're just checking (not reserving), return success
-      if (!reserveQuota) {
-        return {
-          allowed: true,
-          status
-        };
-      }
-&nbsp;
-      // Reserve the quota atomically
-      const success = await this.reserveQuota(requestCount);
-      if (!success) {
-        // Race condition: quota was exhausted between check and reserve
-        const updatedStatus = await this.getQuotaStatus();
-        return {
-          allowed: false,
-          status: updatedStatus,
-          reason: 'Quota was exhausted by concurrent request'
-        };
-      }
-&nbsp;
-      // Return updated status after reservation
-      const finalStatus = await this.getQuotaStatus();
-      return {
-        allowed: true,
-        status: finalStatus
-      };
-    } catch (error) {
-<span class="cstat-no" title="statement not covered" >      console.error('QuotaManager.checkQuota error:', error);</span>
-      // On KV failure, fail closed (deny quota) to be conservative
-<span class="cstat-no" title="statement not covered" >      return {</span>
-        allowed: false,
-        status: this.getFallbackStatus(),
-        reason: `Quota check failed due to KV error: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
-    }
-  }
-&nbsp;
-  /**
-   * Reserve quota for API calls
-   * Note: This uses optimistic concurrency - there's a small race condition window,
-   * but it's mitigated by the 2K safety buffer (13K limit vs 15K actual quota).
-   * @param requestCount Number of API calls to reserve
-   * @returns true if successfully reserved, false if quota exhausted or KV error
-   */
-  async reserveQuota(requestCount: number): Promise&lt;boolean&gt; {
-    try {
-      await this.ensureDailyReset();
-&nbsp;
-      // Get current usage
-      const currentUsage = await this.kv.get&lt;number&gt;(this.QUOTA_KEY, 'json') || 0;
-      const newUsage = currentUsage + requestCount;
-      const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
-&nbsp;
-      if (newUsage &gt; effectiveLimit) {
-        return false;
-      }
-&nbsp;
-      // Update counter (single atomic write)
-      // Race condition is possible but mitigated by safety buffer
-      await this.kv.put(this.QUOTA_KEY, JSON.stringify(newUsage));
-&nbsp;
-      return true;
-    } catch (error) {
-      console.error('QuotaManager.reserveQuota error:', error);
-      // On KV failure, fail closed (deny quota)
-      return false;
-    }
-  }
-&nbsp;
-  /**
-   * Get total usage by reading the main counter (updated on each reservation)
-   * Note: This uses eventual consistency - the main counter is updated after each
-   * shard write, so it may lag slightly behind the true total under high concurrency.
-   * This is acceptable since we have a safety buffer.
-   */
-  private async getTotalUsage(): Promise&lt;number&gt; {
-    try {
-      // Read main counter for fast reads (updated on each reserveQuota call)
-      const currentUsage = await this.kv.get&lt;number&gt;(this.QUOTA_KEY, 'json') || 0;
-      return currentUsage;
-    } catch (error) {
-      console.error('QuotaManager.getTotalUsage error:', error);
-      // On KV failure, return 0 to be conservative (will show full quota available)
-      return 0;
-    }
-  }
-&nbsp;
-  /**
-   * Get current quota status without modifying it
-   */
-  async getQuotaStatus(): Promise&lt;QuotaStatus&gt; {
-    try {
-      await this.ensureDailyReset();
-&nbsp;
-      // Use aggregated total from shards for most accurate count
-      const usedToday = await this.getTotalUsage();
-      const remaining = Math.max(0, this.DAILY_LIMIT - usedToday);
-      const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
-      const bufferRemaining = Math.max(0, effectiveLimit - usedToday);
-&nbsp;
-      const now = new Date();
-      const nextMidnight = new Date(now);
-      nextMidnight.setUTCDate(nextMidnight.getUTCDate() + 1);
-      nextMidnight.setUTCHours(0, 0, 0, 0);
-      const hoursToReset = (nextMidnight.getTime() - now.getTime()) / (1000 * 60 * 60);
-&nbsp;
-      return {
-        used_today: usedToday,
-        remaining,
-        limit: this.DAILY_LIMIT,
-        last_reset: await this.getLastResetDate(),
-        next_reset_in_hours: Math.round(hoursToReset * 100) / 100,
-        buffer_remaining: bufferRemaining,
-        can_make_calls: bufferRemaining &gt; 0
-      };
-    } catch (error) {
-<span class="cstat-no" title="statement not covered" >      console.error('QuotaManager.getQuotaStatus error:', error);</span>
-      // Return fallback status on KV failure
-<span class="cstat-no" title="statement not covered" >      return this.getFallbackStatus();</span>
-    }
-  }
-&nbsp;
-  /**
-   * Manually increment quota (for tracking external API calls)
-   * Use this when you make ISBNdb calls outside the reservation system
-   */
-  async recordApiCall(callCount: number = 1): Promise&lt;void&gt; {
-    try {
-      await this.ensureDailyReset();
-&nbsp;
-      const currentUsage = await this.kv.get&lt;number&gt;(this.QUOTA_KEY, 'json') || 0;
-      const newUsage = currentUsage + callCount;
-      await this.kv.put(this.QUOTA_KEY, JSON.stringify(newUsage));
-    } catch (error) {
-      console.error('QuotaManager.recordApiCall error:', error);
-      // Log but don't throw - we don't want tracking failures to break API calls
-    }
-  }
-&nbsp;
-  /**
-   * Reset quota counter (for testing or manual reset)
-   */
-  async resetQuota(): Promise&lt;void&gt; {
-    await this.kv.put(this.QUOTA_KEY, JSON.stringify(0));
-    await this.kv.put(this.RESET_KEY, this.getTodayDateString());
-  }
-&nbsp;
-  /**
-   * Check if quota should be reset for new day and reset if needed
-   */
-  private async ensureDailyReset(): Promise&lt;void&gt; {
-    try {
-      const lastReset = await this.getLastResetDate();
-      const today = this.getTodayDateString();
-&nbsp;
-      if (lastReset !== today) {
-        // New day - reset quota
-        await this.kv.put(this.QUOTA_KEY, JSON.stringify(0));
-        await this.kv.put(this.RESET_KEY, today);
-      }
-    } catch (error) {
-<span class="cstat-no" title="statement not covered" >      console.error('QuotaManager.ensureDailyReset error:', error);</span>
-      // Continue without resetting - will retry on next call
-    }
-  }
-&nbsp;
-  private async getLastResetDate(): Promise&lt;string&gt; {
-    try {
-      return await this.kv.get(this.RESET_KEY) || this.getTodayDateString();
-    } catch (error) {
-      console.error('QuotaManager.getLastResetDate error:', error);
-      // Return today's date as fallback
-      return this.getTodayDateString();
-    }
-  }
-&nbsp;
-  private getTodayDateString(): string {
-    return new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  }
-&nbsp;
-  /**
-   * Get fallback status when KV is unavailable
-   * Returns conservative values to prevent quota exhaustion
-   */
-  private <span class="fstat-no" title="function not covered" >getFallbackStatus(): QuotaStatus {</span>
-    const now = <span class="cstat-no" title="statement not covered" >new Date();</span>
-    const nextMidnight = <span class="cstat-no" title="statement not covered" >new Date(now);</span>
-<span class="cstat-no" title="statement not covered" >    nextMidnight.setUTCDate(nextMidnight.getUTCDate() + 1);</span>
-<span class="cstat-no" title="statement not covered" >    nextMidnight.setUTCHours(0, 0, 0, 0);</span>
-    const <span class="cstat-no" title="statement not covered" >hoursToReset = (nextMidnight.getTime() - now.getTime()) / (1000 * 60 * 60);</span>
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    return {</span>
-      used_today: 0,
-      remaining: this.DAILY_LIMIT,
-      limit: this.DAILY_LIMIT,
-      last_reset: this.getTodayDateString(),
-      next_reset_in_hours: Math.round(hoursToReset * 100) / 100,
-      buffer_remaining: 0, // Fail closed: report 0 buffer remaining on KV failure
-      can_make_calls: false // Fail closed: deny calls on KV failure
-    };
-  }
-&nbsp;
-  /**
-   * Get estimated safe batch size based on remaining quota
-   * Useful for dynamic batch sizing in harvesting operations
-   */
-  async getSafeBatchSize(maxBatchSize: number = 1000): Promise&lt;number&gt; {
-    const status = await this.getQuotaStatus();
-&nbsp;
-    if (!status.can_make_calls) {
-      return 0;
-    }
-&nbsp;
-    // Conservative approach: use half of remaining quota for this batch
-    const conservativeQuota = Math.floor(status.buffer_remaining / 2);
-&nbsp;
-    // ISBNdb Premium can handle 1000 ISBNs per call
-    // So batch size = min(maxBatchSize, remaining quota * 1000)
-    return Math.min(maxBatchSize, conservativeQuota * 1000);
-  }
-&nbsp;
-  /**
-   * Check if specific harvesting operation should proceed
-   * Includes operational logic for different harvesting types
-   */
-  async shouldAllowOperation(operation: 'cron' | 'bulk_author' | 'batch_direct' | 'new_releases', estimatedCalls: number = 1): Promise&lt;QuotaCheckResult&gt; {
-    const result = await this.checkQuota(estimatedCalls, false);
-&nbsp;
-    <span class="missing-if-branch" title="if path not taken" >I</span>if (!result.allowed) {
-<span class="cstat-no" title="statement not covered" >      return result;</span>
-    }
-&nbsp;
-    // Additional operational rules
-    switch (operation) {
-      case 'cron':
-        // Cron jobs should be more conservative (leave room for manual operations)
-        if (result.status.buffer_remaining &lt; estimatedCalls * 2) {
-          return {
-            allowed: false,
-            status: result.status,
-            reason: `Cron operation blocked: need ${estimatedCalls * 2} buffer calls, only ${result.status.buffer_remaining} remaining`
-          };
-        }
-        break;
-&nbsp;
-      case 'bulk_author':
-        // Bulk operations can use more quota but should check if it's a reasonable batch
-        if (estimatedCalls &gt; 100) {
-          return {
-            allowed: false,
-            status: result.status,
-            reason: `Bulk operation too large: ${estimatedCalls} calls requested, max 100 recommended`
-          };
-        }
-        break;
-    }
-&nbsp;
-    return result;
-  }
+/**
+ * Target dimensions calculation result
+ */
+interface TargetDimensions {
+  width: number;
+  height: number;
+  scaled: boolean;
 }
 &nbsp;
 /**
- * Factory function to create QuotaManager instance
- * Use this in your Worker handlers to get a properly configured instance
+ * Calculate target dimensions that fit within max bounds while preserving aspect ratio
+ * Never upscales - returns source dimensions if smaller than target
  */
-export function createQuotaManager(kv: KVNamespace): QuotaManager {
-  return new QuotaManager(kv);
+function calculateTargetDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxWidth: number,
+  maxHeight: number
+): TargetDimensions {
+  // If source is smaller than max, don't upscale
+  if (sourceWidth &lt;= maxWidth &amp;&amp; sourceHeight &lt;= maxHeight) {
+    return { width: sourceWidth, height: sourceHeight, scaled: false };
+  }
+&nbsp;
+  // Calculate scale factor to fit within bounds
+  const widthRatio = maxWidth / sourceWidth;
+  const heightRatio = maxHeight / sourceHeight;
+  const scale = Math.min(widthRatio, heightRatio);
+&nbsp;
+  return {
+    width: Math.round(sourceWidth * scale),
+    height: Math.round(sourceHeight * scale),
+    scaled: true
+  };
 }
 &nbsp;
-/**
- * Utility function for quota-aware API calling
- * Wraps an ISBNdb API call with automatic quota management
- */
-export async function withQuotaGuard&lt;T&gt;(
-  quotaManager: QuotaManager,
-  operation: string,
-  estimatedCalls: number,
-  apiCall: () =&gt; Promise&lt;T&gt;
-): Promise&lt;T&gt; {
-  // Check and reserve quota
-  const quotaResult = await quotaManager.checkQuota(estimatedCalls, true);
+// Security: Only allow images from known book cover providers
+const ALLOWED_DOMAINS = new Set([
+  'books.google.com',
+  'covers.openlibrary.org',
+  'images.isbndb.com',
+  'images-na.ssl-images-amazon.com',
+  'pictures.abebooks.com',
+  'm.media-amazon.com'
+]);
 &nbsp;
-  if (!quotaResult.allowed) {
-    throw new Error(`Quota exhausted for ${operation}: ${quotaResult.reason}`);
-  }
+// Track WASM initialization state
+let wasmInitialized = false;
+&nbsp;
+/**
+ * Initialize all WASM modules
+ * Must be called before processing images in CF Workers
+ */
+async function initWasm(): Promise&lt;void&gt; {
+  if (wasmInitialized) return;
+&nbsp;
+  const startTime = Date.now();
 &nbsp;
   try {
-    // Execute the API call
-    const result = await apiCall();
+    // Initialize all WASM modules with globally injected binaries
+    await Promise.all([
+      initJpegDecode(JPEG_DEC_WASM),
+      initPngDecode(PNG_DEC_WASM),
+      initWebpEncode(WEBP_ENC_WASM),
+      initResize(RESIZE_WASM),
+    ]);
 &nbsp;
-    console.log(`✅ ${operation} completed successfully. Quota used: ${estimatedCalls}. Remaining: ${quotaResult.status.buffer_remaining}`);
-&nbsp;
-    return result;
+    wasmInitialized = true;
+    console.log(`[jSquash] WASM initialized in ${Date.now() - startTime}ms`);
   } catch (error) {
-    // On failure, we could implement quota rollback here
-    // For now, we keep the reservation to be conservative
-    console.error(`❌ ${operation} failed:`, error);
-    throw error;
+<span class="cstat-no" title="statement not covered" >    console.error('[jSquash] WASM init failed:', error);</span>
+<span class="cstat-no" title="statement not covered" >    throw error;</span>
   }
-}</pre></td></tr></table></pre>
+}
+&nbsp;
+/**
+ * Validate that URL is from an allowed domain
+ */
+function isAllowedDomain(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ALLOWED_DOMAINS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+&nbsp;
+/**
+ * Image type detected from buffer
+ */
+type ImageType = 'jpeg' | 'png' | 'webp';
+&nbsp;
+/**
+ * Detect image type from ArrayBuffer
+ */
+function detectImageType(buffer: ArrayBuffer): ImageType | null {
+  const view = new Uint8Array(buffer);
+&nbsp;
+  // JPEG: starts with FF D8 FF
+  if (view[0] === 0xFF &amp;&amp; view[1] === 0xD8 &amp;&amp; view[2] === 0xFF) {
+    return 'jpeg';
+  }
+&nbsp;
+  // PNG: starts with 89 50 4E 47
+  if (view[0] === 0x89 &amp;&amp; view[1] === 0x50 &amp;&amp; view[2] === 0x4E &amp;&amp; view[3] === 0x47) {
+    return 'png';
+  }
+&nbsp;
+  // WebP: starts with RIFF....WEBP
+  <span class="missing-if-branch" title="if path not taken" >I</span>if (view[0] === 0x52 &amp;&amp; <span class="branch-1 cbranch-no" title="branch not covered" >view[1] === 0x49 &amp;&amp; <span class="branch-2 cbranch-no" title="branch not covered" >v</span>iew[2] === 0x46 &amp;&amp; <span class="branch-3 cbranch-no" title="branch not covered" >v</span>iew[3] === 0x46 &amp;&amp;</span>
+<span class="branch-4 cbranch-no" title="branch not covered" >      view[8] === 0x57 &amp;&amp; <span class="branch-5 cbranch-no" title="branch not covered" >v</span>iew[9] === 0x45 &amp;&amp; <span class="branch-6 cbranch-no" title="branch not covered" >v</span>iew[10] === 0x42 &amp;&amp; <span class="branch-7 cbranch-no" title="branch not covered" >v</span>iew[11] === 0x50) {</span>
+<span class="cstat-no" title="statement not covered" >    return 'webp';</span>
+  }
+&nbsp;
+  return null;
+}
+&nbsp;
+/**
+ * Decode image buffer to ImageData
+ */
+async function decodeImage(buffer: ArrayBuffer, type: ImageType): Promise&lt;ImageData&gt; {
+  switch (type) {
+    case 'jpeg':
+      return await decodeJpeg(buffer);
+    case 'png':
+      return await decodePng(buffer);
+<span class="branch-2 cbranch-no" title="branch not covered" >    default:</span>
+<span class="cstat-no" title="statement not covered" >      throw new Error(`Unsupported image type: ${type}`);</span>
+  }
+}
+&nbsp;
+/**
+ * Resize ImageData to target dimensions
+ */
+async function resizeImage(imageData: ImageData, targetWidth: number, targetHeight: number): Promise&lt;ImageData&gt; {
+  return await resize(imageData, {
+    width: targetWidth,
+    height: targetHeight,
+    method: 'lanczos3', // High quality downscaling
+    premultiply: true,
+    linearRGB: true
+  });
+}
+&nbsp;
+/**
+ * Process a single cover image
+ * Downloads, resizes to 3 sizes, encodes as WebP, stores in R2
+ *
+ * @param isbn - ISBN for the book
+ * @param sourceUrl - URL to download the original image
+ * @param env - Worker environment with R2 binding
+ * @returns Processing result
+ */
+export async function processAndStoreCover(isbn: string, sourceUrl: string, env: Env): Promise&lt;CoverProcessingResult&gt; {
+  const startTime = Date.now();
+  const normalizedISBN = isbn.replace(/[-\s]/g, '');
+&nbsp;
+  const metrics: CoverProcessingResult['metrics'] = {
+    isbn: normalizedISBN,
+    initMs: 0,
+    fetchMs: 0,
+    decodeMs: 0,
+    resizeMs: 0,
+    encodeMs: 0,
+    uploadMs: 0,
+    totalMs: 0,
+    originalSize: 0,
+    webpSizes: {}
+  };
+&nbsp;
+  try {
+    // Security check
+    if (!isAllowedDomain(sourceUrl)) {
+      throw new Error(`Domain not allowed: ${new URL(sourceUrl).hostname}`);
+    }
+&nbsp;
+    // Initialize WASM modules if needed
+    const initStart = Date.now();
+    await initWasm();
+    metrics.initMs = Date.now() - initStart;
+&nbsp;
+    // 1. Fetch the original image
+    const fetchStart = Date.now();
+    const response = await fetch(sourceUrl, {
+      headers: {
+        'User-Agent': 'Alexandria/2.0 (cover-processor)',
+        'Accept': 'image/*'
+      }
+    });
+&nbsp;
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: HTTP ${response.status}`);
+    }
+&nbsp;
+    const buffer = await response.arrayBuffer();
+    metrics.fetchMs = Date.now() - fetchStart;
+    metrics.originalSize = buffer.byteLength;
+&nbsp;
+    // Validate size
+    if (buffer.byteLength &gt; 10 * 1024 * 1024) {
+      throw new Error(`Image too large: ${buffer.byteLength} bytes`);
+    }
+&nbsp;
+    if (buffer.byteLength &lt; 100) {
+      throw new Error('Image too small (likely placeholder)');
+    }
+&nbsp;
+    // 2. Detect type and decode
+    const decodeStart = Date.now();
+    const imageType = detectImageType(buffer);
+    if (!imageType) {
+      throw new Error('Unknown image format');
+    }
+&nbsp;
+    const imageData = await decodeImage(buffer, imageType);
+    metrics.decodeMs = Date.now() - decodeStart;
+&nbsp;
+    const sourceWidth = imageData.width;
+    const sourceHeight = imageData.height;
+    console.log(`[jSquash] Decoded ${imageType} ${sourceWidth}x${sourceHeight} (${buffer.byteLength} bytes)`);
+&nbsp;
+    // Safety check for extremely large dimensions (can crash WASM decoder/resizer)
+    // ISBNdb image_original can be 3000x4000+ which exhausts WASM memory
+    const MAX_DIMENSION = 4096;
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (sourceWidth &gt; MAX_DIMENSION || sourceHeight &gt; MAX_DIMENSION) {
+<span class="cstat-no" title="statement not covered" >      console.warn(`[jSquash] Image dimensions ${sourceWidth}x${sourceHeight} exceed safe limit ${MAX_DIMENSION}, proceeding with caution`);</span>
+      // Don't throw - let resizer handle it. If it fails, the error will be caught.
+    }
+&nbsp;
+    // Check if image is too small for WebP conversion (would inflate size)
+    if (buffer.byteLength &lt; MIN_SIZE_FOR_WEBP) {
+      console.log(`[jSquash] Image too small for WebP conversion (${buffer.byteLength} &lt; ${MIN_SIZE_FOR_WEBP} bytes), storing original format`);
+&nbsp;
+      // Store original image in all three size slots (no resizing, no WebP conversion)
+      const uploadStart = Date.now();
+      const fileExtension = imageType === 'jpeg' ? 'jpg' : <span class="branch-1 cbranch-no" title="branch not covered" >imageType;</span>
+      const contentType = imageType === 'jpeg' ? 'image/jpeg' : <span class="branch-1 cbranch-no" title="branch not covered" >`image/${imageType}`;</span>
+&nbsp;
+      const uploadPromises = Object.keys(TARGET_SIZES).map(async (sizeName) =&gt; {
+        const r2Key = `isbn/${normalizedISBN}/${sizeName}.${fileExtension}`;
+&nbsp;
+        await env.COVER_IMAGES.put(r2Key, buffer, {
+          httpMetadata: {
+            contentType: contentType,
+            cacheControl: 'public, max-age=31536000, immutable'
+          },
+          customMetadata: {
+            uploadedAt: new Date().toISOString(),
+            sourceUrl: sourceUrl,
+            originalSize: buffer.byteLength.toString(),
+            originalType: imageType,
+            webpSkipped: 'true',
+            reason: 'below_size_threshold'
+          }
+        });
+&nbsp;
+        return { sizeName, key: r2Key, size: buffer.byteLength };
+      });
+&nbsp;
+      const uploadResults = await Promise.all(uploadPromises);
+      metrics.uploadMs = Date.now() - uploadStart;
+      metrics.totalMs = Date.now() - startTime;
+      metrics.webpSkipped = true;
+&nbsp;
+      console.log(`[jSquash] Stored original ${imageType} for ${normalizedISBN}: ${buffer.byteLength} bytes (${metrics.totalMs}ms)`);
+&nbsp;
+      return {
+        status: 'processed',
+        isbn: normalizedISBN,
+        metrics,
+        compression: {
+          originalSize: buffer.byteLength,
+          totalWebpSize: buffer.byteLength * 3, // Stored in all 3 size slots
+          ratio: '0%',
+          webpSkipped: true
+        },
+        urls: {
+          large: `/covers/${normalizedISBN}/large`,
+          medium: `/covers/${normalizedISBN}/medium`,
+          small: `/covers/${normalizedISBN}/small`
+        },
+        r2Keys: uploadResults.map(r =&gt; r.key)
+      };
+    }
+&nbsp;
+    // 3. Resize to all target sizes and encode as WebP
+    // IMPORTANT: We NEVER upscale - if source is smaller, we use source dimensions
+    const results: Record&lt;string, ArrayBuffer&gt; = {};
+    metrics.dimensions = {};
+&nbsp;
+    for (const [sizeName, targetBounds] of Object.entries(TARGET_SIZES)) {
+      const target = calculateTargetDimensions(
+        sourceWidth,
+        sourceHeight,
+        targetBounds.maxWidth,
+        targetBounds.maxHeight
+      );
+&nbsp;
+      metrics.dimensions[sizeName] = { width: target.width, height: target.height, scaled: target.scaled };
+&nbsp;
+      const resizeStart = Date.now();
+      let imageToEncode: ImageData;
+&nbsp;
+      if (target.scaled) {
+        // Source is larger than target - downscale
+        imageToEncode = await resizeImage(imageData, target.width, target.height);
+      } else {
+        // Source is smaller or equal - use original (no upscaling!)
+        imageToEncode = imageData;
+      }
+      metrics.resizeMs += Date.now() - resizeStart;
+&nbsp;
+      // Encode to WebP
+      const encodeStart = Date.now();
+      const webpBuffer = await encodeWebp(imageToEncode, { quality: WEBP_QUALITY });
+      metrics.encodeMs += Date.now() - encodeStart;
+&nbsp;
+      results[sizeName] = webpBuffer;
+      metrics.webpSizes![sizeName] = webpBuffer.byteLength;
+    }
+&nbsp;
+    // 4. Upload all 3 sizes to R2
+    const uploadStart = Date.now();
+    const uploadPromises = Object.entries(results).map(async ([sizeName, webpBuffer]) =&gt; {
+      const r2Key = `isbn/${normalizedISBN}/${sizeName}.webp`;
+&nbsp;
+      await env.COVER_IMAGES.put(r2Key, webpBuffer, {
+        httpMetadata: {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable'
+        },
+        customMetadata: {
+          uploadedAt: new Date().toISOString(),
+          sourceUrl: sourceUrl,
+          originalSize: metrics.originalSize.toString(),
+          originalType: imageType,
+          quality: WEBP_QUALITY.toString()
+        }
+      });
+&nbsp;
+      return { sizeName, key: r2Key, size: webpBuffer.byteLength };
+    });
+&nbsp;
+    const uploadResults = await Promise.all(uploadPromises);
+    metrics.uploadMs = Date.now() - uploadStart;
+    metrics.totalMs = Date.now() - startTime;
+&nbsp;
+    const totalWebpSize = Object.values(metrics.webpSizes!).reduce((a, b) =&gt; a + b, 0);
+    const compressionRatio = ((1 - totalWebpSize / metrics.originalSize) * 100).toFixed(1);
+&nbsp;
+    console.log(`[jSquash] Processed ${normalizedISBN}: ${metrics.originalSize} → ${totalWebpSize} bytes (${compressionRatio}% smaller, ${metrics.totalMs}ms)`);
+&nbsp;
+    return {
+      status: 'processed',
+      isbn: normalizedISBN,
+      metrics,
+      compression: {
+        originalSize: metrics.originalSize,
+        totalWebpSize,
+        ratio: `${compressionRatio}%`
+      },
+      urls: {
+        large: `/covers/${normalizedISBN}/large`,
+        medium: `/covers/${normalizedISBN}/medium`,
+        small: `/covers/${normalizedISBN}/small`
+      },
+      r2Keys: uploadResults.map(r =&gt; r.key)
+    };
+&nbsp;
+  } catch (error) {
+    metrics.totalMs = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : <span class="branch-1 cbranch-no" title="branch not covered" >String(error);</span>
+    console.error(`[jSquash] Failed to process ${normalizedISBN}:`, errorMessage);
+&nbsp;
+    return {
+      status: 'error',
+      isbn: normalizedISBN,
+      error: errorMessage,
+      metrics
+    };
+  }
+}
+&nbsp;
+/**
+ * Check if processed WebP covers exist for an ISBN
+ */
+export async function coversExist(env: Env, isbn: string): Promise&lt;boolean&gt; {
+  const normalizedISBN = isbn.replace(/[-\s]/g, '');
+&nbsp;
+  // Check for large.webp as indicator
+  const key = `isbn/${normalizedISBN}/large.webp`;
+  const head = await env.COVER_IMAGES.head(key);
+  return head !== null;
+}
+&nbsp;
+/**
+ * Benchmark function for testing
+ * Processes image but cleans up R2 files afterward
+ */
+export async function <span class="fstat-no" title="function not covered" >benchmark(s</span>ourceUrl: string, env: Env): Promise&lt;CoverProcessingResult&gt; {
+  const testISBN = <span class="cstat-no" title="statement not covered" >'benchmark-test';</span>
+  const result = <span class="cstat-no" title="statement not covered" >await processAndStoreCover(testISBN, sourceUrl, env);</span>
+&nbsp;
+  // Clean up test files
+<span class="cstat-no" title="statement not covered" >  if (result.status === 'processed') {</span>
+<span class="cstat-no" title="statement not covered" >    for (const key of result.r2Keys || []) {</span>
+<span class="cstat-no" title="statement not covered" >      await env.COVER_IMAGES.delete(key);</span>
+    }
+  }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  return result;</span>
+}
+&nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
             </div><!-- /wrapper -->
@@ -1155,14 +1440,14 @@ export async function withQuotaGuard&lt;T&gt;(
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
                 at 2025-12-30T20:32:38.299Z
             </div>
-        <script src="../../prettify.js"></script>
+        <script src="../prettify.js"></script>
         <script>
             window.onload = function () {
                 prettyPrint();
             };
         </script>
-        <script src="../../sorter.js"></script>
-        <script src="../../block-navigation.js"></script>
+        <script src="../sorter.js"></script>
+        <script src="../block-navigation.js"></script>
     </body>
 </html>
     
