@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { enrichEdition, enrichWork, enrichAuthor, queueEnrichment, getEnrichmentStatus } from '../enrichment-service.js';
 
 describe('Enrichment Service', () => {
-  let mockSql;
+  let mockSql: any;
+  let mockLogger: any;
 
   beforeEach(() => {
     // Reset mockSql for each test
@@ -13,6 +14,14 @@ describe('Enrichment Service', () => {
       // We can attach properties to this array if needed (like count)
       return Promise.resolve([]);
     });
+
+    // Mock logger
+    mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    };
   });
 
   describe('enrichEdition', () => {
@@ -29,7 +38,7 @@ describe('Enrichment Service', () => {
         .mockResolvedValueOnce([{ isbndb_quality: 0 }]) // existing quality check
         .mockResolvedValueOnce([{ isbn: '9780123456789', was_insert: true, isbndb_quality: 10 }]); // upsert result
 
-      const result = await enrichEdition(mockSql, edition);
+      const result = await enrichEdition(mockSql, edition, mockLogger);
 
       expect(result.action).toBe('created');
       expect(result.isbn).toBe('9780123456789');
@@ -48,7 +57,7 @@ describe('Enrichment Service', () => {
         .mockResolvedValueOnce([{ isbndb_quality: 5 }]) // existing quality
         .mockResolvedValueOnce([{ isbn: '9780123456789', was_insert: false, isbndb_quality: 10 }]); // upsert result
 
-      const result = await enrichEdition(mockSql, edition);
+      const result = await enrichEdition(mockSql, edition, mockLogger);
 
       expect(result.action).toBe('updated');
       expect(result.quality_improvement).toBe(5); // 10 - 5
@@ -62,7 +71,7 @@ describe('Enrichment Service', () => {
 
         mockSql.mockRejectedValue(new Error('DB connection failed'));
 
-        await expect(enrichEdition(mockSql, edition)).rejects.toThrow('Database operation failed: DB connection failed');
+        await expect(enrichEdition(mockSql, edition, mockLogger)).rejects.toThrow('DB connection failed');
         // It should try to log the error
         expect(mockSql).toHaveBeenCalledTimes(2); // The initial fail + the log attempt
     });
@@ -78,7 +87,7 @@ describe('Enrichment Service', () => {
 
       mockSql.mockResolvedValueOnce([{ work_key: '/works/OL123W', was_insert: true }]);
 
-      const result = await enrichWork(mockSql, work);
+      const result = await enrichWork(mockSql, work, mockLogger);
 
       expect(result.action).toBe('created');
       expect(result.work_key).toBe('/works/OL123W');
@@ -93,7 +102,7 @@ describe('Enrichment Service', () => {
 
         mockSql.mockResolvedValueOnce([{ work_key: '/works/OL123W', was_insert: false }]);
 
-        const result = await enrichWork(mockSql, work);
+        const result = await enrichWork(mockSql, work, mockLogger);
 
         expect(result.action).toBe('updated');
     });
