@@ -17,7 +17,9 @@ import coversRoutes from './routes/covers.js';
 import coversLegacyRoutes from './routes/covers-legacy.js';
 import authorsRoutes from './routes/authors.js';
 import booksRoutes from './routes/books.js';
+import quotaRoutes from './routes/quota.js';
 import testRoutes from './routes/test.js';
+import { handleScheduledCoverHarvest } from './routes/harvest.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue } from './services/queue-handlers.js';
@@ -104,6 +106,7 @@ const subRouters = [
   coversLegacyRoutes,
   authorsRoutes,
   booksRoutes,
+  quotaRoutes,
   testRoutes,
 ];
 
@@ -181,6 +184,17 @@ export type AlexandriaAppType = typeof app;
 
 export default {
   fetch: app.fetch,
+
+  // Scheduled cron handler (runs every 5 minutes)
+  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
+    try {
+      console.log('[Cron] Scheduled event triggered:', event.cron);
+      await handleScheduledCoverHarvest(env);
+    } catch (error) {
+      console.error('[Cron] Scheduled handler error:', error);
+      throw error;
+    }
+  },
 
   // Queue consumer handler
   async queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext) {

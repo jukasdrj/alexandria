@@ -237,6 +237,9 @@ curl 'https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offse
 - **POST /api/books/search** - Search ISBNdb by date, title, author, or subject
 - **POST /api/books/enrich-new-releases** - Enrich new releases by date range (synchronous)
 
+**Quota Management:**
+- **GET /api/quota/status** - Get current ISBNdb quota usage and remaining calls
+
 **Testing:**
 - **GET /api/test/isbndb** - Test ISBNdb connectivity
 - **POST /api/test/isbndb/batch** - Test ISBNdb batch endpoint
@@ -309,6 +312,143 @@ curl "https://alexandria.ooheynerds.com/api/test/isbndb/batch" \
 ```
 
 **Documentation**: `docs/ISBNDB-ENDPOINTS.md`
+
+---
+
+## ISBNdb Quota Management (COMPLETE - Dec 30, 2025)
+
+### Overview
+Alexandria implements centralized quota management to coordinate ISBNdb API usage across all harvesting operations, ensuring we stay within the 15,000 daily call limit.
+
+### Quota System Architecture
+
+**Unified Quota Limit**: 13,000 calls/day (15,000 limit - 2,000 safety buffer)
+
+**Storage**: Cloudflare KV (`QUOTA_KV` namespace)
+- Key: `isbndb_daily_calls` - Current day's usage counter
+- Key: `isbndb_quota_last_reset` - Last reset date (YYYY-MM-DD)
+- Auto-resets at midnight UTC
+
+**Quota Manager** (`worker/src/services/quota-manager.ts`):
+- `checkQuota(count, reserve)` - Check/reserve quota atomically
+- `reserveQuota(count)` - Reserve quota for upcoming calls
+- `recordApiCall(count)` - Track completed API calls
+- `getQuotaStatus()` - Get current usage statistics
+- `getSafeBatchSize(max)` - Dynamic batch sizing based on remaining quota
+- `shouldAllowOperation(type, count)` - Operation-specific quota rules
+
+### Quota-Protected Endpoints
+
+All ISBNdb-calling endpoints enforce quota limits:
+
+1. **POST /api/enrich/batch-direct** - Returns 429 if quota exhausted
+2. **POST /api/authors/enrich-bibliography** - Returns 429 if quota exhausted
+3. **POST /api/books/enrich-new-releases** - Returns 429 if quota exhausted
+4. **Cron jobs** (`worker/src/index.ts` scheduled handler) - Skip execution if quota exhausted
+5. **Bulk scripts** (`scripts/bulk-author-harvest.js`) - Check quota before each batch
+
+### Quota Status Endpoint
+
+**GET /api/quota/status** - Real-time quota monitoring
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "used_today": 5432,
+    "remaining": 9568,
+    "limit": 15000,
+    "buffer_remaining": 7568,
+    "can_make_calls": true,
+    "last_reset": "2025-12-30",
+    "next_reset_in_hours": 8.5
+  }
+}
+```
+
+### Operation-Specific Rules
+
+1. **Cron Jobs**: Require 2x buffer headroom (e.g., 100 calls needs 200 buffer remaining)
+2. **Bulk Author**: Limited to 100 calls per operation
+3. **Batch Direct**: No extra restrictions (uses quota as available)
+4. **New Releases**: No extra restrictions
+
+### Quota Enforcement Strategy
+
+**Fail-Closed Security**:
+- KV failures deny quota (conservative approach)
+- Better to miss enrichment than exceed quota
+
+**Graceful Degradation**:
+- Endpoints return 429 (Too Many Requests) when quota exhausted
+- Partial batches processed when quota runs low
+- Scripts checkpoint progress for resumption
+
+**Daily Reset**:
+- Automatic reset at midnight UTC
+- No manual intervention needed
+- Quota does NOT roll over between days
+
+### Monitoring Quota Usage
+
+```bash
+# Check current quota status
+curl https://alexandria.ooheynerds.com/api/quota/status | jq
+
+# Monitor quota in real-time during operations
+watch -n 5 'curl -s https://alexandria.ooheynerds.com/api/quota/status | jq .data'
+
+# View quota usage in Worker logs
+npm run tail | grep -i quota
+```
+
+### Testing
+
+**Unit Tests**: `worker/src/services/__tests__/quota-manager.test.ts` (40 tests)
+- Quota checking, reservation, exhaustion, reset
+- KV failure handling (fail-closed)
+- Concurrent operations
+- Operation-specific rules
+
+**Integration Tests**: `worker/src/__tests__/quota-integration.test.ts` (13 tests)
+- Multi-operation coordination
+- Daily reset automation
+- Error recovery
+- Quota exhaustion scenarios
+
+All 53 tests passing ✅
+
+### Best Practices
+
+1. **Always check quota before ISBNdb operations**:
+   ```typescript
+   const quotaManager = createQuotaManager(env.QUOTA_KV);
+   const result = await quotaManager.checkQuota(estimatedCalls, true);
+   if (!result.allowed) {
+     return c.json({ error: 'Quota exhausted' }, 429);
+   }
+   ```
+
+2. **Use `withQuotaGuard` wrapper for automatic quota handling**:
+   ```typescript
+   const data = await withQuotaGuard(
+     quotaManager,
+     'batch-enrichment',
+     batchSize,
+     () => callISBNdbAPI()
+   );
+   ```
+
+3. **Monitor quota during bulk operations**:
+   - Check quota status before starting
+   - Use `getSafeBatchSize()` for dynamic sizing
+   - Implement checkpoints for resumption
+
+4. **Understand quota vs API calls**:
+   - 1 batch call (1000 ISBNs) = 1 quota call
+   - 1 author bibliography request = 1 quota call (regardless of results)
+   - Queue-based enrichment counts quota when processed, not when queued
 
 ---
 
@@ -913,9 +1053,10 @@ alexandria/
   "r2_buckets": [{
     "binding": "COVER_IMAGES"               // R2: bookstrack-covers-processed
   }],
-  "kv_namespaces": [{
-    "binding": "CACHE"                      // KV for caching
-  }],
+  "kv_namespaces": [
+    { "binding": "CACHE" },                 // KV for caching
+    { "binding": "QUOTA_KV" }               // KV for ISBNdb quota tracking
+  ],
   "secrets_store_secrets": [
     { "binding": "ISBNDB_API_KEY" },        // ISBNdb API key
     { "binding": "GOOGLE_BOOKS_API_KEY" }   // Google Books API key

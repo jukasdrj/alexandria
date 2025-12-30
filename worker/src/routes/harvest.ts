@@ -12,6 +12,7 @@ import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import type { AppBindings, Env } from '../env.js';
 import postgres from 'postgres';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
+import { QuotaManager } from '../services/quota-manager.js';
 
 const app = new OpenAPIHono<AppBindings>();
 
@@ -19,9 +20,6 @@ const app = new OpenAPIHono<AppBindings>();
 // Constants
 // =================================================================================
 
-const DAILY_QUOTA_LIMIT = 12000; // Safety margin under 15k ISBNdb limit
-const QUOTA_KV_KEY = 'isbndb_daily_calls';
-const LAST_RESET_KV_KEY = 'isbndb_quota_last_reset';
 const MIN_YEAR = 2000;
 const MAX_YEAR = new Date().getFullYear();
 
@@ -36,48 +34,6 @@ const QuotaStatusResponseSchema = z.object({
   last_reset: z.string().nullable(),
   next_reset_in_hours: z.number(),
 });
-
-// =================================================================================
-// Helper Functions
-// =================================================================================
-
-/**
- * Get current quota usage, resetting if past midnight UTC
- */
-async function getQuotaStatus(env: Env): Promise<{
-  usedToday: number;
-  remaining: number;
-  lastReset: string | null;
-}> {
-  const now = new Date();
-  const todayUTC = now.toISOString().split('T')[0]; // YYYY-MM-DD
-
-  const lastReset = await env.CACHE.get(LAST_RESET_KV_KEY);
-  let usedToday = parseInt((await env.CACHE.get(QUOTA_KV_KEY)) || '0');
-
-  // Reset if new day
-  if (lastReset !== todayUTC) {
-    usedToday = 0;
-    await env.CACHE.put(QUOTA_KV_KEY, '0');
-    await env.CACHE.put(LAST_RESET_KV_KEY, todayUTC);
-  }
-
-  return {
-    usedToday,
-    remaining: Math.max(0, DAILY_QUOTA_LIMIT - usedToday),
-    lastReset: lastReset || todayUTC,
-  };
-}
-
-/**
- * Increment quota counter
- */
-async function incrementQuota(env: Env, count: number = 1): Promise<number> {
-  const current = parseInt((await env.CACHE.get(QUOTA_KV_KEY)) || '0');
-  const newCount = current + count;
-  await env.CACHE.put(QUOTA_KV_KEY, newCount.toString());
-  return newCount;
-}
 
 // =================================================================================
 // GET /api/harvest/quota - Check quota status
@@ -102,15 +58,15 @@ const quotaStatusRoute = createRoute({
 });
 
 app.openapi(quotaStatusRoute, async (c) => {
-  const quota = await getQuotaStatus(c.env);
-  const hoursUntilReset = 24 - new Date().getUTCHours();
+  const quotaManager = new QuotaManager(c.env.QUOTA_KV);
+  const status = await quotaManager.getQuotaStatus();
 
   return c.json({
-    used_today: quota.usedToday,
-    remaining: quota.remaining,
-    limit: DAILY_QUOTA_LIMIT,
-    last_reset: quota.lastReset,
-    next_reset_in_hours: hoursUntilReset,
+    used_today: status.used_today,
+    remaining: status.remaining,
+    limit: status.limit,
+    last_reset: status.last_reset,
+    next_reset_in_hours: status.next_reset_in_hours,
   });
 });
 
@@ -123,25 +79,36 @@ app.openapi(quotaStatusRoute, async (c) => {
  * Runs every 5 minutes via cron trigger (every-5-minutes pattern)
  *
  * Strategy:
+ * - Initialize QuotaManager to check ISBNdb quota
  * - Queries enriched_editions for OpenLibrary editions missing covers
  * - Filters to 2000-present (past 25 years)
  * - Batches 1000 ISBNs per ISBNdb API call
  * - Updates editions with cover URLs
  * - Queues cover downloads for WebP processing
+ * - Records API calls in quota manager
  */
 export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
   const startTime = Date.now();
   console.log('[CoverHarvest:Scheduled] Starting scheduled harvest');
 
-  // Check quota first
-  const quota = await getQuotaStatus(env);
-  if (quota.remaining <= 0) {
-    console.log('[CoverHarvest:Scheduled] Daily quota exceeded, skipping', {
-      used: quota.usedToday,
-      limit: DAILY_QUOTA_LIMIT,
+  // Initialize QuotaManager
+  const quotaManager = new QuotaManager(env.QUOTA_KV);
+
+  // Check quota before starting
+  const quotaCheck = await quotaManager.shouldAllowOperation('cron', 1);
+  if (!quotaCheck.allowed) {
+    console.warn('[CoverHarvest:Scheduled] Quota check failed, skipping', {
+      reason: quotaCheck.reason,
+      status: quotaCheck.status,
     });
     return;
   }
+
+  console.log('[CoverHarvest:Scheduled] Quota check passed', {
+    used_today: quotaCheck.status.used_today,
+    remaining: quotaCheck.status.buffer_remaining,
+    limit: quotaCheck.status.limit,
+  });
 
   // Create database connection
   const sql = postgres(env.HYPERDRIVE.connectionString, {
@@ -181,6 +148,9 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
 
     // Fetch from ISBNdb (single API call for up to 1000 ISBNs)
     const batchData = await fetchISBNdbBatch(isbns, env);
+
+    // Record API call in quota manager
+    await quotaManager.recordApiCall(1);
 
     let editionsUpdated = 0;
     let coversQueued = 0;
@@ -227,8 +197,8 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
       }
     }
 
-    // Increment quota counter
-    await incrementQuota(env, 1);
+    // Get updated quota status for logging
+    const updatedQuota = await quotaManager.getQuotaStatus();
 
     console.log('[CoverHarvest:Scheduled] Complete', {
       isbns_queried: isbns.length,
@@ -237,6 +207,8 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
       covers_queued: coversQueued,
       no_cover_url: noCoverUrl,
       duration_ms: Date.now() - startTime,
+      quota_used_today: updatedQuota.used_today,
+      quota_remaining: updatedQuota.buffer_remaining,
     });
 
   } catch (error) {

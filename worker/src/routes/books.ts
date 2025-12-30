@@ -17,6 +17,7 @@ import {
 } from '../schemas/response.js';
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
 import { findOrCreateWork, linkWorkToAuthors } from '../services/work-utils.js';
+import { createQuotaManager } from '../services/quota-manager.js';
 
 // =================================================================================
 // Types
@@ -87,6 +88,13 @@ const SearchBooksDataSchema = z.object({
   books: z.array(BookSchema),
 }).openapi('SearchBooksData');
 
+const QuotaStatusSchema = z.object({
+  used_today: z.number(),
+  remaining: z.number(),
+  limit: z.number(),
+  buffer_remaining: z.number(),
+}).openapi('QuotaStatus');
+
 const EnrichNewReleasesDataSchema = z.object({
   start_month: z.string(),
   end_month: z.string(),
@@ -98,6 +106,8 @@ const EnrichNewReleasesDataSchema = z.object({
   failed: z.number(),
   api_calls: z.number(),
   duration_ms: z.number(),
+  quota_status: QuotaStatusSchema.optional().describe('Final quota status'),
+  quota_exhausted: z.boolean().optional().describe('Whether quota was exhausted during operation'),
 }).openapi('EnrichNewReleasesData');
 
 const SearchBooksSuccessSchema = createSuccessSchema(SearchBooksDataSchema, 'SearchBooksSuccess');
@@ -328,6 +338,9 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
 
     const sql = c.get('sql');
 
+    // Initialize quota manager
+    const quotaManager = createQuotaManager(c.env.QUOTA_KV);
+
     // Generate list of months to process
     const months: string[] = [];
     const [startYear, startMo] = start_month.split('-').map(Number);
@@ -346,6 +359,47 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
 
     logger.info('[EnrichNewReleases] Starting', { months, subjects, max_pages_per_month });
 
+    // Calculate total pages needed and pre-check quota
+    const queryCount = subjects && subjects.length > 0
+      ? months.length * subjects.length
+      : months.length;
+    const estimatedApiCalls = queryCount * max_pages_per_month;
+
+    logger.info('[EnrichNewReleases] Quota pre-check', {
+      months: months.length,
+      queries_per_month: queryCount / months.length,
+      total_queries: queryCount,
+      estimated_api_calls: estimatedApiCalls,
+    });
+
+    // Pre-check quota before starting
+    const preCheckResult = await quotaManager.checkQuota(estimatedApiCalls, false);
+    if (!preCheckResult.allowed) {
+      logger.warn('[EnrichNewReleases] Pre-check failed', {
+        reason: preCheckResult.reason,
+        quota_status: preCheckResult.status,
+      });
+      return createSuccessResponse(c, {
+        start_month,
+        end_month,
+        months_processed: 0,
+        total_books_found: 0,
+        already_existed: 0,
+        newly_enriched: 0,
+        covers_queued: 0,
+        failed: 0,
+        api_calls: 0,
+        duration_ms: Date.now() - startTime,
+        quota_status: {
+          used_today: preCheckResult.status.used_today,
+          remaining: preCheckResult.status.remaining,
+          limit: preCheckResult.status.limit,
+          buffer_remaining: preCheckResult.status.buffer_remaining,
+        },
+        quota_exhausted: true,
+      });
+    }
+
     // Results tracking
     const results = {
       start_month,
@@ -358,6 +412,8 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
       failed: 0,
       api_calls: 0,
       duration_ms: 0,
+      quota_status: undefined as any,
+      quota_exhausted: false,
     };
 
     // Process each month
@@ -367,6 +423,26 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
         : [{ query: monthStr, column: 'date_published' as const }];
 
       for (const { query, column } of queries) {
+        // Check quota before starting this month's queries
+        const monthQuotaCheck = await quotaManager.checkQuota(max_pages_per_month, false);
+        if (!monthQuotaCheck.allowed) {
+          logger.warn('[EnrichNewReleases] Quota exhausted mid-operation', {
+            month: monthStr,
+            months_processed: results.months_processed,
+            api_calls: results.api_calls,
+            reason: monthQuotaCheck.reason,
+          });
+          results.duration_ms = Date.now() - startTime;
+          results.quota_status = {
+            used_today: monthQuotaCheck.status.used_today,
+            remaining: monthQuotaCheck.status.remaining,
+            limit: monthQuotaCheck.status.limit,
+            buffer_remaining: monthQuotaCheck.status.buffer_remaining,
+          };
+          results.quota_exhausted = true;
+          return createSuccessResponse(c, results);
+        }
+
         const pageSize = 100;
         let page = 1;
         let hasMore = true;
@@ -380,12 +456,27 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
             headers: { 'Authorization': apiKey, 'Content-Type': 'application/json' },
           });
 
+          // Record API call
           results.api_calls++;
+          await quotaManager.recordApiCall(1);
 
           if (response.status === 404) break;
           if (response.status === 429 || response.status === 403) {
-            logger.warn('[EnrichNewReleases] Quota/rate limit hit', { month: monthStr, api_calls: results.api_calls });
+            logger.warn('[EnrichNewReleases] Quota/rate limit hit by ISBNdb', {
+              month: monthStr,
+              page,
+              api_calls: results.api_calls,
+              status: response.status,
+            });
             results.duration_ms = Date.now() - startTime;
+            const finalStatus = await quotaManager.getQuotaStatus();
+            results.quota_status = {
+              used_today: finalStatus.used_today,
+              remaining: finalStatus.remaining,
+              limit: finalStatus.limit,
+              buffer_remaining: finalStatus.buffer_remaining,
+            };
+            results.quota_exhausted = true;
             return createSuccessResponse(c, results);
           }
           if (!response.ok) break;
@@ -501,7 +592,16 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
 
     results.duration_ms = Date.now() - startTime;
 
-    logger.info('[EnrichNewReleases] Complete', results);
+    // Get final quota status
+    const finalStatus = await quotaManager.getQuotaStatus();
+    results.quota_status = {
+      used_today: finalStatus.used_today,
+      remaining: finalStatus.remaining,
+      limit: finalStatus.limit,
+      buffer_remaining: finalStatus.buffer_remaining,
+    };
+
+    logger.info('[EnrichNewReleases] Complete', { ...results, quota_status: finalStatus });
 
     return createSuccessResponse(c, results);
   } catch (error) {

@@ -18,6 +18,7 @@ import {
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
 import { fetchWikidataMultipleBatches } from '../../services/wikidata-client.js';
 import { findOrCreateWork, linkWorkToAuthors } from '../services/work-utils.js';
+import { createQuotaManager } from '../services/quota-manager.js';
 
 // =================================================================================
 // ISBNdb Types
@@ -560,10 +561,13 @@ app.openapi(enrichBibliographyRoute, async (c) => {
       });
     }
 
-    const sql = c.get('sql');
+    // Initialize QuotaManager
+    const quotaManager = createQuotaManager(c.env.QUOTA_KV);
     const pageSize = 100;
+    const sql = c.get('sql');
+    const logger = c.get('logger');
 
-    // Track results
+    // Track results (including quota status)
     const results = {
       author: author_name,
       books_found: 0,
@@ -572,10 +576,30 @@ app.openapi(enrichBibliographyRoute, async (c) => {
       covers_queued: 0,
       failed: 0,
       pages_fetched: 0,
-      api_calls: 0,  // Track ISBNdb API calls
+      api_calls: 0,
+      quota_status: null as any, // Will be populated later
+      quota_exhausted: false,
       errors: [] as Array<{ isbn: string; error: string }>,
       duration_ms: 0
     };
+
+    // Estimate how many pages we might need (max 100 pages for ISBNdb, 10,000 results)
+    const estimatedMaxPages = Math.min(max_pages, 100);
+
+    // Pre-check: Can we do at least one page?
+    logger?.info('[EnrichBibliography] Checking quota for author bibliography fetch', { author_name, estimated_max_pages: estimatedMaxPages });
+    const initialQuotaCheck = await quotaManager.checkQuota(1, false);
+
+    if (!initialQuotaCheck.allowed) {
+      results.quota_status = initialQuotaCheck.status;
+      logger?.warn('[EnrichBibliography] Quota exhausted before starting', { author_name, reason: initialQuotaCheck.reason });
+      return c.json({
+        ...results,
+        error: 'ISBNdb quota exhausted',
+        quota_exhausted: true,
+        message: initialQuotaCheck.reason
+      }, 429);
+    }
 
     // Collect all books from ISBNdb author endpoint (with full metadata!)
     const allBooks: Array<{
@@ -597,8 +621,27 @@ app.openapi(enrichBibliographyRoute, async (c) => {
 
     let page = 1;
     let hasMore = true;
+    let quotaExhausted = false;
 
-    while (hasMore && page <= max_pages) {
+    while (hasMore && page <= max_pages && !quotaExhausted) {
+      // Check quota BEFORE each API call
+      const quotaCheck = await quotaManager.checkQuota(1, false);
+
+      if (!quotaCheck.allowed) {
+        logger?.warn('[EnrichBibliography] Quota exhausted mid-operation', {
+          author_name,
+          page,
+          books_collected: allBooks.length,
+          reason: quotaCheck.reason
+        });
+        results.quota_status = quotaCheck.status;
+        results.quota_exhausted = true;
+        quotaExhausted = true;
+        // Continue with partial results
+        break;
+      }
+
+      // Make ISBNdb API call
       const response = await fetch(
         `https://api.premium.isbndb.com/author/${encodeURIComponent(author_name)}?page=${page}&pageSize=${pageSize}`,
         {
@@ -609,18 +652,33 @@ app.openapi(enrichBibliographyRoute, async (c) => {
         }
       );
 
-      results.api_calls++;
+      // Reserve quota for this call (using checkQuota with reserveQuota=true)
+      const quotaReserve = await quotaManager.checkQuota(1, true);
+      if (quotaReserve.allowed) {
+        results.api_calls++;
+      }
 
       if (response.status === 404) {
+        logger?.info('[EnrichBibliography] Author not found on ISBNdb', { author_name });
         break;
       }
 
       if (response.status === 429) {
-        return c.json({ error: 'Rate limited by ISBNdb', partial_results: results }, 429);
+        logger?.error('[EnrichBibliography] Rate limited by ISBNdb', { author_name, page });
+        results.quota_status = await quotaManager.getQuotaStatus();
+        return c.json({
+          error: 'Rate limited by ISBNdb',
+          partial_results: results
+        }, 429);
       }
 
       if (!response.ok) {
-        return c.json({ error: `ISBNdb API error: ${response.status}`, partial_results: results }, 500);
+        logger?.error('[EnrichBibliography] ISBNdb API error', { author_name, page, status: response.status });
+        results.quota_status = await quotaManager.getQuotaStatus();
+        return c.json({
+          error: `ISBNdb API error: ${response.status}`,
+          partial_results: results
+        }, 500);
       }
 
       const data = await response.json() as ISBNdbAuthorResponse;
@@ -654,21 +712,35 @@ app.openapi(enrichBibliographyRoute, async (c) => {
       const total = data.total || 0;
       hasMore = booksInResponse === pageSize || (total > 0 && allBooks.length < total);
 
+      logger?.debug('[EnrichBibliography] Page fetched', {
+        author_name,
+        page,
+        books_in_page: booksInResponse,
+        total_collected: allBooks.length,
+        has_more: hasMore
+      });
+
       page++;
 
-      // Rate limit between pagination requests (ISBNdb Premium: 3 req/sec)
-      if (hasMore && page <= max_pages) {
+      // Rate limit between pagination requests (ISBNdb Premium: 3 req/sec = 350ms delay)
+      if (hasMore && page <= max_pages && !quotaExhausted) {
         await new Promise(resolve => setTimeout(resolve, 350));
       }
     }
 
     results.books_found = allBooks.length;
-    c.get('logger')?.info('[EnrichBibliography] Found books', { books_found: allBooks.length, author_name, api_calls: results.api_calls });
+    logger?.info('[EnrichBibliography] Found books', {
+      author_name,
+      books_found: allBooks.length,
+      api_calls: results.api_calls,
+      quota_exhausted: quotaExhausted
+    });
 
     if (allBooks.length === 0) {
       // Cache empty result to avoid repeated lookups
       await c.env.CACHE.put(cacheKey, JSON.stringify(results), { expirationTtl: 86400 });
       results.duration_ms = Date.now() - startTime;
+      results.quota_status = await quotaManager.getQuotaStatus();
       return c.json(results);
     }
 
@@ -685,7 +757,11 @@ app.openapi(enrichBibliographyRoute, async (c) => {
       results.already_existed = existingSet.size;
 
       isbnsToEnrich = allBooks.filter(b => !existingSet.has(b.isbn));
-      c.get('logger')?.info('[EnrichBibliography] Existing vs new', { already_existed: existingSet.size, to_enrich: isbnsToEnrich.length });
+      logger?.info('[EnrichBibliography] Existing vs new', {
+        author_name,
+        already_existed: existingSet.size,
+        to_enrich: isbnsToEnrich.length
+      });
     }
 
     // DIRECTLY enrich from the data we already have (NO re-fetch from ISBNdb!)
@@ -708,7 +784,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
             description: book.synopsis,
             subject_tags: book.subjects,
             primary_provider: 'isbndb',
-          }, c.get('logger'));
+          }, logger);
         }
 
         // ALWAYS link work to authors (idempotent via ON CONFLICT DO NOTHING)
@@ -742,7 +818,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
           binding: book.binding,
           dewey_decimal: book.dewey_decimal,
           related_isbns: book.related,
-        }, c.get('logger'), c.env);
+        }, logger, c.env);
 
         results.enriched++;
 
@@ -760,7 +836,10 @@ app.openapi(enrichBibliographyRoute, async (c) => {
             results.covers_queued++;
           } catch (queueError) {
             // Don't fail enrichment if cover queue fails
-            c.get('logger')?.warn('[EnrichBibliography] Cover queue failed', { isbn: book.isbn, error: queueError });
+            logger?.warn('[EnrichBibliography] Cover queue failed', {
+              isbn: book.isbn,
+              error: queueError instanceof Error ? queueError.message : String(queueError)
+            });
           }
         }
 
@@ -772,16 +851,18 @@ app.openapi(enrichBibliographyRoute, async (c) => {
     }
 
     results.duration_ms = Date.now() - startTime;
+    results.quota_status = await quotaManager.getQuotaStatus();
 
     // Cache successful result (24 hours)
     const cacheResult = { ...results, errors: [] }; // Don't cache individual errors
     await c.env.CACHE.put(cacheKey, JSON.stringify(cacheResult), { expirationTtl: 86400 });
 
-    c.get('logger')?.info('[EnrichBibliography] Complete', {
+    logger?.info('[EnrichBibliography] Complete', {
       author_name,
       enriched: results.enriched,
       already_existed: results.already_existed,
       failed: results.failed,
+      quota_exhausted: results.quota_exhausted,
       duration_ms: results.duration_ms
     });
 
@@ -793,6 +874,7 @@ app.openapi(enrichBibliographyRoute, async (c) => {
     return c.json({
       error: 'Failed to enrich author bibliography',
       message,
+      quota_status: null,
       duration_ms: Date.now() - startTime
     }, 500);
   }

@@ -10,7 +10,15 @@
  * - Rate limit: 3 req/sec with 350ms delay between requests
  * - Monitor queue processing to stay under 2-hour image expiry
  *
+ * Features:
+ * - Quota coordination via Alexandria Worker's /api/quota/status endpoint
+ * - Checkpoint saving for resume capability
+ * - Progress logging with quota status every 100 authors
+ *
  * Usage:
+ *   # Check current quota status only (no processing)
+ *   node bulk-author-harvest.js --check-quota
+ *
  *   # Dry run - query for top authors, don't call ISBNdb
  *   node bulk-author-harvest.js --dry-run --tier top-1000
  *
@@ -52,6 +60,51 @@ const TIERS = {
 };
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Fetch quota status from Alexandria Worker
+ */
+async function getQuotaStatus() {
+  try {
+    const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/quota/status`);
+
+    if (!response.ok) {
+      console.error(`Failed to fetch quota status: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    return data.data || null; // Response is wrapped in success envelope
+  } catch (error) {
+    console.error(`Error fetching quota status: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Format quota status for display
+ */
+function formatQuotaStatus(quota) {
+  if (!quota) return 'Unable to fetch quota status';
+
+  const used = quota.used || 0;
+  const remaining = quota.remaining || 0;
+  const safetyRemaining = quota.safety_remaining || 0;
+  const limit = quota.daily_limit || 15000;
+  const percentageUsed = quota.percentage_used || 0;
+  const canMakeCalls = quota.can_make_calls !== false;
+  const resetAt = quota.reset_at ? new Date(quota.reset_at).toLocaleString() : 'Unknown';
+
+  const status = canMakeCalls ? '✓ CALLS AVAILABLE' : '✗ QUOTA EXHAUSTED';
+
+  return `
+  Status: ${status}
+  Used: ${used.toLocaleString()} / ${limit.toLocaleString()} calls
+  Remaining: ${remaining.toLocaleString()} calls
+  Safety Threshold: ${safetyRemaining.toLocaleString()} calls available
+  Usage: ${percentageUsed}% of safety limit
+  Reset Time: ${resetAt}`;
+}
 
 /**
  * Query authors sorted by work count via Alexandria API
@@ -158,10 +211,21 @@ async function main() {
       resume: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
       'max-pages': { type: 'string', default: '1' },
+      'check-quota': { type: 'boolean', default: false },
     }
   });
 
   console.log('\n=== Alexandria Bulk Author Harvesting ===\n');
+
+  // Check quota mode - show status and exit
+  if (args['check-quota']) {
+    console.log('Checking ISBNdb API quota status...\n');
+    const quota = await getQuotaStatus();
+    console.log(formatQuotaStatus(quota));
+    console.log('');
+    process.exit(quota?.can_make_calls ? 0 : 1);
+  }
+
   console.log('Strategy: Work count prioritization (proxy for popularity)');
   console.log('Approach: Breadth-first (1 page per author)');
   console.log(`Tier: ${args.tier}`);
@@ -217,6 +281,18 @@ async function main() {
     return;
   }
 
+  // Check quota before starting
+  console.log('\nChecking ISBNdb API quota...');
+  const initialQuota = await getQuotaStatus();
+  if (!initialQuota?.can_make_calls) {
+    console.log('\nQuota Status:');
+    console.log(formatQuotaStatus(initialQuota));
+    console.log('\nQuota exhausted or unavailable. Cannot start processing.');
+    console.log('Retry tomorrow after quota resets.');
+    process.exit(2); // Exit code 2 = quota exhaustion
+  }
+  console.log(formatQuotaStatus(initialQuota));
+
   // Load checkpoint
   const checkpoint = args.resume ? loadCheckpoint() : {
     processed: [],
@@ -240,7 +316,6 @@ async function main() {
 
   // Process authors
   const maxPages = parseInt(args['max-pages']);
-  let apiCallsToday = checkpoint.processed.length;
 
   console.log('\nStarting enrichment...\n');
 
@@ -248,11 +323,24 @@ async function main() {
     const author = remaining[i];
     const progress = `[${i + 1}/${remaining.length}]`;
 
-    // Check daily quota
-    if (apiCallsToday >= CONFIG.DAILY_QUOTA) {
-      console.log(`\n⚠️  Daily quota reached (${CONFIG.DAILY_QUOTA} calls). Stopping.`);
-      console.log('Resume tomorrow with: node bulk-author-harvest.js --resume');
-      break;
+    // Check quota every 100 authors (or at the start)
+    if (i > 0 && i % 100 === 0) {
+      console.log(`\n--- Quota check at author ${i + 1} ---`);
+      const currentQuota = await getQuotaStatus();
+      console.log(formatQuotaStatus(currentQuota));
+
+      if (!currentQuota?.can_make_calls) {
+        console.log(`\n⚠️  ISBNdb quota exhausted! Stopping after ${i} authors.`);
+        console.log('Resume tomorrow with: node bulk-author-harvest.js --resume');
+
+        // Save checkpoint before exiting
+        saveCheckpoint(checkpoint);
+        console.log(`Checkpoint saved to: ${CONFIG.CHECKPOINT_FILE}`);
+
+        process.exit(2); // Exit code 2 = quota exhaustion
+      }
+
+      console.log(`--- Continuing with ${remaining.length - i} remaining authors ---\n`);
     }
 
     try {
@@ -261,9 +349,14 @@ async function main() {
       const result = await enrichAuthorBibliography(author.author_name, maxPages);
 
       if (result.error === 'quota_exhausted') {
-        console.log(`\n⚠️  ISBNdb quota exhausted! Stopping.`);
+        console.log(`\n⚠️  ISBNdb quota exhausted! Stopping after ${i} authors.`);
         console.log('Resume tomorrow with: node bulk-author-harvest.js --resume');
-        break;
+
+        // Save checkpoint before exiting
+        saveCheckpoint(checkpoint);
+        console.log(`Checkpoint saved to: ${CONFIG.CHECKPOINT_FILE}`);
+
+        process.exit(2); // Exit code 2 = quota exhaustion
       }
 
       if (result.error) {
@@ -279,8 +372,6 @@ async function main() {
         checkpoint.stats.covers_queued += result.covers_queued || 0;
         if (result.cached) checkpoint.stats.cache_hits++;
       }
-
-      apiCallsToday++;
 
       // Save checkpoint every 10 authors
       if (i % 10 === 0) {

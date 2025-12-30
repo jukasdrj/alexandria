@@ -11,6 +11,7 @@ export interface Env {
 
   // KV bindings
   CACHE: KVNamespace;
+  QUOTA_KV: KVNamespace;
 
   // Analytics Engine bindings
   ANALYTICS: AnalyticsEngineDataset;

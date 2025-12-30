@@ -65,6 +65,11 @@
     {
       "binding": "CACHE",
       "id": "dd278b63596b4f96828c7db4b3d9adf1"
+    },
+    {
+      "binding": "QUOTA_KV",
+      "id": "5f36534e90e443999c7cc47f7ce9cc01",
+      "preview_id": "1f347d2a35ab43668bcf0de6cdc212a2"
     }
   ],
 

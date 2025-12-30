@@ -511,6 +511,50 @@ export const BatchDirectResultSchema = z
       description: 'Total duration in milliseconds',
       example: 2340,
     }),
+    quota: z
+      .object({
+        used_today: z.number().int().openapi({
+          description: 'ISBNdb API calls used today',
+          example: 150,
+        }),
+        remaining: z.number().int().openapi({
+          description: 'ISBNdb API calls remaining in quota',
+          example: 14850,
+        }),
+        limit: z.number().int().openapi({
+          description: 'Daily quota limit',
+          example: 15000,
+        }),
+        last_reset: z.string().openapi({
+          description: 'Date of last quota reset (YYYY-MM-DD)',
+          example: '2025-12-30',
+        }),
+        next_reset_in_hours: z.number().openapi({
+          description: 'Hours until next quota reset',
+          example: 12.5,
+        }),
+        buffer_remaining: z.number().int().openapi({
+          description: 'Calls remaining in safety buffer (limit - 2000)',
+          example: 12850,
+        }),
+        can_make_calls: z.boolean().openapi({
+          description: 'Whether quota is available for more calls',
+          example: true,
+        }),
+      })
+      .optional()
+      .openapi({
+        description: 'ISBNdb quota status after this operation',
+        example: {
+          used_today: 150,
+          remaining: 14850,
+          limit: 15000,
+          last_reset: '2025-12-30',
+          next_reset_in_hours: 12.5,
+          buffer_remaining: 12850,
+          can_make_calls: true,
+        },
+      }),
   })
   .openapi('BatchDirectResult');
 

@@ -45,46 +45,56 @@ export class QuotaManager {
    * @returns QuotaCheckResult with availability and status
    */
   async checkQuota(requestCount: number = 1, reserveQuota: boolean = false): Promise<QuotaCheckResult> {
-    const status = await this.getQuotaStatus();
+    try {
+      const status = await this.getQuotaStatus();
 
-    // Check if we have enough quota remaining
-    const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
-    const wouldExceedLimit = (status.used_today + requestCount) > effectiveLimit;
+      // Check if we have enough quota remaining
+      const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
+      const wouldExceedLimit = (status.used_today + requestCount) > effectiveLimit;
 
-    if (wouldExceedLimit) {
-      return {
-        allowed: false,
-        status,
-        reason: `Request would exceed daily limit. Need ${requestCount} calls, but only ${status.buffer_remaining} remaining.`
-      };
-    }
+      if (wouldExceedLimit) {
+        return {
+          allowed: false,
+          status,
+          reason: `Request would exceed daily limit. Need ${requestCount} calls, but only ${status.buffer_remaining} remaining.`
+        };
+      }
 
-    // If we're just checking (not reserving), return success
-    if (!reserveQuota) {
+      // If we're just checking (not reserving), return success
+      if (!reserveQuota) {
+        return {
+          allowed: true,
+          status
+        };
+      }
+
+      // Reserve the quota atomically
+      const success = await this.reserveQuota(requestCount);
+      if (!success) {
+        // Race condition: quota was exhausted between check and reserve
+        const updatedStatus = await this.getQuotaStatus();
+        return {
+          allowed: false,
+          status: updatedStatus,
+          reason: 'Quota was exhausted by concurrent request'
+        };
+      }
+
+      // Return updated status after reservation
+      const finalStatus = await this.getQuotaStatus();
       return {
         allowed: true,
-        status
+        status: finalStatus
       };
-    }
-
-    // Reserve the quota atomically
-    const success = await this.reserveQuota(requestCount);
-    if (!success) {
-      // Race condition: quota was exhausted between check and reserve
-      const updatedStatus = await this.getQuotaStatus();
+    } catch (error) {
+      console.error('QuotaManager.checkQuota error:', error);
+      // On KV failure, fail closed (deny quota) to be conservative
       return {
         allowed: false,
-        status: updatedStatus,
-        reason: 'Quota was exhausted by concurrent request'
+        status: this.getFallbackStatus(),
+        reason: `Quota check failed due to KV error: ${error instanceof Error ? error.message : 'Unknown error'}`
       };
     }
-
-    // Return updated status after reservation
-    const finalStatus = await this.getQuotaStatus();
-    return {
-      allowed: true,
-      status: finalStatus
-    };
   }
 
   /**
@@ -92,25 +102,31 @@ export class QuotaManager {
    * Note: This uses optimistic concurrency - there's a small race condition window,
    * but it's mitigated by the 2K safety buffer (13K limit vs 15K actual quota).
    * @param requestCount Number of API calls to reserve
-   * @returns true if successfully reserved, false if quota exhausted
+   * @returns true if successfully reserved, false if quota exhausted or KV error
    */
   async reserveQuota(requestCount: number): Promise<boolean> {
-    await this.ensureDailyReset();
+    try {
+      await this.ensureDailyReset();
 
-    // Get current usage
-    const currentUsage = await this.kv.get<number>(this.QUOTA_KEY, 'json') || 0;
-    const newUsage = currentUsage + requestCount;
-    const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
+      // Get current usage
+      const currentUsage = await this.kv.get<number>(this.QUOTA_KEY, 'json') || 0;
+      const newUsage = currentUsage + requestCount;
+      const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
 
-    if (newUsage > effectiveLimit) {
+      if (newUsage > effectiveLimit) {
+        return false;
+      }
+
+      // Update counter (single atomic write)
+      // Race condition is possible but mitigated by safety buffer
+      await this.kv.put(this.QUOTA_KEY, JSON.stringify(newUsage));
+
+      return true;
+    } catch (error) {
+      console.error('QuotaManager.reserveQuota error:', error);
+      // On KV failure, fail closed (deny quota)
       return false;
     }
-
-    // Update counter (single atomic write)
-    // Race condition is possible but mitigated by safety buffer
-    await this.kv.put(this.QUOTA_KEY, JSON.stringify(newUsage));
-
-    return true;
   }
 
   /**
@@ -120,38 +136,50 @@ export class QuotaManager {
    * This is acceptable since we have a safety buffer.
    */
   private async getTotalUsage(): Promise<number> {
-    // Read main counter for fast reads (updated on each reserveQuota call)
-    const currentUsage = await this.kv.get<number>(this.QUOTA_KEY, 'json') || 0;
-    return currentUsage;
+    try {
+      // Read main counter for fast reads (updated on each reserveQuota call)
+      const currentUsage = await this.kv.get<number>(this.QUOTA_KEY, 'json') || 0;
+      return currentUsage;
+    } catch (error) {
+      console.error('QuotaManager.getTotalUsage error:', error);
+      // On KV failure, return 0 to be conservative (will show full quota available)
+      return 0;
+    }
   }
 
   /**
    * Get current quota status without modifying it
    */
   async getQuotaStatus(): Promise<QuotaStatus> {
-    await this.ensureDailyReset();
+    try {
+      await this.ensureDailyReset();
 
-    // Use aggregated total from shards for most accurate count
-    const usedToday = await this.getTotalUsage();
-    const remaining = Math.max(0, this.DAILY_LIMIT - usedToday);
-    const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
-    const bufferRemaining = Math.max(0, effectiveLimit - usedToday);
+      // Use aggregated total from shards for most accurate count
+      const usedToday = await this.getTotalUsage();
+      const remaining = Math.max(0, this.DAILY_LIMIT - usedToday);
+      const effectiveLimit = this.DAILY_LIMIT - this.SAFETY_BUFFER;
+      const bufferRemaining = Math.max(0, effectiveLimit - usedToday);
 
-    const now = new Date();
-    const nextMidnight = new Date(now);
-    nextMidnight.setUTCDate(nextMidnight.getUTCDate() + 1);
-    nextMidnight.setUTCHours(0, 0, 0, 0);
-    const hoursToReset = (nextMidnight.getTime() - now.getTime()) / (1000 * 60 * 60);
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setUTCDate(nextMidnight.getUTCDate() + 1);
+      nextMidnight.setUTCHours(0, 0, 0, 0);
+      const hoursToReset = (nextMidnight.getTime() - now.getTime()) / (1000 * 60 * 60);
 
-    return {
-      used_today: usedToday,
-      remaining,
-      limit: this.DAILY_LIMIT,
-      last_reset: await this.getLastResetDate(),
-      next_reset_in_hours: Math.round(hoursToReset * 100) / 100,
-      buffer_remaining: bufferRemaining,
-      can_make_calls: bufferRemaining > 0
-    };
+      return {
+        used_today: usedToday,
+        remaining,
+        limit: this.DAILY_LIMIT,
+        last_reset: await this.getLastResetDate(),
+        next_reset_in_hours: Math.round(hoursToReset * 100) / 100,
+        buffer_remaining: bufferRemaining,
+        can_make_calls: bufferRemaining > 0
+      };
+    } catch (error) {
+      console.error('QuotaManager.getQuotaStatus error:', error);
+      // Return fallback status on KV failure
+      return this.getFallbackStatus();
+    }
   }
 
   /**
@@ -159,11 +187,16 @@ export class QuotaManager {
    * Use this when you make ISBNdb calls outside the reservation system
    */
   async recordApiCall(callCount: number = 1): Promise<void> {
-    await this.ensureDailyReset();
+    try {
+      await this.ensureDailyReset();
 
-    const currentUsage = await this.kv.get<number>(this.QUOTA_KEY, 'json') || 0;
-    const newUsage = currentUsage + callCount;
-    await this.kv.put(this.QUOTA_KEY, JSON.stringify(newUsage));
+      const currentUsage = await this.kv.get<number>(this.QUOTA_KEY, 'json') || 0;
+      const newUsage = currentUsage + callCount;
+      await this.kv.put(this.QUOTA_KEY, JSON.stringify(newUsage));
+    } catch (error) {
+      console.error('QuotaManager.recordApiCall error:', error);
+      // Log but don't throw - we don't want tracking failures to break API calls
+    }
   }
 
   /**
@@ -178,22 +211,55 @@ export class QuotaManager {
    * Check if quota should be reset for new day and reset if needed
    */
   private async ensureDailyReset(): Promise<void> {
-    const lastReset = await this.getLastResetDate();
-    const today = this.getTodayDateString();
+    try {
+      const lastReset = await this.getLastResetDate();
+      const today = this.getTodayDateString();
 
-    if (lastReset !== today) {
-      // New day - reset quota
-      await this.kv.put(this.QUOTA_KEY, JSON.stringify(0));
-      await this.kv.put(this.RESET_KEY, today);
+      if (lastReset !== today) {
+        // New day - reset quota
+        await this.kv.put(this.QUOTA_KEY, JSON.stringify(0));
+        await this.kv.put(this.RESET_KEY, today);
+      }
+    } catch (error) {
+      console.error('QuotaManager.ensureDailyReset error:', error);
+      // Continue without resetting - will retry on next call
     }
   }
 
   private async getLastResetDate(): Promise<string> {
-    return await this.kv.get(this.RESET_KEY) || this.getTodayDateString();
+    try {
+      return await this.kv.get(this.RESET_KEY) || this.getTodayDateString();
+    } catch (error) {
+      console.error('QuotaManager.getLastResetDate error:', error);
+      // Return today's date as fallback
+      return this.getTodayDateString();
+    }
   }
 
   private getTodayDateString(): string {
     return new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  }
+
+  /**
+   * Get fallback status when KV is unavailable
+   * Returns conservative values to prevent quota exhaustion
+   */
+  private getFallbackStatus(): QuotaStatus {
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setUTCDate(nextMidnight.getUTCDate() + 1);
+    nextMidnight.setUTCHours(0, 0, 0, 0);
+    const hoursToReset = (nextMidnight.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+    return {
+      used_today: 0,
+      remaining: this.DAILY_LIMIT,
+      limit: this.DAILY_LIMIT,
+      last_reset: this.getTodayDateString(),
+      next_reset_in_hours: Math.round(hoursToReset * 100) / 100,
+      buffer_remaining: 0, // Fail closed: report 0 buffer remaining on KV failure
+      can_make_calls: false // Fail closed: deny calls on KV failure
+    };
   }
 
   /**

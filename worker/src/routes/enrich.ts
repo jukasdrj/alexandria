@@ -33,6 +33,7 @@ import {
 import { normalizeISBN, validateISBNBatch } from '../../lib/isbn-utils.js';
 import { enrichEdition, enrichWork } from '../services/enrichment-service.js';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
+import { createQuotaManager } from '../services/quota-manager.js';
 
 // Create enrichment router
 export const enrichRoutes = new OpenAPIHono<AppBindings>();
@@ -486,6 +487,32 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
       source,
     });
 
+    // Initialize QuotaManager and check quota availability
+    const quotaManager = createQuotaManager(c.env.QUOTA_KV);
+    const quotaCheck = await quotaManager.checkQuota(1, true); // 1 call for batch (regardless of ISBN count)
+
+    if (!quotaCheck.allowed) {
+      logger.warn('Batch direct enrichment blocked by quota limit', {
+        reason: quotaCheck.reason,
+        status: quotaCheck.status,
+      });
+      return c.json(
+        {
+          success: false,
+          error: 'Quota exhausted',
+          message: quotaCheck.reason,
+          quota: quotaCheck.status,
+        },
+        429
+      );
+    }
+
+    logger.info('Quota reserved for batch direct enrichment', {
+      used: quotaCheck.status.used_today,
+      remaining: quotaCheck.status.remaining,
+      buffer_remaining: quotaCheck.status.buffer_remaining,
+    });
+
     // Fetch all ISBNs in a single ISBNdb API call (10x efficiency!)
     const batchStartTime = Date.now();
     const enrichmentData = await fetchISBNdbBatch(normalizedISBNs, c.env);
@@ -511,6 +538,7 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
       errors: [] as Array<{ isbn: string; error: string }>,
       api_calls: 1, // Single batch call!
       duration_ms: 0,
+      quota: quotaCheck.status,
     };
 
     for (const [isbn, externalData] of enrichmentData) {
