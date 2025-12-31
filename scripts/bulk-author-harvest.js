@@ -85,10 +85,17 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  * Fetch quota status from Alexandria Worker
  */
 async function getQuotaStatus() {
+  // Add 10 second timeout
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
   try {
     const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/quota/status`, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      signal: controller.signal
     });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       console.error(`Failed to fetch quota status: ${response.status}`);
@@ -98,6 +105,11 @@ async function getQuotaStatus() {
     const data = await response.json();
     return data.data || null; // Response is wrapped in success envelope
   } catch (error) {
+    clearTimeout(timeout);
+    if (error.name === 'AbortError') {
+      console.error('Quota status request timeout after 10 seconds');
+      return null;
+    }
     console.error(`Error fetching quota status: ${error.message}`);
     return null;
   }
@@ -135,47 +147,77 @@ function formatQuotaStatus(quota) {
 async function getTopAuthors(offset, limit) {
   console.log(`Querying authors by work count (offset: ${offset}, limit: ${limit})...`);
 
-  const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/top?offset=${offset}&limit=${limit}`, {
-    headers: getAuthHeaders()
-  });
+  // Add 30 second timeout
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(`API error: ${error.error || error.message}`);
+  try {
+    const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/top?offset=${offset}&limit=${limit}`, {
+      headers: getAuthHeaders(),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(`API error: ${error.error || error.message}`);
+    }
+
+    const data = await response.json();
+    console.log(`Query completed in ${data.query_duration_ms}ms`);
+    return data.authors || [];
+  } catch (error) {
+    clearTimeout(timeout);
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout after 30 seconds');
+    }
+    throw error;
   }
-
-  const data = await response.json();
-  console.log(`Query completed in ${data.query_duration_ms}ms`);
-  return data.authors || [];
 }
 
 /**
  * Enrich author bibliography via Alexandria API
  */
 async function enrichAuthorBibliography(authorName, maxPages = 1) {
-  const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/enrich-bibliography`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({
-      author_name: authorName,
-      max_pages: maxPages
-    })
-  });
+  // Add 60 second timeout to prevent hanging
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
 
-  if (response.status === 429) {
-    return { error: 'rate_limited', books_found: 0 };
+  try {
+    const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/enrich-bibliography`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        author_name: authorName,
+        max_pages: maxPages
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+
+    if (response.status === 429) {
+      return { error: 'rate_limited', books_found: 0 };
+    }
+
+    if (response.status === 403) {
+      return { error: 'quota_exhausted', books_found: 0 };
+    }
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      return { error: error.error || error.message, books_found: 0 };
+    }
+
+    return await response.json();
+  } catch (error) {
+    clearTimeout(timeout);
+    if (error.name === 'AbortError') {
+      return { error: 'timeout', books_found: 0 };
+    }
+    throw error;
   }
-
-  if (response.status === 403) {
-    return { error: 'quota_exhausted', books_found: 0 };
-  }
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    return { error: error.error || error.message, books_found: 0 };
-  }
-
-  return await response.json();
 }
 
 /**
