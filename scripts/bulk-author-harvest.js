@@ -48,7 +48,27 @@ const CONFIG = {
   DELAY_MS: 1500, // 1.5s between authors (safe for 3 req/sec)
   MAX_PAGES: 1, // Breadth-first: 1 page = 100 books per author
   DAILY_QUOTA: 15000, // ISBNdb Premium daily limit
+  // Cloudflare Access Service Token (from environment or empty)
+  CF_ACCESS_CLIENT_ID: process.env.CF_ACCESS_CLIENT_ID || '',
+  CF_ACCESS_CLIENT_SECRET: process.env.CF_ACCESS_CLIENT_SECRET || '',
 };
+
+/**
+ * Get headers for Alexandria API requests with Cloudflare Access authentication
+ */
+function getAuthHeaders() {
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  // Add Cloudflare Access service token if available
+  if (CONFIG.CF_ACCESS_CLIENT_ID && CONFIG.CF_ACCESS_CLIENT_SECRET) {
+    headers['CF-Access-Client-Id'] = CONFIG.CF_ACCESS_CLIENT_ID;
+    headers['CF-Access-Client-Secret'] = CONFIG.CF_ACCESS_CLIENT_SECRET;
+  }
+
+  return headers;
+}
 
 // Tier definitions based on edition count
 const TIERS = {
@@ -66,7 +86,9 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  */
 async function getQuotaStatus() {
   try {
-    const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/quota/status`);
+    const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/quota/status`, {
+      headers: getAuthHeaders()
+    });
 
     if (!response.ok) {
       console.error(`Failed to fetch quota status: ${response.status}`);
@@ -113,7 +135,9 @@ function formatQuotaStatus(quota) {
 async function getTopAuthors(offset, limit) {
   console.log(`Querying authors by work count (offset: ${offset}, limit: ${limit})...`);
 
-  const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/top?offset=${offset}&limit=${limit}`);
+  const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/top?offset=${offset}&limit=${limit}`, {
+    headers: getAuthHeaders()
+  });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Unknown error' }));
@@ -131,7 +155,7 @@ async function getTopAuthors(offset, limit) {
 async function enrichAuthorBibliography(authorName, maxPages = 1) {
   const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/enrich-bibliography`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       author_name: authorName,
       max_pages: maxPages
@@ -190,7 +214,9 @@ function saveCheckpoint(checkpoint) {
  */
 async function checkQueueStatus() {
   try {
-    const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/queue/status`);
+    const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/queue/status`, {
+      headers: getAuthHeaders()
+    });
     if (response.ok) {
       return await response.json();
     }
