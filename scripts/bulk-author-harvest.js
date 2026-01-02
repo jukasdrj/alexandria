@@ -45,7 +45,7 @@ import { dirname } from 'node:path';
 const CONFIG = {
   ALEXANDRIA_URL: 'https://alexandria.ooheynerds.com',
   CHECKPOINT_FILE: 'data/bulk-author-checkpoint.json',
-  DELAY_MS: 1500, // 1.5s between authors (safe for 3 req/sec)
+  DELAY_MS: 6000, // 6s between authors (Worker rate limit: 10 req/min for heavy endpoints)
   MAX_PAGES: 1, // Breadth-first: 1 page = 100 books per author
   DAILY_QUOTA: 15000, // ISBNdb Premium daily limit
   // Cloudflare Access Service Token (from environment or empty)
@@ -450,7 +450,7 @@ async function main() {
       // Save checkpoint every 5 authors (more frequent for better crash recovery)
       if (i % 5 === 0 || i === 1) {
         saveCheckpoint(checkpoint);
-        console.log(`📝 Checkpoint saved (${checkpoint.processed.length + checkpoint.failed.length}/${totalAuthors})`);
+        console.log(`📝 Checkpoint saved (${checkpoint.processed.length + checkpoint.failed.length}/${authors.length})`);
       }
 
       // Rate limit
