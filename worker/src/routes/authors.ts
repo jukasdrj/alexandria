@@ -287,35 +287,6 @@ app.openapi(topAuthorsRoute, async (c) => {
   }
 });
 
-// GET /api/authors/:key
-// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
-app.openapi(authorDetailsRoute, async (c) => {
-  const startTime = Date.now();
-
-  try {
-    const sql = c.get('sql');
-    const params = c.req.valid('param');
-
-    const result = await getAuthorDetails({ sql, env: c.env }, params);
-
-    if (!result.success) {
-      return c.json({
-        error: result.error || 'Author not found',
-        author_key: result.author_key
-      }, 404);
-    }
-
-    return c.json({
-      ...result.data,
-      query_duration_ms: Date.now() - startTime
-    });
-  } catch (error) {
-    c.get('logger')?.error('Author details error', { error: error instanceof Error ? error.message : String(error) });
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: 'Failed to fetch author details', message }, 500);
-  }
-});
-
 // POST /api/authors/bibliography
 // @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(bibliographyRoute, async (c) => {
@@ -430,6 +401,35 @@ app.openapi(enrichStatusRoute, async (c) => {
       error: 'Status check failed',
       message: error instanceof Error ? error.message : String(error)
     }, 500);
+  }
+});
+
+// GET /api/authors/:key (MUST BE LAST - wildcard route)
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+app.openapi(authorDetailsRoute, async (c) => {
+  const startTime = Date.now();
+
+  try {
+    const sql = c.get('sql');
+    const params = c.req.valid('param');
+
+    const result = await getAuthorDetails({ sql, env: c.env }, params);
+
+    if (!result.success) {
+      return c.json({
+        error: result.error || 'Author not found',
+        author_key: result.author_key
+      }, 404);
+    }
+
+    return c.json({
+      ...result.data,
+      query_duration_ms: Date.now() - startTime
+    });
+  } catch (error) {
+    c.get('logger')?.error('Author details error', { error: error instanceof Error ? error.message : String(error) });
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: 'Failed to fetch author details', message }, 500);
   }
 });
 

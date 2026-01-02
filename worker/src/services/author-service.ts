@@ -242,10 +242,10 @@ export async function getTopAuthors(
  */
 export async function getAuthorDetails(
   { sql }: { sql: Sql },
-  key: string
-): Promise<AuthorDetailsResult | null> {
+  params: { key: string }
+): Promise<{ success: boolean; data?: AuthorDetailsResult; error?: string; author_key?: string }> {
   // Handle both formats: "OL7234434A" and "/authors/OL7234434A"
-  let authorKey = key;
+  let authorKey = params.key;
   if (!authorKey.startsWith('/authors/')) {
     authorKey = `/authors/${authorKey}`;
   }
@@ -280,34 +280,41 @@ export async function getAuthorDetails(
   `;
 
   if (results.length === 0) {
-    return null;
+    return {
+      success: false,
+      error: 'Author not found',
+      author_key: authorKey
+    };
   }
 
   const author = results[0];
 
   return {
-    author_key: author.author_key,
-    name: author.name,
-    gender: author.gender ?? null,
-    gender_qid: author.gender_qid ?? null,
-    nationality: author.nationality ?? null,
-    citizenship_qid: author.citizenship_qid ?? null,
-    birth_year: author.birth_year ?? null,
-    death_year: author.death_year ?? null,
-    birth_place: author.birth_place ?? null,
-    birth_place_qid: author.birth_place_qid ?? null,
-    birth_country: author.birth_country ?? null,
-    birth_country_qid: author.birth_country_qid ?? null,
-    death_place: author.death_place ?? null,
-    death_place_qid: author.death_place_qid ?? null,
-    bio: author.bio ?? null,
-    bio_source: author.bio_source ?? null,
-    wikidata_id: author.wikidata_id ?? null,
-    openlibrary_author_id: author.openlibrary_author_id ?? null,
-    goodreads_author_ids: author.goodreads_author_ids ?? null,
-    author_photo_url: author.author_photo_url ?? null,
-    book_count: author.book_count ?? 0,
-    wikidata_enriched_at: author.wikidata_enriched_at?.toISOString() ?? null,
+    success: true,
+    data: {
+      author_key: author.author_key,
+      name: author.name,
+      gender: author.gender ?? null,
+      gender_qid: author.gender_qid ?? null,
+      nationality: author.nationality ?? null,
+      citizenship_qid: author.citizenship_qid ?? null,
+      birth_year: author.birth_year ?? null,
+      death_year: author.death_year ?? null,
+      birth_place: author.birth_place ?? null,
+      birth_place_qid: author.birth_place_qid ?? null,
+      birth_country: author.birth_country ?? null,
+      birth_country_qid: author.birth_country_qid ?? null,
+      death_place: author.death_place ?? null,
+      death_place_qid: author.death_place_qid ?? null,
+      bio: author.bio ?? null,
+      bio_source: author.bio_source ?? null,
+      wikidata_id: author.wikidata_id ?? null,
+      openlibrary_author_id: author.openlibrary_author_id ?? null,
+      goodreads_author_ids: author.goodreads_author_ids ?? null,
+      author_photo_url: author.author_photo_url ?? null,
+      book_count: author.book_count ?? 0,
+      wikidata_enriched_at: author.wikidata_enriched_at?.toISOString() ?? null,
+    }
   };
 }
 
@@ -322,30 +329,41 @@ export async function getAuthorDetails(
  */
 export async function getEnrichmentStatus(
   { sql }: { sql: Sql }
-): Promise<EnrichmentStatusResult> {
-  const stats = await sql`
-    SELECT
-      COUNT(*) as total_authors,
-      COUNT(wikidata_id) as has_wikidata_id,
-      COUNT(wikidata_enriched_at) as wikidata_enriched,
-      COUNT(CASE WHEN gender IS NOT NULL AND gender != 'Unknown' THEN 1 END) as has_gender,
-      COUNT(nationality) as has_nationality,
-      COUNT(birth_place) as has_birth_place,
-      COUNT(CASE WHEN wikidata_id IS NOT NULL AND wikidata_enriched_at IS NULL THEN 1 END) as pending_enrichment
-    FROM enriched_authors
-  `;
+): Promise<{ success: boolean; data?: EnrichmentStatusResult; error?: string; message?: string }> {
+  try {
+    const stats = await sql`
+      SELECT
+        COUNT(*) as total_authors,
+        COUNT(wikidata_id) as has_wikidata_id,
+        COUNT(wikidata_enriched_at) as wikidata_enriched,
+        COUNT(CASE WHEN gender IS NOT NULL AND gender != 'Unknown' THEN 1 END) as has_gender,
+        COUNT(nationality) as has_nationality,
+        COUNT(birth_place) as has_birth_place,
+        COUNT(CASE WHEN wikidata_id IS NOT NULL AND wikidata_enriched_at IS NULL THEN 1 END) as pending_enrichment
+      FROM enriched_authors
+    `;
 
-  return {
-    total_authors: Number(stats[0].total_authors),
-    has_wikidata_id: Number(stats[0].has_wikidata_id),
-    wikidata_enriched: Number(stats[0].wikidata_enriched),
-    pending_enrichment: Number(stats[0].pending_enrichment),
-    diversity_fields: {
-      has_gender: Number(stats[0].has_gender),
-      has_nationality: Number(stats[0].has_nationality),
-      has_birth_place: Number(stats[0].has_birth_place),
-    },
-  };
+    return {
+      success: true,
+      data: {
+        total_authors: Number(stats[0].total_authors),
+        has_wikidata_id: Number(stats[0].has_wikidata_id),
+        wikidata_enriched: Number(stats[0].wikidata_enriched),
+        pending_enrichment: Number(stats[0].pending_enrichment),
+        diversity_fields: {
+          has_gender: Number(stats[0].has_gender),
+          has_nationality: Number(stats[0].has_nationality),
+          has_birth_place: Number(stats[0].has_birth_place),
+        },
+      }
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Status check failed',
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 /**
@@ -361,29 +379,33 @@ export async function getEnrichmentStatus(
 export async function enrichWikidataAuthors(
   { sql }: { sql: Sql },
   params: EnrichWikidataParams
-): Promise<EnrichWikidataResult> {
-  const { limit = 100, force_refresh = false } = params;
+): Promise<{ success: boolean; data?: EnrichWikidataResult; error?: string; message?: string }> {
+  try {
+    const { limit = 100, force_refresh = false } = params;
 
-  // Get authors with wikidata_id but not yet enriched
-  const authorsToEnrich = await sql`
-    SELECT author_key, wikidata_id, name
-    FROM enriched_authors
-    WHERE wikidata_id IS NOT NULL
-      AND (wikidata_enriched_at IS NULL OR ${force_refresh})
-    ORDER BY
-      CASE WHEN birth_year IS NOT NULL THEN 0 ELSE 1 END, -- Prioritize those with some data
-      author_key
-    LIMIT ${limit}
-  `;
+    // Get authors with wikidata_id but not yet enriched
+    const authorsToEnrich = await sql`
+      SELECT author_key, wikidata_id, name
+      FROM enriched_authors
+      WHERE wikidata_id IS NOT NULL
+        AND (wikidata_enriched_at IS NULL OR ${force_refresh})
+      ORDER BY
+        CASE WHEN birth_year IS NOT NULL THEN 0 ELSE 1 END, -- Prioritize those with some data
+        author_key
+      LIMIT ${limit}
+    `;
 
-  if (authorsToEnrich.length === 0) {
-    return {
-      processed: 0,
-      enriched: 0,
-      wikidata_fetched: 0,
-      results: [],
-    };
-  }
+    if (authorsToEnrich.length === 0) {
+      return {
+        success: true,
+        data: {
+          processed: 0,
+          enriched: 0,
+          wikidata_fetched: 0,
+          results: [],
+        }
+      };
+    }
 
   // Extract Q-IDs for Wikidata batch fetch
   const qids = authorsToEnrich.map((a) => a.wikidata_id).filter(Boolean);
@@ -486,12 +508,22 @@ export async function enrichWikidataAuthors(
     }
   }
 
-  return {
-    processed: authorsToEnrich.length,
-    enriched: enrichedCount,
-    wikidata_fetched: wikidataResults.size,
-    results,
-  };
+    return {
+      success: true,
+      data: {
+        processed: authorsToEnrich.length,
+        enriched: enrichedCount,
+        wikidata_fetched: wikidataResults.size,
+        results,
+      }
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Wikidata enrichment failed',
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 /**
  * Get author bibliography from ISBNdb
