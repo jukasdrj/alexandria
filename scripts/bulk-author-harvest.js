@@ -179,10 +179,16 @@ async function getTopAuthors(offset, limit) {
 /**
  * Enrich author bibliography via Alexandria API
  */
-async function enrichAuthorBibliography(authorName, maxPages = 1) {
-  // Add 60 second timeout to prevent hanging
+async function enrichAuthorBibliography(authorName, maxPages = 1, editionCount = 0) {
+  // Dynamic timeout based on author size
+  // Small authors (<100): 30s, Medium (100-500): 60s, Large (500-1000): 90s, Mega (1000+): 120s
+  const timeoutMs = editionCount > 1000 ? 120000
+                  : editionCount > 500  ? 90000
+                  : editionCount > 100  ? 60000
+                  : 30000;
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${CONFIG.ALEXANDRIA_URL}/api/authors/enrich-bibliography`, {
@@ -412,9 +418,9 @@ async function main() {
     }
 
     try {
-      console.log(`${progress} Processing: ${author.author_name} (${author.work_count} works)...`);
+      console.log(`${progress} Processing: ${author.author_name} (${author.edition_count} editions)...`);
 
-      const result = await enrichAuthorBibliography(author.author_name, maxPages);
+      const result = await enrichAuthorBibliography(author.author_name, maxPages, author.edition_count);
 
       if (result.error === 'quota_exhausted') {
         console.log(`\n⚠️  ISBNdb quota exhausted! Stopping after ${i} authors.`);
@@ -432,18 +438,19 @@ async function main() {
         checkpoint.failed.push({ name: author.author_name, error: result.error });
       } else {
         const status = result.cached ? '📦 CACHED' : '✅ ENRICHED';
-        console.log(`  ${status}: ${result.books_found || 0} books, ${result.newly_enriched || 0} new, ${result.covers_queued || 0} covers`);
+        console.log(`  ${status}: ${result.books_found || 0} books, ${result.enriched || 0} new, ${result.covers_queued || 0} covers`);
 
         checkpoint.processed.push(author.author_name);
         checkpoint.stats.books_found += result.books_found || 0;
-        checkpoint.stats.enriched += result.newly_enriched || 0;
+        checkpoint.stats.enriched += result.enriched || 0;  // FIX: Use 'enriched', not 'newly_enriched'
         checkpoint.stats.covers_queued += result.covers_queued || 0;
         if (result.cached) checkpoint.stats.cache_hits++;
       }
 
-      // Save checkpoint every 10 authors
-      if (i % 10 === 0) {
+      // Save checkpoint every 5 authors (more frequent for better crash recovery)
+      if (i % 5 === 0 || i === 1) {
         saveCheckpoint(checkpoint);
+        console.log(`📝 Checkpoint saved (${checkpoint.processed.length + checkpoint.failed.length}/${totalAuthors})`);
       }
 
       // Rate limit

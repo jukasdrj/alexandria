@@ -4,6 +4,7 @@ import postgres from 'postgres';
 import type { Env } from './env.js';
 import { createOpenAPIApp, registerOpenAPIDoc } from './openapi.js';
 import { errorHandler } from '../middleware/error-handler.js'; // Now uses ResponseEnvelope format
+import { rateLimiter, RateLimitPresets } from '../middleware/rate-limiter.js';
 import { Logger } from '../lib/logger.js';
 import { getDashboardHTML } from '../dashboard.js';
 import type { MessageBatch, Message, CoverQueueMessage, EnrichmentQueueMessage } from './services/types.js';
@@ -19,6 +20,7 @@ import authorsRoutes from './routes/authors.js';
 import booksRoutes from './routes/books.js';
 import quotaRoutes from './routes/quota.js';
 import testRoutes from './routes/test.js';
+import migrateRoutes from './routes/migrate.js';
 import { handleScheduledCoverHarvest } from './routes/harvest.js';
 
 // Queue handlers (migrated to TypeScript)
@@ -73,6 +75,24 @@ app.use('*', async (c, next) => {
   c.header('X-Response-Time', `${Date.now() - start}ms`);
 });
 
+// Rate limiting middleware (applied before DB connection to save resources)
+// Search endpoints (more expensive queries)
+app.use('/api/search*', rateLimiter(RateLimitPresets.search));
+
+// Write operations (covers, enrichment)
+app.use('/api/covers/process', rateLimiter(RateLimitPresets.write));
+app.use('/api/covers/queue', rateLimiter(RateLimitPresets.write));
+app.use('/api/enrich/*', rateLimiter(RateLimitPresets.write));
+
+// Heavy operations (batch, bulk)
+app.use('/api/enrich/batch-direct', rateLimiter(RateLimitPresets.heavy));
+app.use('/covers/batch', rateLimiter(RateLimitPresets.heavy));
+app.use('/api/authors/enrich-bibliography', rateLimiter(RateLimitPresets.heavy));
+app.use('/api/books/enrich-new-releases', rateLimiter(RateLimitPresets.heavy));
+
+// Standard rate limit for other API endpoints
+app.use('/api/*', rateLimiter(RateLimitPresets.standard));
+
 // Database connection middleware
 app.use('*', async (c, next) => {
   const sql = postgres(c.env.HYPERDRIVE.connectionString, {
@@ -108,6 +128,7 @@ const subRouters = [
   booksRoutes,
   quotaRoutes,
   testRoutes,
+  migrateRoutes,
 ];
 
 // Register route modules

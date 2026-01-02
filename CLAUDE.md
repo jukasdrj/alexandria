@@ -18,11 +18,9 @@ Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) th
 ## Architecture Flow
 
 ```
-Internet → Cloudflare Access (IP bypass: 47.187.18.143/32)
-→ Worker (alexandria.ooheynerds.com, Hono framework with zod-openapi)
+Internet → [3-Layer Security] → Worker (alexandria.ooheynerds.com)
 → Hyperdrive (connection pooling, ID: 00ff424776f4415d95245c3c4c36e854)
-→ Cloudflare Access (Service Token auth to tunnel)
-→ Tunnel (alexandria-db.ooheynerds.com)
+→ Service Token Auth → Tunnel (alexandria-db.ooheynerds.com)
 → Unraid (192.168.1.240:5432, SSL enabled)
 → PostgreSQL (54.8M editions)
 
@@ -42,9 +40,66 @@ Cover Images:
 
 **IMPORTANT**:
 - Tunnel is outbound-only from home network. No inbound firewall ports needed.
-- API secured with Cloudflare Access - only accessible from home IP (47.187.18.143/32)
+- **Worker API is PUBLIC** (globally accessible, secured by multi-layer defense)
+- **Database tunnel is PRIVATE** (Service Token authentication only, no IP restrictions)
 - Tunnel uses **Zero Trust remotely-managed configuration** (token-based, not config.yml)
 - Public hostname configured in Zero Trust dashboard: `alexandria-db.ooheynerds.com` → `tcp://localhost:5432`
+
+## Security Architecture (Jan 2, 2026)
+
+**3-Layer Defense Model**:
+
+1. **Cloudflare Edge** (FREE):
+   - WAF: Cloudflare Free Managed Ruleset (20 rules: Log4j, Shellshock, WordPress exploits)
+   - Bot Fight Mode: Active (blocks bad bots, challenges suspicious traffic)
+   - DDoS Protection: Automatic
+   - Rate Limiting: Optional (1 rule available on Free plan)
+
+2. **Worker Application** (ACTIVE):
+   - **Application Rate Limiting** (`worker/middleware/rate-limiter.ts`):
+     - Standard API: 100 req/min per IP
+     - Search: 60 req/min per IP
+     - Write ops: 30 req/min per IP
+     - Heavy ops: 10 req/min per IP
+   - **Input Validation**: Zod schemas on all endpoints
+   - **Security Headers**: HSTS, X-Frame-Options, X-Content-Type-Options
+   - **CORS**: Configured
+
+3. **Database Layer**:
+   - **Service Token**: Hyperdrive → Tunnel authentication
+   - **Parameterized Queries**: SQL injection protection
+   - **Read-Only Access**: No destructive operations
+   - **Tunnel Encryption**: mTLS
+
+**Rate Limit Headers**:
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 94
+X-RateLimit-Reset: 1767374513
+Retry-After: 45 (when exceeded)
+```
+
+**HTTP 429 Response** (rate limit exceeded):
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded. Maximum 100 requests per 60s.",
+    "details": {
+      "limit": 100,
+      "reset_at": 1767374540,
+      "retry_after": 45
+    }
+  }
+}
+```
+
+**Documentation**:
+- `docs/SECURITY-FINAL-SUMMARY.md` - Complete security overview
+- `docs/SECURITY-SETUP-COMPLETE.md` - Setup guide
+- `worker/middleware/rate-limiter.ts` - Rate limiting implementation
+- `worker/src/__tests__/rate-limiter.test.ts` - 12 passing tests
 
 ## Database Schema (CRITICAL)
 
