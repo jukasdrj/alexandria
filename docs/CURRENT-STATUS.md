@@ -1,16 +1,15 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 2, 2026
+**Last Updated:** January 3, 2026
 
 ## 🎯 Priority Overview
 
 ### P1 - HIGH Priority (Blockers)
-1. **#109** - Validate queue optimization metrics (post-Dec 30 deploy)
-2. **#108** - Debug bulk author harvest failures (17.5% timeout rate)
+1. **#108** - Debug bulk author harvest failures (17.5% timeout rate)
 
 ### P2 - MEDIUM Priority
-3. **#111** - Run top-1000 author tier harvest (blocked by #108)
-4. **#110** - Set up Wikidata enrichment cron job
+2. **#111** - Run top-1000 author tier harvest (blocked by #108)
+3. **#110** - Set up Wikidata enrichment cron job
 
 ### P3 - LOW Priority (Future Enhancements)
 5. **#114** - Author deduplication and normalization
@@ -24,54 +23,32 @@
 
 ---
 
-## 📊 P1: Critical Issues
+## ✅ Recently Completed
 
-### #109: Validate Queue Optimization Metrics ⚠️
+### #109: ISBNdb Quota Tracking (COMPLETED - Jan 3, 2026)
 
-**Status:** OPEN
-**Priority:** P1 - HIGH
-**Created:** Jan 1, 2026
+**Fixed critical quota tracking bugs:**
+1. POST /api/harvest/covers was making ISBNdb calls without quota tracking
+2. Enrichment queue handler not recording API usage
+3. GET /api/quota/status using wrong KV namespace (CACHE vs QUOTA_KV)
 
-**Background:**
-Queue optimization deployed Dec 30, 2025 with aggressive performance improvements:
-- Batch size: 10 → 20 (2x)
-- Concurrency: 5 → 10 (2x)
-- Batch timeout: 10s → 30s (3x)
-- Code: Added parallel I/O with `Promise.allSettled()`
+**Root Cause:**
+- bendv3 hourly cron calls /api/harvest/covers (24 calls/day)
+- These calls were untracked, causing quota discrepancy
+- User observed 10K ISBNs processed but quota showed 0 used
 
-**Expected Performance:**
-- Before: ~2.2 covers/second
-- After: ~15-20 covers/second (10x improvement)
-- Top-1000: 50,000 covers in <60 minutes (was ~3 hours)
+**Resolution:**
+- ✅ Added QuotaManager to /api/harvest/covers endpoint
+- ✅ Fixed quota.ts KV namespace (CACHE → QUOTA_KV)
+- ✅ Added quota recording to enrichment queue handler
+- ✅ All 475 tests passing
+- ✅ Quota now correctly shows 992 calls used today
 
-**Validation Tasks:**
-```bash
-# 1. Check Worker logs for cover processing metrics
-npm run tail | grep -i "cover|batch"
-
-# 2. Monitor CPU time (should stay <150s, limit is 300s)
-# Look for: CPU time p95, batch duration
-
-# 3. Check dead letter queue for failures
-npx wrangler queues list | grep -i dlq
-
-# 4. Verify parallel processing is working
-# Look for: concurrent batch processing, not sequential
-```
-
-**Success Criteria:**
-- [ ] CPU time p95 < 150s (well under 300s limit)
-- [ ] Batch success rate > 98%
-- [ ] Actual throughput: 10-20 covers/sec
-- [ ] JWT expiry recovery working (<1% failures)
-- [ ] No memory/OOM errors
-
-**Related Files:**
-- `docs/QUEUE-OPTIMIZATION-DEC30.md`
-- `worker/src/services/queue-handlers.ts`
-- `worker/wrangler.jsonc`
+**Documentation:** `docs/operations/ISBNDB-QUOTA-INVESTIGATION-JAN3.md`
 
 ---
+
+## 📊 P1: Critical Issues
 
 ### #108: Debug Bulk Author Harvest Failures 🔴
 
