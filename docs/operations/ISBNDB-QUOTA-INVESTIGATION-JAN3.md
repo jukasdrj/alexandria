@@ -232,9 +232,56 @@ After fixes deployed:
 
 ---
 
-**Status**: Investigation complete, fixes identified, ready for implementation
-**Next Steps**:
-1. Fix /api/harvest/covers quota tracking
-2. Fix queue-handlers quota recording
-3. Deploy and verify quota tracking works
-4. Compare KV quota with ISBNdb dashboard
+## Implementation Results (Jan 3, 2026)
+
+### Fixes Deployed
+
+**Commit:** d11a8d3 - `fix(quota): Add ISBNdb quota tracking to harvest endpoint and queue handler`
+
+**Changes Made:**
+1. ✅ `worker/src/routes/enrich.ts` - Added QuotaManager to /api/harvest/covers
+2. ✅ `worker/src/routes/quota.ts` - Fixed KV namespace (CACHE → QUOTA_KV)
+3. ✅ `worker/src/services/queue-handlers.ts` - Added quota recording
+
+**Testing:**
+- All 475 tests passing
+- Deployed to production
+- Verified quota increment with test batch (10 ISBNs)
+
+### Actual Usage Tracking
+
+**Pre-Fix Period (Before Jan 3, 2026 ~8:45 AM UTC):**
+- ISBNdb Dashboard: ~9,304 calls consumed
+- Alexandria Quota KV: 0 (untracked due to bugs)
+- **Discrepancy:** All calls before fix deployment were untracked
+
+**Post-Fix Period (After Jan 3, 2026 ~8:45 AM UTC):**
+- Alexandria Quota KV: Tracking correctly
+- First tracked call: Test batch (10 ISBNs)
+- Hourly bendv3 harvest: Now being tracked properly
+
+**Current Status (Jan 3, 2026 ~8:55 AM UTC):**
+- ISBNdb Dashboard (Actual): **9,304 calls used**
+- Alexandria Quota KV (Tracked): **992 calls used**
+- Discrepancy: 8,312 calls occurred before quota tracking was fixed
+- Remaining: 5,696 calls (15,000 - 9,304)
+
+### Quota Reconciliation
+
+**Why the discrepancy exists:**
+1. Quota tracking bugs existed for several hours/days before detection
+2. bendv3 hourly harvest was running untracked during this period
+3. Possible other enrichment operations occurred before fixes deployed
+4. Quota KV started tracking from 0 after fix deployment
+
+**Action taken:**
+- Quota tracking is now accurate going forward
+- Historical untracked calls cannot be retroactively recorded
+- ISBNdb dashboard is the source of truth for total daily usage
+- Alexandria KV will track accurately from Jan 3, 2026 8:45 AM UTC onward
+
+---
+
+**Status**: ✅ RESOLVED - Quota tracking fixed and verified
+**Issue #109**: Closed on GitHub
+**Documentation**: Updated in CURRENT-STATUS.md
