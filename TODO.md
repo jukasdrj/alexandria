@@ -18,8 +18,12 @@ Current status and next steps for development.
 5. ✅ Fixed memory limit errors: reduced batch size 50→10, increased concurrency 3→5
 6. ✅ jSquash WebP cover processing working (50-80% compression on large images)
 
-**Issues Created:**
-- #84: Skip WebP conversion for small images (negative compression on <5KB images)
+**Completed (January 2, 2026):**
+7. ✅ Issue #84: Skip WebP conversion for small images (<5KB threshold)
+   - Small images stored in original format (JPEG/PNG)
+   - Prevents negative compression (WebP overhead > original size)
+   - All 30 jsquash-processor tests passing
+   - Metadata includes `webpSkipped: true` and `reason: below_size_threshold`
 
 **Top-100 Results:**
 - Authors processed: 98/100 (2 failed due to ISBNdb 400 errors)
@@ -31,7 +35,6 @@ Current status and next steps for development.
 1. [ ] Wait for cover queue to drain (~2 hours)
 2. [ ] Run `--tier top-1000` (1,000 authors)
 3. [ ] Monitor for memory/CPU limit errors
-4. [ ] Fix #84 (WebP small image optimization)
 
 ### Post-Migration Optimization (COMPLETE)
 **Status:** Done

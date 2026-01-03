@@ -2,124 +2,230 @@
 
 **Self-hosted OpenLibrary database (54M+ books) accessible globally via Cloudflare Workers**
 
-Production API: `https://alexandria.ooheynerds.com`
+[![Production](https://img.shields.io/badge/Production-Live-success)](https://alexandria.ooheynerds.com)
+[![Database](https://img.shields.io/badge/Books-54.8M-blue)](https://alexandria.ooheynerds.com/api/stats)
+[![ISBNdb](https://img.shields.io/badge/ISBNdb-Premium-orange)](https://isbndb.com)
 
-## Overview
+**Production API:** `https://alexandria.ooheynerds.com`
+**Dashboard:** https://alexandria.ooheynerds.com/
+**OpenAPI Spec:** https://alexandria.ooheynerds.com/openapi.json
 
-Alexandria exposes a complete PostgreSQL mirror of OpenLibrary through Cloudflare's edge network. The database runs on a home Unraid server and is accessible worldwide via Cloudflare Tunnel + Hyperdrive.
+---
 
-## Architecture
+## 🎯 Current Status (January 2026)
+
+**Phase 2 Complete** ✅ - Database integration, cover processing, enrichment API operational
+**Active Work:** Bulk author harvesting, queue optimization, Wikidata enrichment
+
+**Quick Links:**
+- **[Current Issues & Priorities](./docs/CURRENT-STATUS.md)** - P1/P2/P3 issues
+- **[Development Roadmap](./TODO.md)** - Phase tracking
+- **[Full Documentation](./docs/INDEX.md)** - Complete docs index
+- **[Developer Guide](./CLAUDE.md)** - 42KB authoritative guide
+
+---
+
+## 📚 What is Alexandria?
+
+Alexandria exposes a complete **PostgreSQL mirror of OpenLibrary** (54M+ books) through Cloudflare's global edge network. The database runs on a home Unraid server and is accessible worldwide via Cloudflare Tunnel + Hyperdrive.
+
+**Key Features:**
+- 🔍 **Smart Search** - ISBN, title, author with fuzzy matching (pg_trgm)
+- 🖼️ **Cover Processing** - Multi-provider (OpenLibrary, ISBNdb, Google Books)
+- 📊 **Enrichment Pipeline** - ISBNdb Premium integration with quota management
+- 🌐 **Global Edge** - Cloudflare's 300+ locations
+- 🔐 **3-Layer Security** - WAF, rate limiting, authentication
+- 📖 **54.8M Books** - OpenLibrary complete dataset + enriched metadata
+
+---
+
+## 🏗️ Architecture
 
 ```
 Internet → Cloudflare Edge (300+ locations)
     ↓
-Worker (alexandria.ooheynerds.com) + Hono + Zod validation
+[3-Layer Security]
+  1. Cloudflare WAF + Bot Fight Mode + DDoS
+  2. Worker Rate Limiting + Input Validation
+  3. Service Token Auth + Parameterized Queries
     ↓
-Hyperdrive (connection pooling + query caching)
+Worker (alexandria.ooheynerds.com)
+  - Hono + @hono/zod-openapi
+  - TypeScript with full type safety
+  - Workers Paid Plan (300s CPU, smart placement)
     ↓
-Cloudflare Access (mTLS auth)
+Hyperdrive (connection pooling + caching)
     ↓
-Tunnel (alexandria-db.ooheynerds.com)
+Cloudflare Tunnel (mTLS, alexandria-db.ooheynerds.com)
     ↓
 Unraid Server (192.168.1.240)
     ↓
 PostgreSQL 18 (54.8M editions, SSL enabled)
     ↓
-R2 Bucket (cover images)
+R2 Bucket (bookstrack-covers-processed)
+    ↓
+Cloudflare Queues
+  - alexandria-cover-queue (10/batch, 10 concurrency)
+  - alexandria-enrichment-queue (100/batch, 1 concurrency)
 ```
 
-## Features
+**Data Sources:**
+- **OpenLibrary** - Base dataset (54.8M editions, 49.3M ISBNs, 40.1M works, 14.7M authors)
+- **ISBNdb Premium** - Enrichment (3 req/sec, 1000 ISBN batches, 15K daily quota)
+- **Google Books** - Fallback metadata
+- **Wikidata** - Author diversity data (gender, nationality, birth place)
 
-✅ **Database Access** (Phase 2 Complete)
-- Hyperdrive connection pooling
-- ISBN, title, and author search
-- 54.8M editions, 49.3M ISBNs, 40.1M works, 14.7M authors
+---
 
-✅ **Cover Processing** (Phase 2.5 Complete)
-- R2 storage with multi-size variants
-- Work-based and ISBN-based endpoints
-- Multi-provider fetching (OpenLibrary, ISBNdb, Google Books)
+## 🚀 Quick Start
 
-✅ **Enrichment API** (Phase 2.6 Complete)
-- Edition, work, and author metadata endpoints
-- Quality scoring and conflict detection
-- Background queue processing
+### Prerequisites
+- Node.js 18+ and npm
+- Wrangler CLI (`npm install -g wrangler`)
+- Access to Cloudflare account (for deployment)
 
-✅ **TypeScript Integration** (v2.0.0)
-- Exported types for external consumers
-- Zod runtime validation
-- OpenAPI 3.0 specification
-
-## Quick Start
+### Local Development
 
 ```bash
-# Development
+# Clone repository
+git clone https://github.com/yourusername/alexandria.git
+cd alexandria
+
+# Install dependencies
 cd worker/
 npm install
-npm run dev              # Local dev server (localhost:8787)
 
-# Deploy
-npm run deploy           # Deploy to Cloudflare
-npm run tail             # Live logs
+# Start local dev server
+npm run dev              # → http://localhost:8787
 
-# Infrastructure checks
-./scripts/tunnel-status.sh  # Verify tunnel (expect 4 connections)
-./scripts/db-check.sh        # Database health + sample query
+# Run tests
+npm test                 # Vitest suite (53 tests)
+
+# Deploy to Cloudflare
+npm run deploy
+
+# Monitor logs
+npm run tail
 ```
 
-## API Endpoints
-
-**Search:**
-- `GET /api/search?isbn={isbn}` - ISBN lookup
-- `GET /api/search?title={title}` - Title search
-- `GET /api/search?author={author}` - Author search
-- `GET /api/stats` - Database statistics
-
-**Covers:**
-- `POST /api/covers/process` - Process cover from URL
-- `GET /api/covers/:work_key/:size` - Serve cover (large/medium/small)
-- `POST /covers/:isbn/process` - Legacy ISBN-based processing
-- `GET /covers/:isbn/:size` - Legacy ISBN-based serving
-
-**Enrichment:**
-- `POST /api/enrich/edition` - Store edition metadata
-- `POST /api/enrich/work` - Store work metadata
-- `POST /api/enrich/author` - Store author metadata
-- `POST /api/enrich/queue` - Queue background job
-- `GET /api/enrich/status/:id` - Job status
-
-**System:**
-- `GET /health` - Health check
-- `GET /openapi.json` - OpenAPI 3.0 spec
-
-## Using the API
-
-### Quick Examples
+### Infrastructure Checks
 
 ```bash
-# Search by ISBN
-curl "https://alexandria.ooheynerds.com/api/search?isbn=9780439064873"
+# Verify tunnel (expect 4 connections)
+./scripts/tunnel-status.sh
 
-# Search by title (fuzzy matching)
-curl "https://alexandria.ooheynerds.com/api/search?title=harry%20potter&limit=10"
+# Database health + sample query
+./scripts/db-check.sh
 
-# Search by author
-curl "https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offset=40"
-
-# Get cover image
-curl "https://alexandria.ooheynerds.com/covers/9780439064873/medium" -o cover.jpg
+# Deploy with validation
+./scripts/deploy-worker.sh
 ```
 
-### Type-Safe Client Generation
+---
 
-Generate typed clients from the OpenAPI spec for full type safety:
+## 📖 API Endpoints
+
+### Search & Stats
+- **`GET /api/search?isbn={isbn}`** - ISBN lookup with Smart Resolution
+- **`GET /api/search?title={title}`** - Title search (ILIKE fuzzy)
+- **`GET /api/search?author={author}`** - Author search (ILIKE fuzzy)
+- **`GET /api/stats`** - Database statistics
+- **`GET /health`** - Health check with DB latency
+
+### Cover Processing (ISBN-based)
+- **`POST /api/covers/process`** - Process cover from provider URL
+- **`GET /covers/:isbn/:size`** - Serve cover (large/medium/small)
+- **`GET /covers/:isbn/status`** - Check cover availability
+- **`POST /covers/:isbn/process`** - Trigger cover processing
+- **`POST /covers/batch`** - Batch processing (max 10)
+- **`POST /api/covers/queue`** - Queue background processing (max 100)
+
+### Enrichment
+- **`POST /api/enrich/edition`** - Store edition metadata
+- **`POST /api/enrich/work`** - Store work metadata
+- **`POST /api/enrich/author`** - Store author metadata
+- **`POST /api/enrich/queue`** - Queue enrichment (max 100)
+- **`POST /api/enrich/batch-direct`** - Direct batch (up to 1000 ISBNs)
+- **`GET /api/enrich/status/:id`** - Check enrichment status
+
+### Author Operations
+- **`GET /api/authors/top`** - Top authors by edition count
+- **`GET /api/authors/:key`** - Get author details
+- **`POST /api/authors/bibliography`** - Get ISBNdb bibliography
+- **`POST /api/authors/enrich-bibliography`** - Fetch + enrich in one call
+- **`POST /api/authors/enrich-wikidata`** - Enrich with Wikidata
+
+### Books & New Releases
+- **`POST /api/books/search`** - Search ISBNdb by date/title/author
+- **`POST /api/books/enrich-new-releases`** - Enrich by date range
+
+### Quota Management
+- **`GET /api/quota/status`** - ISBNdb quota usage and remaining
+
+### System
+- **`GET /openapi.json`** - OpenAPI 3.0 specification
+- **`GET /`** - Interactive dashboard
+
+**Full API documentation:** [docs/api/API-SEARCH-ENDPOINTS.md](./docs/api/API-SEARCH-ENDPOINTS.md)
+
+---
+
+## 💻 Usage Examples
+
+### Basic Search
+
+```bash
+# Search by ISBN (with Smart Resolution)
+curl "https://alexandria.ooheynerds.com/api/search?isbn=9780439064873" | jq
+
+# Title search with pagination
+curl "https://alexandria.ooheynerds.com/api/search?title=harry%20potter&limit=10" | jq
+
+# Author search
+curl "https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offset=40" | jq
+
+# Database stats
+curl "https://alexandria.ooheynerds.com/api/stats" | jq
+```
+
+### Cover Images
+
+```bash
+# Get cover image (large/medium/small)
+curl "https://alexandria.ooheynerds.com/covers/9780439064873/large" -o cover.webp
+
+# Check if cover exists
+curl "https://alexandria.ooheynerds.com/covers/9780439064873/status" | jq
+
+# Batch cover processing
+curl -X POST "https://alexandria.ooheynerds.com/covers/batch" \
+  -H "Content-Type: application/json" \
+  -d '{"isbns":["9780439064873","9781234567890"]}'
+```
+
+### Enrichment
+
+```bash
+# Direct batch enrichment (up to 1000 ISBNs)
+curl -X POST "https://alexandria.ooheynerds.com/api/enrich/batch-direct" \
+  -H "Content-Type: application/json" \
+  -d '{"isbns":["9780439064873"],"source":"my_app"}' | jq
+
+# Author bibliography (fetch + enrich)
+curl -X POST "https://alexandria.ooheynerds.com/api/authors/enrich-bibliography" \
+  -H "Content-Type: application/json" \
+  -d '{"author_name":"Brandon Sanderson"}' | jq
+
+# Check ISBNdb quota
+curl "https://alexandria.ooheynerds.com/api/quota/status" | jq
+```
+
+### Type-Safe Clients
 
 **TypeScript (openapi-fetch):**
 ```bash
 # Generate types
 npx openapi-typescript https://alexandria.ooheynerds.com/openapi.json -o alexandria-types.ts
-
-# Install client
 npm install openapi-fetch
 ```
 
@@ -139,114 +245,215 @@ const { data } = await client.GET("/api/search", {
 
 **Python (httpx + pydantic):**
 ```bash
-# Generate models
 pip install datamodel-code-generator
 datamodel-codegen \
   --url https://alexandria.ooheynerds.com/openapi.json \
   --output alexandria_models.py
 ```
 
-**Go (oapi-codegen):**
+---
+
+## 📁 Project Structure
+
+```
+alexandria/
+├── worker/                    # Cloudflare Worker (TypeScript)
+│   ├── src/
+│   │   ├── index.ts           # Main worker + Hono routes
+│   │   ├── env.ts             # Environment type definitions
+│   │   ├── routes/            # API route handlers (zod-openapi)
+│   │   ├── schemas/           # Zod validation schemas
+│   │   └── services/          # Business logic
+│   ├── services/              # External API services
+│   ├── lib/                   # Utilities (logger, cache, ISBN)
+│   ├── wrangler.jsonc         # Cloudflare configuration
+│   └── package.json           # v2.2.0
+├── scripts/                   # Deployment & harvesting scripts
+│   ├── bulk-author-harvest.js
+│   ├── expand-author-bibliographies.js
+│   └── lib/                   # Script utilities
+├── migrations/                # Database migrations (003 deployed)
+├── docs/                      # Documentation (organized)
+│   ├── INDEX.md               # Documentation index
+│   ├── CURRENT-STATUS.md      # Active issues (P1/P2/P3)
+│   ├── api/                   # API documentation
+│   ├── security/              # Security architecture
+│   ├── operations/            # Operations guides
+│   ├── harvesting/            # Harvesting docs
+│   ├── infrastructure/        # Infrastructure setup
+│   └── archive/               # Outdated docs
+├── data/                      # Runtime data (checkpoints)
+├── CLAUDE.md                  # Developer guide (42KB)
+├── TODO.md                    # Development roadmap
+├── CHANGELOG.md               # Version history
+└── README.md                  # This file
+```
+
+---
+
+## 🔐 Security
+
+**3-Layer Defense Model:**
+
+1. **Cloudflare Edge** (FREE tier)
+   - WAF: Cloudflare Free Managed Ruleset
+   - Bot Fight Mode: Active
+   - DDoS Protection: Automatic
+
+2. **Worker Application** (ACTIVE)
+   - Rate Limiting: 100 req/min per IP (API), 60 req/min (search), 30 req/min (writes)
+   - Input Validation: Zod schemas on all endpoints
+   - Security Headers: HSTS, X-Frame-Options, X-Content-Type-Options
+
+3. **Database Layer**
+   - Service Token: Hyperdrive → Tunnel authentication
+   - Parameterized Queries: SQL injection protection
+   - Read-Only Access: No destructive operations
+
+**Full security documentation:** [docs/security/SECURITY-FINAL-SUMMARY.md](./docs/security/SECURITY-FINAL-SUMMARY.md)
+
+---
+
+## 📊 Infrastructure
+
+### Cloudflare Resources
+- **Domain:** `ooheynerds.com`
+- **Worker:** `alexandria.ooheynerds.com` (Workers Paid Plan)
+- **Tunnel:** `alexandria-db.ooheynerds.com` (ID: 848928ab-4ab9-4733-93b0-3e7967c60acb)
+- **Hyperdrive:** ID: 00ff424776f4415d95245c3c4c36e854
+- **R2 Bucket:** `bookstrack-covers-processed`
+- **Queues:** `alexandria-cover-queue`, `alexandria-enrichment-queue`
+
+### Home Server (Unraid)
+- **Host:** `Tower.local` (192.168.1.240)
+- **PostgreSQL:** Port 5432, SSL enabled, v18
+- **Database:** `openlibrary` (250GB, 54M+ records)
+- **SSH:** `root@Tower.local` (passwordless, ed25519 key)
+- **Auto-start:** Both `postgres` and `alexandria-tunnel` containers
+
+### Database Schema
+- **editions:** 54.8M rows (core OpenLibrary data)
+- **works:** 40.1M rows
+- **authors:** 14.7M rows
+- **edition_isbns:** 49.3M rows (indexed for fast ISBN lookups)
+- **enriched_editions:** 28.6M rows (Alexandria-enriched metadata)
+- **enriched_works:** 21.3M rows
+- **enriched_authors:** 8.2M rows (with Wikidata diversity data)
+
+**Full schema documentation:** [CLAUDE.md](./CLAUDE.md) (Database Schema section)
+
+---
+
+## 📚 Documentation
+
+### Essential Reading
+- **[README.md](./README.md)** (this file) - Project overview
+- **[CLAUDE.md](./CLAUDE.md)** - Complete developer guide (42KB, authoritative)
+- **[docs/CURRENT-STATUS.md](./docs/CURRENT-STATUS.md)** - Active issues & priorities
+- **[docs/INDEX.md](./docs/INDEX.md)** - Full documentation index
+- **[TODO.md](./TODO.md)** - Development roadmap
+
+### By Topic
+- **API:** [docs/api/](./docs/api/)
+- **Security:** [docs/security/](./docs/security/)
+- **Operations:** [docs/operations/](./docs/operations/)
+- **Harvesting:** [docs/harvesting/](./docs/harvesting/)
+- **Infrastructure:** [docs/infrastructure/](./docs/infrastructure/)
+
+### Quick Commands Reference
 ```bash
-# Generate client
-oapi-codegen -package alexandria -generate types,client openapi.json > alexandria/client.go
+# Development
+cd worker/ && npm run dev        # Local dev
+npm run deploy                    # Deploy to Cloudflare
+npm run tail                      # Live logs
+
+# Infrastructure
+./scripts/tunnel-status.sh        # Check tunnel (4 connections)
+./scripts/db-check.sh             # Database health
+ssh root@Tower.local              # SSH to Unraid
+
+# Database
+ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
+
+# Monitoring
+curl https://alexandria.ooheynerds.com/api/quota/status | jq
+curl https://alexandria.ooheynerds.com/api/stats | jq
 ```
 
-**Rust (openapi-generator):**
-```bash
-# Generate client
-openapi-generator generate -i openapi.json -g rust -o ./alexandria-client
-```
+---
 
-### Legacy TypeScript Integration
+## 🗺️ Development Roadmap
 
-```bash
-# Install package (when published)
-npm install alexandria-worker
-```
+### ✅ Phase 1-2: Complete (Infrastructure + Database)
+- Cloudflare Tunnel on Unraid
+- Hyperdrive connection pooling
+- Search API (ISBN, title, author)
+- Cover processing pipeline
+- Enrichment API with queues
+- TypeScript migration (v2.0.0)
 
-```typescript
-import type {
-  SearchQuery,
-  SearchResult,
-  BookResult,
-  ENDPOINTS
-} from 'alexandria-worker/types';
+### ✅ Phase 2.5-2.10: Complete (Enrichment)
+- R2 cover storage with multi-size variants
+- ISBNdb Premium integration (3 req/sec, 1000 ISBN batches)
+- Smart Resolution pipeline (ISBNdb → Google Books → OpenLibrary)
+- Queue-based background processing
+- Quota management (15K daily calls)
+- Author diversity enrichment (Wikidata)
 
-// Type-safe API client
-const books = await fetch('https://alexandria.ooheynerds.com/api/search?isbn=9780439064873')
-  .then(res => res.json()) as SearchResult;
-```
+### 🚧 Phase 3: In Progress (Performance & Optimization)
+- [x] pg_trgm fuzzy search
+- [x] GIN trigram indexes
+- [x] Query result caching (KV)
+- [x] CDN caching headers
+- [x] Queue optimization (10x throughput improvement)
+- [ ] Validate queue metrics (Issue #109)
+- [ ] Debug harvest failures (Issue #108)
 
-See [worker/README-INTEGRATION.md](./worker/README-INTEGRATION.md) for full integration guide.
+### 🔜 Phase 4: Next (Bulk Harvesting)
+- [ ] Top-1000 author tier harvest (Issue #111)
+- [ ] Wikidata enrichment cron job (Issue #110)
+- [ ] Author deduplication (Issue #114)
 
-## Project Structure
+### 📋 Phase 5-6: Future (Advanced Features)
+- Combined search with auto-detection
+- Pagination support
+- Search analytics tracking
+- CI/CD pipeline (GitHub Actions)
+- Cross-repo contract testing
 
-```
-alex/
-├── worker/                    # Cloudflare Worker
-│   ├── index.ts              # Main worker (Hono framework)
-│   ├── types.ts              # Exported TypeScript types
-│   ├── wrangler.jsonc        # Cloudflare configuration
-│   └── README-INTEGRATION.md # Integration guide
-├── scripts/                  # Infrastructure scripts
-│   ├── deploy-worker.sh
-│   ├── tunnel-status.sh
-│   └── db-check.sh
-├── docs/                     # Documentation
-│   ├── CREDENTIALS.md        # Credentials (gitignored)
-│   └── reference/            # Reference documentation
-└── CLAUDE.md                 # Claude Code instructions
-```
+**Full roadmap:** [TODO.md](./TODO.md)
 
-## Infrastructure
+---
 
-**Cloudflare Resources:**
-- Domain: `ooheynerds.com`
-- Worker: `alexandria.ooheynerds.com`
-- Tunnel: `alexandria-db.ooheynerds.com` (ID: 848928ab-4ab9-4733-93b0-3e7967c60acb)
-- Hyperdrive: Connection pooling + caching (ID: 00ff424776f4415d95245c3c4c36e854)
-- R2 Bucket: `bookstrack-covers-processed`
+## 🤝 Contributing
 
-**Home Server (Unraid):**
-- Host: `Tower.local` (192.168.1.240)
-- PostgreSQL: Port 5432, SSL enabled
-- Database: `openlibrary` (250GB, 54M+ records)
-- SSH: `root@Tower.local` (passwordless)
+Alexandria is a personal project, but contributions are welcome:
 
-**Tunnel Configuration:**
-- Uses **Zero Trust remotely-managed** token (not config file)
-- Configured via Cloudflare dashboard
-- Public hostname: `alexandria-db.ooheynerds.com` → `tcp://localhost:5432`
-- Auto-restarts on failure
+1. Check [docs/CURRENT-STATUS.md](./docs/CURRENT-STATUS.md) for open issues
+2. Review [CLAUDE.md](./CLAUDE.md) for development guidelines
+3. Follow existing code patterns (Hono + Zod + TypeScript)
+4. Add tests for new features
+5. Update documentation
 
-## Documentation
+---
 
-- [CLAUDE.md](./CLAUDE.md) - Complete project guide for Claude Code
-- [Integration Guide](./worker/README-INTEGRATION.md) - TypeScript API integration
-- [TODO.md](./TODO.md) - Development roadmap
-
-## Development Roadmap
-
-**✅ Complete:**
-- Phase 1: Infrastructure (Tunnel, Worker, DNS)
-- Phase 2: Database Integration (Hyperdrive, Search)
-- Phase 2.5: Cover Processing (R2, Multi-provider)
-- Phase 2.6: Enrichment API (Metadata, Queue)
-
-**🔜 Next:**
-- Phase 3: Performance (pg_trgm, GIN indexes, caching)
-- Phase 4: Advanced Search (Combined queries, pagination)
-- Phase 5: Operations (CI/CD, monitoring, alerts)
-
-See [TODO.md](./TODO.md) for details.
-
-## License
+## 📄 License
 
 MIT
 
-## Links
+---
 
-- **Production API**: https://alexandria.ooheynerds.com
-- **GitHub**: https://github.com/jukasdrj/alexandria
-- **npm** (pending): `alexandria-worker`
+## 🔗 Links
+
+- **Production API:** https://alexandria.ooheynerds.com
+- **Dashboard:** https://alexandria.ooheynerds.com/
+- **OpenAPI Spec:** https://alexandria.ooheynerds.com/openapi.json
+- **Documentation:** [docs/INDEX.md](./docs/INDEX.md)
+- **Issues:** [docs/CURRENT-STATUS.md](./docs/CURRENT-STATUS.md)
+- **GitHub:** https://github.com/jukasdrj/alexandria
+
+---
+
+**Last Updated:** January 2, 2026
+**Version:** 2.2.0
+**Database:** 54.8M editions | 49.3M ISBNs | 40.1M works | 14.7M authors
