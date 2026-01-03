@@ -186,6 +186,8 @@ export async function processCoverQueue(
           `;
           if (updateResult.count > 0) {
             logger.debug('Updated enriched_editions with R2 URLs', { isbn: normalizedISBN });
+            // Ack message on success with DB update
+            message.ack();
             return {
               status: 'processed' as const,
               isbn: normalizedISBN,
@@ -202,6 +204,8 @@ export async function processCoverQueue(
           });
         }
 
+        // Ack message on success
+        message.ack();
         return {
           status: 'processed' as const,
           isbn: normalizedISBN,
@@ -214,15 +218,14 @@ export async function processCoverQueue(
           isbn: normalizedISBN,
           error: result.error,
         });
+        // Ack message on non-retryable failure
+        message.ack();
         return {
           status: 'failed' as const,
           isbn: normalizedISBN,
           error: result.error || 'Processing failed',
         };
       }
-
-      // Ack message on success or non-retryable failure
-      message.ack();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error('Cover processing exception', {
