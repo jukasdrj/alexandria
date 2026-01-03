@@ -97,8 +97,8 @@ app.openapi(quotaRoute, async (c) => {
   try {
     const env = c.env;
 
-    // Initialize QuotaManager with KV cache
-    const quotaManager = new QuotaManager(env.CACHE);
+    // Initialize QuotaManager with QUOTA_KV namespace (NOT CACHE!)
+    const quotaManager = new QuotaManager(env.QUOTA_KV);
 
     // Get quota status
     const status = await quotaManager.getQuotaStatus();

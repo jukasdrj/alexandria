@@ -23,6 +23,7 @@ import {
   CoverHarvestResultSchema,
   ErrorResponseSchema,
 } from '../schemas/enrich.js';
+import { QuotaManager } from '../services/quota-manager.js';
 import {
   handleEnrichEdition,
   handleEnrichWork,
@@ -694,6 +695,31 @@ enrichRoutes.openapi(coverHarvestRoute, async (c) => {
 
     const sql = c.get('sql');
 
+    // Initialize quota manager
+    const quotaManager = new QuotaManager(c.env.QUOTA_KV);
+
+    // Check quota before making ISBNdb call
+    const quotaCheck = await quotaManager.checkQuota(1, true);
+    if (!quotaCheck.allowed) {
+      logger.warn('Cover harvest: quota exhausted', {
+        reason: quotaCheck.reason,
+        used_today: quotaCheck.status.used_today,
+        remaining: quotaCheck.status.buffer_remaining,
+      });
+
+      return c.json(
+        {
+          error: 'ISBNdb quota exhausted',
+          quota_status: {
+            used_today: quotaCheck.status.used_today,
+            remaining: quotaCheck.status.buffer_remaining,
+            limit: quotaCheck.status.limit,
+          },
+        },
+        429
+      );
+    }
+
     // Query OpenLibrary editions without covers (English ISBNs only)
     // Using created_at DESC to process newest first
     logger.info('Cover harvest: querying editions', { batch_size, offset });
@@ -731,6 +757,14 @@ enrichRoutes.openapi(coverHarvestRoute, async (c) => {
 
     // Fetch from ISBNdb (single API call for up to 1000 ISBNs)
     const batchData = await fetchISBNdbBatch(isbns, c.env);
+
+    // Record API call in quota manager (CRITICAL: must happen after successful call)
+    await quotaManager.recordApiCall(1);
+
+    logger.info('Cover harvest: ISBNdb call complete', {
+      found: batchData.size,
+      quota_used: 1,
+    });
 
     const results = {
       queried: isbns.length,

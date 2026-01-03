@@ -14,6 +14,7 @@ import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 import { enrichEdition, enrichWork } from './enrichment-service.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
 import { Logger } from '../../lib/logger.js';
+import { QuotaManager } from './quota-manager.js';
 import type {
   CoverQueueMessage,
   EnrichmentQueueMessage,
@@ -380,10 +381,15 @@ export async function processEnrichmentQueue(
     const enrichmentData = await fetchISBNdbBatch(isbnsToFetch, env);
     const batchDuration = Date.now() - batchStartTime;
 
+    // Record API call in quota manager (queue handlers track but don't enforce)
+    const quotaManager = new QuotaManager(env.QUOTA_KV);
+    await quotaManager.recordApiCall(1);
+
     logger.info('Batch fetch complete', {
       found: enrichmentData.size,
       requested: isbnsToFetch.length,
       durationMs: batchDuration,
+      quota_recorded: true,
     });
     results.api_calls_saved = isbnsToFetch.length - 1; // Saved N-1 API calls
 
