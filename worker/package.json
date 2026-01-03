@@ -1,10 +1,10 @@
 {
   "name": "alexandria-worker",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "type": "module",
   "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types, Zod validation, OpenAPI spec, and intelligent search",
   "main": "src/index.ts",
-  "types": "types.ts",
+  "types": "src/index.ts",
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -42,7 +42,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "echo 'Publishing alexandria-worker v2.2.0 - OpenAPI spec + AlexandriaAppType export'"
+    "prepublishOnly": "echo 'Publishing alexandria-worker v2.2.1 - Contract testing support with AlexandriaAppType export'"
   },
   "keywords": [
     "cloudflare",
