@@ -5,6 +5,35 @@ All notable changes to the Alexandria API and npm package will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Author Name Normalization** (#114): Complete author deduplication system
+  - Added `normalized_name` column to `enriched_authors` table
+  - Created `normalize_author_name()` PostgreSQL function with comprehensive normalization rules
+  - Added GIN trigram and B-tree indexes on `normalized_name` for performance
+  - Created `authors_canonical` view for deduplicated author listings
+  - Auto-normalize trigger keeps `normalized_name` in sync with `name` changes
+  - Migration handles backfill of 14.7M authors in batches (50K per batch)
+  - Handles: case variations, spacing, co-authors, suffixes, synonyms, quotes
+  - Comprehensive test suite (13 PostgreSQL function tests + integration tests)
+
+### Changed
+- **Author Search**: Updated `/api/search?author=...` to use `normalized_name` for deduplication
+  - Searches now match author name variations automatically
+  - Falls back to ILIKE on `name` if `normalized_name` is NULL (backward compatible)
+  - Reduced duplicate author results in search responses
+- **Top Authors**: Updated `/api/authors/top` to deduplicate by `normalized_name`
+  - Shows one canonical author per normalized name
+  - Selects author with most books as canonical version
+  - Eliminates duplicate entries in top author lists
+
+### Documentation
+- Added comprehensive `docs/AUTHOR-NORMALIZATION.md` guide
+- Created migration file `migrations/005_add_author_normalization.sql`
+- Created test suite `migrations/005_test_normalization.sql`
+- Added analysis script `scripts/analyze-author-duplicates.js`
+
 ## [2.1.0] - 2025-12-03
 
 ### Added

@@ -186,24 +186,40 @@ export async function getTopAuthors(
     }
   }
 
-  // Query authors sorted by work count (faster than edition count)
-  // Excludes institutional/corporate authors that won't have ISBNdb entries
+  // Query enriched_authors for better performance and deduplication
+  // Uses normalized_name to group variations of the same author
   const authors = await sql`
+    WITH author_stats AS (
+      SELECT
+        ea.author_key,
+        ea.name as author_name,
+        ea.normalized_name,
+        COUNT(DISTINCT wae.work_key)::int as work_count,
+        ea.book_count,
+        -- Rank authors by normalized_name to pick canonical version
+        ROW_NUMBER() OVER (
+          PARTITION BY COALESCE(ea.normalized_name, ea.name)
+          ORDER BY ea.book_count DESC NULLS LAST, ea.author_key
+        ) as name_rank
+      FROM enriched_authors ea
+      JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
+      WHERE ea.name IS NOT NULL
+        AND LENGTH(ea.name) > 3
+        -- Exclude institutional/corporate authors
+        AND ea.name !~* '^(United States|Great Britain|Anonymous|Congress|House|Senate|Committee|Department|Ministry|Government|Office|Board|Bureau|Commission|Council|Agency|Institute|Corporation|Company|Ltd|Inc|Corp|Association|Society|Foundation|University|College|Library|Museum|Press|Publishing|Rand McNally|ICON Group|Philip M\\.? Parker|\[name missing\]|Various Authors)'
+        AND ea.name NOT LIKE '%Congress%'
+        AND ea.name NOT LIKE '%Parliament%'
+        AND ea.name NOT LIKE '%Government%'
+        AND ea.name NOT LIKE '%Ministry%'
+      GROUP BY ea.author_key, ea.name, ea.normalized_name, ea.book_count
+    )
     SELECT
-      a.key as author_key,
-      a.data->>'name' as author_name,
-      COUNT(*)::int as work_count
-    FROM authors a
-    JOIN author_works aw ON aw.author_key = a.key
-    WHERE a.data->>'name' IS NOT NULL
-      AND LENGTH(a.data->>'name') > 3
-      AND a.data->>'name' !~* '^(United States|Great Britain|Anonymous|Congress|House|Senate|Committee|Department|Ministry|Government|Office|Board|Bureau|Commission|Council|Agency|Institute|Corporation|Company|Ltd|Inc|Corp|Association|Society|Foundation|University|College|Library|Museum|Press|Publishing|Rand McNally|ICON Group|Philip M\. Parker|\[name missing\])'
-      AND a.data->>'name' NOT LIKE '%Congress%'
-      AND a.data->>'name' NOT LIKE '%Parliament%'
-      AND a.data->>'name' NOT LIKE '%Government%'
-      AND a.data->>'name' NOT LIKE '%Ministry%'
-    GROUP BY a.key, a.data->>'name'
-    ORDER BY COUNT(*) DESC
+      author_key,
+      author_name,
+      work_count
+    FROM author_stats
+    WHERE name_rank = 1  -- Only include canonical author per normalized_name
+    ORDER BY work_count DESC
     OFFSET ${offset}
     LIMIT ${limit}
   `;

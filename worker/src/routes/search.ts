@@ -406,7 +406,8 @@ app.openapi(searchRoute, async (c) => {
       }
 
     } else if (author) {
-      // OPTIMIZED: Query enriched_authors with ILIKE for fast partial match
+      // OPTIMIZED: Query enriched_authors with normalized_name for deduplication
+      // Fallback to ILIKE on name if normalized_name not available
       const authorPattern = `%${author}%`;
 
       // Fetch limit+1 to check if more results exist without expensive COUNT
@@ -416,7 +417,15 @@ app.openapi(searchRoute, async (c) => {
           FROM enriched_authors ea
           JOIN work_authors_enriched wae ON wae.author_key = ea.author_key
           JOIN enriched_editions ee ON ee.work_key = wae.work_key
-          WHERE ea.name ILIKE ${authorPattern}
+          WHERE (
+            -- Use normalized_name for better deduplication if available
+            CASE
+              WHEN ea.normalized_name IS NOT NULL
+              THEN ea.normalized_name = normalize_author_name(${author})
+                   OR ea.normalized_name LIKE '%' || normalize_author_name(${author}) || '%'
+              ELSE ea.name ILIKE ${authorPattern}
+            END
+          )
           LIMIT ${limit + 1}
           OFFSET ${offset}
         )
