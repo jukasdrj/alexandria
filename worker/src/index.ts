@@ -13,6 +13,7 @@ import type { MessageBatch, Message, CoverQueueMessage, EnrichmentQueueMessage }
 import healthRoutes from './routes/health.js';
 import statsRoutes from './routes/stats.js';
 import searchRoutes from './routes/search.js';
+import searchCombinedRoutes from './routes/search-combined.js';
 import { enrichRoutes } from './routes/enrich.js';
 import coversRoutes from './routes/covers.js';
 import coversLegacyRoutes from './routes/covers-legacy.js';
@@ -122,6 +123,7 @@ const subRouters = [
   healthRoutes,
   statsRoutes,
   searchRoutes,
+  searchCombinedRoutes,
   enrichRoutes,
   coversRoutes,
   coversLegacyRoutes,

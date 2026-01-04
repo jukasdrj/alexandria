@@ -84,6 +84,45 @@ export const SearchSuccessSchema = createSuccessSchema(SearchDataSchema, 'Search
 export { ErrorResponseSchema as SearchErrorSchema };
 
 // =================================================================================
+// Combined Search Schemas (Auto-Detection)
+// =================================================================================
+
+export const CombinedSearchQuerySchema = z.object({
+  q: z.string()
+    .min(1, 'Query must not be empty')
+    .max(200, 'Query too long (max 200 characters)')
+    .describe('Search query - automatically detects ISBN, author, or title'),
+  nocache: z.string().optional().transform((val) => val === 'true'),
+}).merge(PaginationQuerySchema).openapi('CombinedSearchQuery');
+
+export const QueryInfoSchema = z.object({
+  original: z.string().describe('Original query string from user'),
+  detected_type: z.enum(['isbn', 'author', 'title']).describe('Auto-detected query type'),
+  normalized: z.string().describe('Normalized query used for search'),
+  confidence: z.enum(['high', 'medium', 'low']).describe('Detection confidence level'),
+}).openapi('QueryInfo');
+
+export const SearchMetadataSchema = z.object({
+  cache_hit: z.boolean().describe('Whether result was served from cache'),
+  response_time_ms: z.number().describe('Total response time in milliseconds'),
+  source: z.string().describe('Data source (e.g., "database", "cache")'),
+}).openapi('SearchMetadata');
+
+// Combined search data (inner payload)
+export const CombinedSearchDataSchema = z.object({
+  query: QueryInfoSchema,
+  results: z.array(BookResultSchema),
+  pagination: PaginationMetadataSchema,
+  metadata: SearchMetadataSchema,
+}).openapi('CombinedSearchData');
+
+// Combined search success response with envelope
+export const CombinedSearchSuccessSchema = createSuccessSchema(
+  CombinedSearchDataSchema,
+  'CombinedSearchSuccess'
+);
+
+// =================================================================================
 // Type Exports
 // =================================================================================
 
@@ -92,3 +131,9 @@ export type AuthorReference = z.infer<typeof AuthorReferenceSchema>;
 export type BookResult = z.infer<typeof BookResultSchema>;
 export type PaginationMetadata = z.infer<typeof PaginationMetadataSchema>;
 export type SearchData = z.infer<typeof SearchDataSchema>;
+
+// Combined search types
+export type CombinedSearchQuery = z.infer<typeof CombinedSearchQuerySchema>;
+export type QueryInfo = z.infer<typeof QueryInfoSchema>;
+export type SearchMetadata = z.infer<typeof SearchMetadataSchema>;
+export type CombinedSearchData = z.infer<typeof CombinedSearchDataSchema>;

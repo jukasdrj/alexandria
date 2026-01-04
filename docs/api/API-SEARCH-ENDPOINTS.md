@@ -1,6 +1,6 @@
 # Alexandria Search API Endpoints Documentation
 
-Last Updated: 2025-12-10
+Last Updated: 2026-01-04
 
 ## Overview
 
@@ -20,27 +20,147 @@ Alexandria provides comprehensive search capabilities across 54.8M book editions
 
 ## Search Endpoints
 
-### 1. Combined Search Endpoint (Recommended)
+### 1. Combined Search Endpoint (Recommended) 🆕
 
 **Endpoint**: `GET /api/search/combined`
 
-**Description**: Performs an intelligent search across ISBNs, titles, and authors based on the query format. This is the recommended search endpoint for most use cases.
+**Description**: Unified search endpoint with automatic query type detection. Intelligently detects whether the query is an ISBN, author name, or book title and routes to the appropriate search logic. This is the **recommended endpoint** for most use cases due to its simplicity and intelligent caching.
+
+**Auto-Detection Logic**:
+1. **ISBN Detection** (Priority 1): Matches 10 or 13 digit patterns (e.g., `9780439064873`, `978-0-439-06487-3`, `043906487X`)
+2. **Author Detection** (Priority 2): Matches 2-4 word capitalized names (e.g., `J. K. Rowling`, `Stephen King`) with exact match validation against database
+3. **Title Search** (Fallback): All other queries use fuzzy title search with PostgreSQL trigram similarity
 
 **Query Parameters**:
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `q` | string | yes | - | The search query. The API automatically detects if it is an ISBN. |
+| `q` | string | yes | - | Search query (1-200 characters) - automatically detects ISBN, author, or title |
 | `limit` | number | optional | 10 | Results per page (max: 100) |
 | `offset` | number | optional | 0 | Starting position for pagination |
+| `nocache` | boolean | optional | false | Bypass cache (for testing) |
 
-**Example**:
+**Caching Strategy**:
+- **ISBN searches**: Cached for 24 hours (editions rarely change)
+- **Author searches**: Cached for 1 hour (new works added occasionally)
+- **Title searches**: Cached for 1 hour (content updates)
+- Cache key includes: query type, normalized query, limit, and offset
+
+**Response Structure**:
+```json
+{
+  "success": true,
+  "data": {
+    "query": {
+      "original": "harry potter",
+      "detected_type": "title",
+      "normalized": "harry potter",
+      "confidence": "medium"
+    },
+    "results": [
+      {
+        "title": "Harry Potter and the Philosopher's Stone",
+        "authors": [
+          {
+            "name": "J. K. Rowling",
+            "key": "/authors/OL23919A",
+            "openlibrary": "https://openlibrary.org/authors/OL23919A",
+            "gender": "female",
+            "nationality": "British",
+            "birth_year": 1965,
+            "wikidata_id": "Q34660"
+          }
+        ],
+        "isbn": "9780439064873",
+        "coverUrl": "https://covers.openlibrary.org/b/id/10521270-L.jpg",
+        "coverSource": "external",
+        "publish_date": "1999",
+        "publishers": "Scholastic",
+        "pages": 309,
+        "work_title": "Harry Potter and the Philosopher's Stone",
+        "openlibrary_edition": "https://openlibrary.org/books/OL26331930M",
+        "openlibrary_work": "https://openlibrary.org/works/OL82563W",
+        "binding": "Paperback"
+      }
+    ],
+    "pagination": {
+      "limit": 10,
+      "offset": 0,
+      "total": 47,
+      "hasMore": true,
+      "returnedCount": 10
+    },
+    "metadata": {
+      "cache_hit": false,
+      "response_time_ms": 142,
+      "source": "database"
+    }
+  },
+  "meta": {
+    "requestId": "cf-abc123",
+    "timestamp": "2026-01-04T22:15:30.123Z"
+  }
+}
+```
+
+**Examples**:
+
 ```bash
-# Intelligent search for an ISBN
+# ISBN search (auto-detected)
 curl 'https://alexandria.ooheynerds.com/api/search/combined?q=9780439064873'
+# → Returns: detected_type: "isbn", confidence: "high"
 
-# Intelligent search for a title
-curl 'https://alexandria.ooheynerds.com/api/search/combined?q=Dune'
+# Author search (auto-detected)
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=J.%20K.%20Rowling'
+# → Returns: detected_type: "author", confidence: "high"
+
+# Title search (fallback)
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
+# → Returns: detected_type: "title", confidence: "medium"
+
+# Pagination
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=fantasy&limit=20&offset=40'
+# → Returns results 41-60
+
+# Bypass cache (for testing)
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=9780439064873&nocache=true'
+```
+
+**Performance**:
+- Query type detection overhead: <20ms
+- ISBN detection: <1ms (regex pattern matching)
+- Author detection: <10ms (indexed database lookup)
+- Total response time varies by search type and cache status
+
+**Error Responses**:
+
+```json
+// 400 Bad Request - Empty query
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Query must not be empty"
+  }
+}
+
+// 400 Bad Request - Query too long
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Query too long (max 200 characters)"
+  }
+}
+
+// 500 Internal Server Error
+{
+  "success": false,
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "Search failed: Database connection error"
+  }
+}
 ```
 
 ---
