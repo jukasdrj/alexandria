@@ -22,6 +22,7 @@ import quotaRoutes from './routes/quota.js';
 import testRoutes from './routes/test.js';
 import migrateRoutes from './routes/migrate.js';
 import { handleScheduledCoverHarvest } from './routes/harvest.js';
+import { handleScheduledWikidataEnrichment } from './routes/authors.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue } from './services/queue-handlers.js';
@@ -212,11 +213,18 @@ export * from '../types.js';
 export default {
   fetch: app.fetch,
 
-  // Scheduled cron handler (runs every 5 minutes)
+  // Scheduled cron handler (runs daily at 2 AM UTC)
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
     try {
       console.log('[Cron] Scheduled event triggered:', event.cron);
-      await handleScheduledCoverHarvest(env);
+
+      // Run both scheduled tasks in parallel
+      await Promise.all([
+        handleScheduledCoverHarvest(env),
+        handleScheduledWikidataEnrichment(env)
+      ]);
+
+      console.log('[Cron] All scheduled tasks completed');
     } catch (error) {
       console.error('[Cron] Scheduled handler error:', error);
       throw error;

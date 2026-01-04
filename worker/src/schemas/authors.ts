@@ -38,6 +38,11 @@ export const EnrichWikidataRequestSchema = z.object({
     .describe('Re-enrich authors that were already enriched (default: false)'),
 }).openapi('EnrichWikidataRequest');
 
+export const ResolveIdentifierRequestSchema = z.object({
+  type: z.enum(['viaf', 'isni']).describe('Identifier type: VIAF or ISNI'),
+  id: z.string().min(1).describe('Identifier value (e.g., "97113511" for VIAF or "0000 0001 2144 1970" for ISNI)'),
+}).openapi('ResolveIdentifierRequest');
+
 // =================================================================================
 // Authors Response Schemas
 // =================================================================================
@@ -143,6 +148,16 @@ export const EnrichStatusResponseSchema = z.object({
   }),
 }).openapi('EnrichStatusResponse');
 
+export const ResolveIdentifierResponseSchema = z.object({
+  identifier_type: z.enum(['viaf', 'isni']),
+  identifier_value: z.string(),
+  wikidata_id: z.string().nullable(),
+  author_name: z.string().optional(),
+  source: z.enum(['viaf', 'isni', 'wikidata_sparql']),
+  cached: z.boolean(),
+  resolution_method: z.string().optional(),
+}).openapi('ResolveIdentifierResponse');
+
 export const AuthorErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
@@ -163,6 +178,7 @@ export type AuthorKeyParam = z.infer<typeof AuthorKeyParamSchema>;
 export type BibliographyRequest = z.infer<typeof BibliographyRequestSchema>;
 export type EnrichBibliographyRequest = z.infer<typeof EnrichBibliographyRequestSchema>;
 export type EnrichWikidataRequest = z.infer<typeof EnrichWikidataRequestSchema>;
+export type ResolveIdentifierRequest = z.infer<typeof ResolveIdentifierRequestSchema>;
 export type TopAuthor = z.infer<typeof TopAuthorSchema>;
 export type TopAuthorsResponse = z.infer<typeof TopAuthorsResponseSchema>;
 export type AuthorDetails = z.infer<typeof AuthorDetailsSchema>;
@@ -172,4 +188,5 @@ export type EnrichBibliographyResponse = z.infer<typeof EnrichBibliographyRespon
 export type EnrichWikidataResult = z.infer<typeof EnrichWikidataResultSchema>;
 export type EnrichWikidataResponse = z.infer<typeof EnrichWikidataResponseSchema>;
 export type EnrichStatusResponse = z.infer<typeof EnrichStatusResponseSchema>;
+export type ResolveIdentifierResponse = z.infer<typeof ResolveIdentifierResponseSchema>;
 export type AuthorError = z.infer<typeof AuthorErrorSchema>;

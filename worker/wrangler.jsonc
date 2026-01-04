@@ -158,6 +158,12 @@
 
   "logpush": true,
 
+  "triggers": {
+    "crons": [
+      "0 2 * * *"
+    ]
+  },
+
   "dev": {
     "ip": "localhost",
     "port": 8787,

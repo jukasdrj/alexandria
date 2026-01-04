@@ -89,6 +89,7 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 - `GET /covers/:isbn/:size` - Serve covers
 - `POST /api/enrich/batch-direct` - Batch enrichment (up to 1000 ISBNs)
 - `POST /api/authors/enrich-bibliography` - Author expansion
+- `POST /api/authors/resolve-identifier` - VIAF/ISNI → Wikidata crosswalk (NEW!)
 - `GET /api/quota/status` - ISBNdb quota tracking
 - `GET /openapi.json` - OpenAPI spec
 

@@ -6,12 +6,14 @@ import {
   BibliographyRequestSchema,
   EnrichBibliographyRequestSchema,
   EnrichWikidataRequestSchema,
+  ResolveIdentifierRequestSchema,
   TopAuthorsResponseSchema,
   AuthorDetailsSchema,
   BibliographyResponseSchema,
   EnrichBibliographyResponseSchema,
   EnrichWikidataResponseSchema,
   EnrichStatusResponseSchema,
+  ResolveIdentifierResponseSchema,
   AuthorErrorSchema,
 } from '../schemas/authors.js';
 import {
@@ -22,6 +24,7 @@ import {
   enrichWikidataAuthors,
   getEnrichmentStatus,
 } from '../services/author-service.js';
+import { resolveIdentifier } from '../../services/identifier-resolver.js';
 
 // =================================================================================
 // Route Definitions
@@ -256,6 +259,49 @@ const enrichStatusRoute = createRoute({
   },
 });
 
+const resolveIdentifierRoute = createRoute({
+  method: 'post',
+  path: '/api/authors/resolve-identifier',
+  tags: ['Authors'],
+  summary: 'Resolve VIAF/ISNI to Wikidata Q-ID',
+  description: 'Map VIAF (Virtual International Authority File) or ISNI (International Standard Name Identifier) to Wikidata entity. Enables author discovery through external authority identifiers. Results are cached for 30 days.',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: ResolveIdentifierRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Identifier resolved successfully',
+      content: {
+        'application/json': {
+          schema: ResolveIdentifierResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Invalid identifier format',
+      content: {
+        'application/json': {
+          schema: AuthorErrorSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Resolution failed',
+      content: {
+        'application/json': {
+          schema: AuthorErrorSchema,
+        },
+      },
+    },
+  },
+});
+
 // =================================================================================
 // Route Handlers
 // =================================================================================
@@ -404,6 +450,55 @@ app.openapi(enrichStatusRoute, async (c) => {
   }
 });
 
+// POST /api/authors/resolve-identifier
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+app.openapi(resolveIdentifierRoute, async (c) => {
+  const startTime = Date.now();
+
+  try {
+    const logger = c.get('logger');
+    const cache = c.env.CACHE; // KV namespace for caching
+    const params = c.req.valid('json');
+
+    logger?.info('[ResolveIdentifier] Request', {
+      type: params.type,
+      id: params.id,
+    });
+
+    // Resolve identifier using the service
+    const result = await resolveIdentifier(params.type, params.id, cache);
+
+    logger?.info('[ResolveIdentifier] Result', {
+      type: result.identifier_type,
+      wikidata_id: result.wikidata_id,
+      cached: result.cached,
+      source: result.source,
+    });
+
+    return c.json(result);
+
+  } catch (error) {
+    c.get('logger')?.error('[ResolveIdentifier] Error', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    // Check if it's a validation error (invalid format)
+    if (message.includes('Invalid')) {
+      return c.json({
+        error: 'Invalid identifier format',
+        message,
+      }, 400);
+    }
+
+    return c.json({
+      error: 'Failed to resolve identifier',
+      message,
+    }, 500);
+  }
+});
+
 // GET /api/authors/:key (MUST BE LAST - wildcard route)
 // @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(authorDetailsRoute, async (c) => {
@@ -432,5 +527,75 @@ app.openapi(authorDetailsRoute, async (c) => {
     return c.json({ error: 'Failed to fetch author details', message }, 500);
   }
 });
+
+// =================================================================================
+// Scheduled Handlers
+// =================================================================================
+
+/**
+ * Scheduled Wikidata Enrichment Handler
+ * Runs daily at 2 AM UTC to enrich authors without Wikidata data
+ *
+ * Target: 1,000 authors/day
+ * Strategy: Query authors without wikidata_id, process in batches
+ */
+export async function handleScheduledWikidataEnrichment(env: any): Promise<void> {
+  const startTime = Date.now();
+  console.log('[WikidataEnrich:Scheduled] Starting scheduled Wikidata enrichment');
+
+  // Create database connection
+  const sql = (await import('postgres')).default(env.HYPERDRIVE.connectionString, {
+    max: 1,
+    fetch_types: false,
+    prepare: false,
+  });
+
+  try {
+    const TARGET_AUTHORS = 1000;
+
+    // Query authors without Wikidata IDs (prioritize those with most books)
+    const authorsResult = await sql`
+      SELECT DISTINCT ea.author_key, ea.name
+      FROM enriched_authors ea
+      WHERE ea.wikidata_id IS NULL
+        AND ea.name IS NOT NULL
+        AND ea.name != ''
+        AND ea.name != 'Various'
+        AND ea.name != 'Unknown'
+      ORDER BY RANDOM()
+      LIMIT ${TARGET_AUTHORS}
+    `;
+
+    const authors = authorsResult as unknown as { author_key: string; name: string }[];
+
+    if (authors.length === 0) {
+      console.log('[WikidataEnrich:Scheduled] No authors found needing Wikidata enrichment');
+      return;
+    }
+
+    console.log('[WikidataEnrich:Scheduled] Found authors to enrich', { count: authors.length });
+
+    // Call enrichment service
+    const result = await enrichWikidataAuthors(
+      { sql, env, logger: console },
+      {
+        limit: authors.length,
+        skip_existing: true
+      }
+    );
+
+    console.log('[WikidataEnrich:Scheduled] Enrichment complete', {
+      enriched: result.data?.enriched || 0,
+      failed: result.data?.failed || 0,
+      duration_ms: Date.now() - startTime,
+    });
+
+  } catch (error) {
+    console.error('[WikidataEnrich:Scheduled] Error during scheduled enrichment:', error);
+    throw error;
+  } finally {
+    await sql.end();
+  }
+}
 
 export default app;
