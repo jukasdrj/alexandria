@@ -358,14 +358,20 @@ async function main() {
   // Check quota before starting
   console.log('\nChecking ISBNdb API quota...');
   const initialQuota = await getQuotaStatus();
-  if (!initialQuota?.can_make_calls) {
+  if (!initialQuota) {
+    console.warn('\n⚠️  Warning: Could not check quota (network error)');
+    console.warn('Proceeding with caution - monitor quota manually');
+    console.warn('Check quota at: https://alexandria.ooheynerds.com/api/quota/status\n');
+  } else if (!initialQuota.can_make_calls) {
     console.log('\nQuota Status:');
     console.log(formatQuotaStatus(initialQuota));
-    console.log('\nQuota exhausted or unavailable. Cannot start processing.');
+    console.log('\n⚠️  ISBNdb quota ACTUALLY exhausted!');
+    console.log(`Used: ${initialQuota.used}/${initialQuota.daily_limit}`);
     console.log('Retry tomorrow after quota resets.');
     process.exit(2); // Exit code 2 = quota exhaustion
+  } else {
+    console.log(formatQuotaStatus(initialQuota));
   }
-  console.log(formatQuotaStatus(initialQuota));
 
   // Load checkpoint
   const checkpoint = args.resume ? loadCheckpoint() : {
@@ -401,20 +407,30 @@ async function main() {
     if (i > 0 && i % 100 === 0) {
       console.log(`\n--- Quota check at author ${i + 1} ---`);
       const currentQuota = await getQuotaStatus();
-      console.log(formatQuotaStatus(currentQuota));
 
-      if (!currentQuota?.can_make_calls) {
-        console.log(`\n⚠️  ISBNdb quota exhausted! Stopping after ${i} authors.`);
-        console.log('Resume tomorrow with: node bulk-author-harvest.js --resume');
+      if (!currentQuota) {
+        // Network error - log warning but CONTINUE harvest
+        console.warn('⚠️  Warning: Could not check quota (network error)');
+        console.warn('Continuing harvest - monitor quota manually at:');
+        console.warn('https://alexandria.ooheynerds.com/api/quota/status\n');
+      } else {
+        console.log(formatQuotaStatus(currentQuota));
 
-        // Save checkpoint before exiting
-        saveCheckpoint(checkpoint);
-        console.log(`Checkpoint saved to: ${CONFIG.CHECKPOINT_FILE}`);
+        if (!currentQuota.can_make_calls) {
+          // ACTUAL quota exhaustion - stop safely
+          console.log(`\n⚠️  ISBNdb quota ACTUALLY exhausted!`);
+          console.log(`Used: ${currentQuota.used}/${currentQuota.daily_limit}`);
+          console.log('Resume tomorrow with: node bulk-author-harvest.js --resume');
 
-        process.exit(2); // Exit code 2 = quota exhaustion
+          // Save checkpoint before exiting
+          saveCheckpoint(checkpoint);
+          console.log(`Checkpoint saved to: ${CONFIG.CHECKPOINT_FILE}`);
+
+          process.exit(2); // Exit code 2 = quota exhaustion
+        }
+
+        console.log(`--- Continuing with ${remaining.length - i} remaining authors ---\n`);
       }
-
-      console.log(`--- Continuing with ${remaining.length - i} remaining authors ---\n`);
     }
 
     try {
