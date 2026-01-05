@@ -44,14 +44,20 @@ async function searchByISBN(
 			e.cover_url_large AS cover_url,
 			e.cover_source,
 			COALESCE(
-				json_agg(
-					DISTINCT jsonb_build_object(
-						'name', a.name,
-						'key', a.author_key,
-						'openlibrary', CONCAT('https://openlibrary.org/authors/', a.author_key)
-					)
-				) FILTER (WHERE a.author_key IS NOT NULL),
-				'[]'::json
+									json_agg(
+										DISTINCT jsonb_build_object(
+											'name', a.name,
+											'key', a.author_key,
+											'openlibrary', CONCAT('https://openlibrary.org', a.author_key),
+											'gender', a.gender,
+											'nationality', a.nationality,
+											'birth_year', a.birth_year,
+											'death_year', a.death_year,
+											'bio', a.bio,
+											'wikidata_id', a.wikidata_id,
+											'image', a.author_photo_url
+										)
+									) FILTER (WHERE a.author_key IS NOT NULL),				'[]'::json
 			) AS authors
 		FROM edition_isbns ei
 		JOIN enriched_editions e ON ei.isbn = e.isbn
@@ -105,7 +111,14 @@ async function searchByAuthor(
 						DISTINCT jsonb_build_object(
 							'name', a2.name,
 							'key', a2.author_key,
-							'openlibrary', CONCAT('https://openlibrary.org/authors/', a2.author_key)
+							'openlibrary', CONCAT('https://openlibrary.org', a2.author_key),
+							'gender', a2.gender,
+							'nationality', a2.nationality,
+							'birth_year', a2.birth_year,
+							'death_year', a2.death_year,
+							'bio', a2.bio,
+							'wikidata_id', a2.wikidata_id,
+							'image', a2.author_photo_url
 						)
 					) FILTER (WHERE a2.author_key IS NOT NULL),
 					'[]'::json
@@ -164,7 +177,14 @@ async function searchByTitle(
 						DISTINCT jsonb_build_object(
 							'name', a.name,
 							'key', a.author_key,
-							'openlibrary', CONCAT('https://openlibrary.org/authors/', a.author_key)
+							'openlibrary', CONCAT('https://openlibrary.org', a.author_key),
+							'gender', a.gender,
+							'nationality', a.nationality,
+							'birth_year', a.birth_year,
+							'death_year', a.death_year,
+							'bio', a.bio,
+							'wikidata_id', a.wikidata_id,
+							'image', a.author_photo_url
 						)
 					) FILTER (WHERE a.author_key IS NOT NULL),
 					'[]'::json
