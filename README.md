@@ -14,8 +14,8 @@
 
 ## 🎯 Current Status (January 2026)
 
-**Phase 2 Complete** ✅ - Database integration, cover processing, enrichment API operational
-**Active Work:** Bulk author harvesting, queue optimization, Wikidata enrichment
+**Phase 1-5 (Search) Complete** ✅ - Combined search with auto-detection now live!
+**Active Work:** Bulk author harvesting (70% complete), author metadata enhancement
 
 **Quick Links:**
 - **[Current Issues & Priorities](./docs/CURRENT-STATUS.md)** - P1/P2/P3 issues
@@ -30,7 +30,8 @@
 Alexandria exposes a complete **PostgreSQL mirror of OpenLibrary** (54M+ books) through Cloudflare's global edge network. The database runs on a home Unraid server and is accessible worldwide via Cloudflare Tunnel + Hyperdrive.
 
 **Key Features:**
-- 🔍 **Smart Search** - ISBN, title, author with fuzzy matching (pg_trgm)
+- 🔍 **Smart Search** - Combined endpoint with auto-detection (ISBN/author/title)
+- ⚡ **Type-Specific Caching** - KV caching (ISBN: 24h, Author/Title: 1h)
 - 🖼️ **Cover Processing** - Multi-provider (OpenLibrary, ISBNdb, Google Books)
 - 📊 **Enrichment Pipeline** - ISBNdb Premium integration with quota management
 - 🌐 **Global Edge** - Cloudflare's 300+ locations
@@ -126,6 +127,7 @@ npm run tail
 ## 📖 API Endpoints
 
 ### Search & Stats
+- **`GET /api/search/combined?q={query}`** - 🆕 **Combined search with auto-detection** (RECOMMENDED)
 - **`GET /api/search?isbn={isbn}`** - ISBN lookup with Smart Resolution
 - **`GET /api/search?title={title}`** - Title search (ILIKE fuzzy)
 - **`GET /api/search?author={author}`** - Author search (ILIKE fuzzy)
@@ -175,13 +177,14 @@ npm run tail
 ### Basic Search
 
 ```bash
-# Search by ISBN (with Smart Resolution)
+# Combined search (auto-detects ISBN/author/title) - RECOMMENDED
+curl "https://alexandria.ooheynerds.com/api/search/combined?q=9780439064873" | jq
+curl "https://alexandria.ooheynerds.com/api/search/combined?q=Stephen%20King&limit=10" | jq
+curl "https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter&limit=10" | jq
+
+# Legacy search endpoints (still supported)
 curl "https://alexandria.ooheynerds.com/api/search?isbn=9780439064873" | jq
-
-# Title search with pagination
 curl "https://alexandria.ooheynerds.com/api/search?title=harry%20potter&limit=10" | jq
-
-# Author search
 curl "https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offset=40" | jq
 
 # Database stats
@@ -400,26 +403,29 @@ curl https://alexandria.ooheynerds.com/api/stats | jq
 - Quota management (15K daily calls)
 - Author diversity enrichment (Wikidata)
 
-### 🚧 Phase 3: In Progress (Performance & Optimization)
+### ✅ Phase 3-5: Complete (Performance & Search)
 - [x] pg_trgm fuzzy search
 - [x] GIN trigram indexes
 - [x] Query result caching (KV)
 - [x] CDN caching headers
 - [x] Queue optimization (10x throughput improvement)
-- [ ] Validate queue metrics (Issue #109)
-- [ ] Debug harvest failures (Issue #108)
+- [x] Combined search with auto-detection (Jan 5, 2026)
+- [x] Pagination support
+- [x] Cross-repo contract testing (Issue #90)
 
-### 🔜 Phase 4: Next (Bulk Harvesting)
-- [ ] Top-1000 author tier harvest (Issue #111)
-- [ ] Wikidata enrichment cron job (Issue #110)
-- [ ] Author deduplication (Issue #114)
+### 🚧 Phase 4: In Progress (Bulk Harvesting)
+- [x] Top-1000 author tier harvest (Issue #111) - 70% complete
+- [x] Wikidata enrichment cron job (Issue #110) - COMPLETE
+- [x] Author deduplication (Issue #114) - COMPLETE
+- [ ] Complete remaining 299 authors (Issue #111)
+- [ ] Enhance author metadata in search results (Issue #120)
 
-### 📋 Phase 5-6: Future (Advanced Features)
-- Combined search with auto-detection
-- Pagination support
+### 📋 Phase 6: Future (Advanced Features)
 - Search analytics tracking
+- Export results (CSV/JSON)
+- Semantic search with embeddings
 - CI/CD pipeline (GitHub Actions)
-- Cross-repo contract testing
+- Wikipedia + LLM fallback for authors (Issue #113)
 
 **Full roadmap:** [TODO.md](./TODO.md)
 
@@ -454,6 +460,6 @@ MIT
 
 ---
 
-**Last Updated:** January 2, 2026
-**Version:** 2.2.0
+**Last Updated:** January 5, 2026
+**Version:** 2.2.1
 **Database:** 54.8M editions | 49.3M ISBNs | 40.1M works | 14.7M authors

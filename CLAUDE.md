@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
 
-**Current Status**: Phase 1-2 COMPLETE! Queue-based architecture operational. Worker live with Hyperdrive + Tunnel database access + R2 cover storage + Cloudflare Queues. ISBNdb Premium (3 req/sec, 1000 ISBN batches). TypeScript with @hono/zod-openapi.
+**Current Status**: Phase 1-5 (Search) COMPLETE! Combined search endpoint live with intelligent query detection. Queue-based architecture operational. Worker live with Hyperdrive + Tunnel database access + R2 cover storage + Cloudflare Queues. ISBNdb Premium (3 req/sec, 1000 ISBN batches). TypeScript with @hono/zod-openapi.
 
 ## Architecture
 
@@ -85,11 +85,12 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 
 **Key endpoints**:
 - `GET /health`, `GET /api/stats` - Status
-- `GET /api/search` - Unified search (ISBN/title/author)
+- `GET /api/search/combined` - Combined search with auto-detection (ISBN/author/title) **RECOMMENDED**
+- `GET /api/search` - Legacy search (ISBN/title/author)
 - `GET /covers/:isbn/:size` - Serve covers
 - `POST /api/enrich/batch-direct` - Batch enrichment (up to 1000 ISBNs)
 - `POST /api/authors/enrich-bibliography` - Author expansion
-- `POST /api/authors/resolve-identifier` - VIAF/ISNI → Wikidata crosswalk (NEW!)
+- `POST /api/authors/resolve-identifier` - VIAF/ISNI → Wikidata crosswalk
 - `GET /api/quota/status` - ISBNdb quota tracking
 - `GET /openapi.json` - OpenAPI spec
 
