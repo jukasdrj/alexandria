@@ -1,20 +1,45 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 4, 2026
+**Last Updated:** January 5, 2026
 
 ## 🎯 Active Issues
 
 ### P2 - MEDIUM Priority
-1. **#111** - Top-1000 author tier harvest (IN PROGRESS - 70% complete)
+1. **#118** - Auto-healing/recovery system for bulk author harvesting
+2. **#111** - Top-1000 author tier harvest (IN PROGRESS - 70% complete)
 
 ### P3 - LOW Priority (Future Enhancements)
-2. **#113** - Wikipedia + LLM fallback for authors without Wikidata
-3. **#100** - GitHub Actions for automated harvesting
-4. **#99** - Harvesting runbook documentation
+3. **#117** - Semantic search with Cloudflare Vectorize
+4. **#116** - Search analytics tracking with Analytics Engine
+5. **#113** - Wikipedia + LLM fallback for authors without Wikidata
+6. **#100** - GitHub Actions for automated harvesting
+7. **#99** - Harvesting runbook documentation
 
 ---
 
 ## ✅ Recently Completed (January 5, 2026)
+
+### #120: Full Author Metadata in Combined Search (COMPLETED - Jan 5)
+**Fixed combined search endpoint to return enriched author data:**
+- Added complete author fields: `bio`, `gender`, `nationality`, `birth_year`, `death_year`, `wikidata_id`, `image`
+- Fixed OpenLibrary URL construction (removed double `/authors/` prefix)
+- All three query types (ISBN, author, title) now return consistent enriched metadata
+- **Commit:** `2ba4e2a`
+- **Deployed:** Version `19f72c71-8d62-44ea-b261-e1458618d6d2`
+- **Tests:** 575/588 passing (13 integration tests skipped - require Tailscale)
+
+**Example response:**
+```json
+{
+  "name": "Agatha Christie",
+  "openlibrary": "https://openlibrary.org/authors/OL27695A",
+  "bio": "Agatha Mary Clarissa Miller was born in Torquay, Devon...",
+  "gender": "female",
+  "nationality": "British",
+  "birth_year": 1890,
+  "death_year": 1976
+}
+```
 
 ### Combined Search Endpoint (COMPLETED - Jan 5)
 **Deployed unified search with intelligent query detection:**
@@ -23,7 +48,7 @@
 - Endpoint: `GET /api/search/combined?q={query}`
 - Full documentation in `docs/api/API-SEARCH-ENDPOINTS.md`
 - Fixed schema mismatches in enriched tables queries
-- Deployed and verified working
+- Now includes full author metadata (#120)
 
 **Examples:**
 ```bash
@@ -255,11 +280,12 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 - Reset: Daily at midnight UTC
 
 **Infrastructure:**
-- Worker: Deployed (Version: a5963008-d879-4101-bf70-1d3f50a781c0)
+- Worker: Deployed (Version: 19f72c71-8d62-44ea-b261-e1458618d6d2)
 - Cron jobs: Active (daily 2 AM UTC)
 - Tunnel: Operational (4 connections)
 - Queues: Processing normally
+- Tests: 575/588 passing (13 integration tests require Tailscale)
 
 ---
 
-**Next Review:** After #111 completion and migration verification
+**Next Review:** After #111 completion (top-1000 harvest)
