@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-01-05
+
+### Fixed
+- **NPM Package**: Published combined search implementation fixes to npm
+  - Includes schema corrections from commit ab5812e
+  - Ensures consumers get working combined search endpoint types and implementation
+
+### Changed
+- Bumped package version to 2.2.2 to include combined search fixes
+
 ## [2.2.1] - 2026-01-05
 
 ### Added
