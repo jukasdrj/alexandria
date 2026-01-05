@@ -734,54 +734,6 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ---
 
-## ISBN Validation
-
-### 23. Bulk ISBN Existence Check
-
-**Endpoint**: `POST /api/isbns/check`
-
-**Description**: Checks which ISBNs exist in the enriched_editions table. Useful for validating large ISBN lists before processing. Checks both primary ISBN field and alternate_isbns array.
-
-**Request Body**:
-```json
-{
-  "isbns": ["9780439064873", "9781492666868", "9780545010221"]
-}
-```
-
-**Validation**:
-- ISBNs array is required
-- Maximum 1000 ISBNs per request
-- Returns 400 error if validation fails
-
-**Response**:
-```json
-{
-  "requested": 3,
-  "found": 2,
-  "missing": 1,
-  "existing_isbns": ["9780439064873", "9781492666868"],
-  "missing_isbns": ["9780545010221"],
-  "query_duration_ms": 45
-}
-```
-
-**Example**:
-```bash
-curl -X POST 'https://alexandria.ooheynerds.com/api/isbns/check' \
-  -H 'Content-Type: application/json' \
-  -d '{"isbns": ["9780439064873", "9781492666868", "9780545010221"]}'
-```
-
-**Performance**: ~20-100ms for 1000 ISBNs (depends on match count)
-
-**Use Cases**:
-- Pre-validation before bulk enrichment
-- Checking if ISBNs need processing
-- Filtering out already-enriched books
-
----
-
 ## Author Endpoints
 
 ### 24. Author Details
@@ -1139,17 +1091,6 @@ When an ISBN search returns no results from the local OpenLibrary database, Smar
    - Subsequent queries hit local cache
    - No user-visible latency increase
 
-### Configuration
-
-Smart Resolution is enabled by default. Configure via environment:
-```javascript
-// Disable Smart Resolution
-SMART_RESOLUTION_ENABLED=false
-
-// Configure providers
-SMART_RESOLUTION_PROVIDERS=isbndb,google,openlibrary
-```
-
 ### Example Flow
 
 ```bash
@@ -1447,133 +1388,7 @@ curl 'https://alexandria.ooheynerds.com/api/authors/enrich-status' | jq .
 
 These endpoints provide administrative functionality and debugging capabilities for the Alexandria system.
 
-### 17. Cover Object Inspection
-
-**Endpoint**: `GET /api/covers/inspect`
-
-**Description**: Debug endpoint to inspect R2 storage objects with metadata. Useful for troubleshooting cover storage issues and analyzing storage usage.
-
-**Query Parameters**:
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `limit` | number | optional | 20 | Number of objects to inspect |
-| `details` | boolean | optional | false | Include full metadata (customMetadata, httpMetadata) |
-
-**Response**:
-```json
-{
-  "objects": [
-    {
-      "key": "isbn/9780439064873/large.webp",
-      "size": 45678,
-      "uploaded": "2025-12-10T15:30:00.000Z",
-      "customMetadata": {
-        "isbn": "9780439064873",
-        "source": "openlibrary"
-      },
-      "httpMetadata": {
-        "contentType": "image/webp"
-      }
-    }
-  ],
-  "count": 1,
-  "truncated": false
-}
-```
-
-**Example**:
-```bash
-# Basic inspection (first 20 objects)
-curl 'https://alexandria.ooheynerds.com/api/covers/inspect'
-
-# Detailed inspection with more results
-curl 'https://alexandria.ooheynerds.com/api/covers/inspect?limit=50&details=true'
-```
-
----
-
-### 18. Manual Enrichment Queue Drain
-
-**Endpoint**: `POST /api/queue/drain/enrichment`
-
-**Description**: Admin endpoint to manually trigger enrichment queue processing. Pulls messages from the queue and processes them synchronously. Useful for manual queue management and testing.
-
-**Query Parameters**:
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `batch_size` | number | optional | 10 | Number of messages to pull and process |
-
-**Response**:
-```json
-{
-  "pulled": 10,
-  "processed": 8,
-  "failed": 2,
-  "errors": [
-    {
-      "isbn": "9780000000000",
-      "error": "ISBN not found in any provider"
-    }
-  ]
-}
-```
-
-**Example**:
-```bash
-# Drain 10 messages (default)
-curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/enrichment'
-
-# Drain custom batch size
-curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/enrichment?batch_size=25'
-```
-
-**Note**: This endpoint processes messages synchronously and may take several seconds to complete for large batch sizes.
-
----
-
-### 19. Manual Cover Queue Drain
-
-**Endpoint**: `POST /api/queue/drain/covers`
-
-**Description**: Admin endpoint to manually trigger cover queue processing. Pulls messages from the queue and processes them synchronously. Useful for manual queue management and testing.
-
-**Query Parameters**:
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `batch_size` | number | optional | 20 | Number of messages to pull and process |
-
-**Response**:
-```json
-{
-  "pulled": 20,
-  "processed": 18,
-  "failed": 2,
-  "errors": [
-    {
-      "isbn": "9780000000000",
-      "error": "No cover URL found"
-    }
-  ]
-}
-```
-
-**Example**:
-```bash
-# Drain 20 messages (default)
-curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/covers'
-
-# Drain custom batch size
-curl -X POST 'https://alexandria.ooheynerds.com/api/queue/drain/covers?batch_size=50'
-```
-
-**Note**: This endpoint processes messages synchronously and may take several seconds to complete for large batch sizes.
-
----
-
-### 20. Interactive Dashboard
+### 17. Interactive Dashboard
 
 **Endpoint**: `GET /`
 
@@ -1607,7 +1422,6 @@ Alexandria enforces the following limits on batch operations to ensure system st
 
 | Endpoint | Limit | Enforcement | Notes |
 |----------|-------|-------------|-------|
-| `POST /api/isbns/check` | 1000 ISBNs max | Returns 400 if exceeded | Checks ISBN existence in enriched_editions |
 | `POST /api/enrich/queue/batch` | 100 books max | Returns 400 if exceeded | Background queue processing |
 | `POST /covers/batch` | 10 ISBNs max | Zod schema validation | Synchronous cover processing |
 | `POST /api/covers/queue` | 100 books max | Returns 400 if exceeded | Background cover queue |

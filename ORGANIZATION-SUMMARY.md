@@ -106,17 +106,14 @@ docs/
 ## 🎯 Key Insights from Analysis
 
 ### Critical Issues Found (P1)
-1. **Documentation Mismatches** - 4 endpoints documented but don't exist in codebase:
-   - `POST /api/isbns/check`
-   - `POST /api/queue/drain/enrichment`
-   - `POST /api/queue/drain/covers`
-   - `GET /api/covers/inspect`
+**All P1 issues have been resolved! ✅**
 
-2. **Phantom Configuration** - Smart Resolution env vars referenced but not implemented:
-   - `SMART_RESOLUTION_ENABLED`
-   - `SMART_RESOLUTION_PROVIDERS`
+1. ~~**Documentation Mismatches**~~ ✅ **RESOLVED Jan 5, 2026**
+   - Removed 4 phantom endpoints from documentation
+   - Removed phantom SMART_RESOLUTION_* configuration references
 
-3. **Issue #120** - Restore full author metadata in combined search endpoint
+2. ~~**Issue #120**~~ ✅ **RESOLVED Jan 5, 2026**
+   - Author metadata now complete in combined search
 
 ### Active Work (P2)
 - **Issue #111** - Top-1000 author tier harvest (70% complete, ~299 remaining)
