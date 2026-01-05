@@ -12,16 +12,15 @@
 
 ---
 
-## 🎯 Current Status (January 2026)
+## 🎯 Current Status
 
-**Phase 1-5 (Search) Complete** ✅ - Combined search with auto-detection now live!
-**Active Work:** Bulk author harvesting (70% complete), author metadata enhancement
+**Production:** Phase 1-5 Complete ✅ | Combined search live | 54.8M books indexed
 
 **Quick Links:**
-- **[Current Issues & Priorities](./docs/CURRENT-STATUS.md)** - P1/P2/P3 issues
-- **[Development Roadmap](./TODO.md)** - Phase tracking
+- **[Developer Guide](./CLAUDE.md)** - Essential reference for development
 - **[Full Documentation](./docs/INDEX.md)** - Complete docs index
-- **[Developer Guide](./CLAUDE.md)** - 42KB authoritative guide
+- **[Roadmap](./TODO.md)** - Future work
+- **[Issues](./docs/CURRENT-STATUS.md)** - Current priorities
 
 ---
 
@@ -172,87 +171,32 @@ npm run tail
 
 ---
 
-## 💻 Usage Examples
+## 💻 Quick Start
 
-### Basic Search
-
-```bash
-# Combined search (auto-detects ISBN/author/title) - RECOMMENDED
-curl "https://alexandria.ooheynerds.com/api/search/combined?q=9780439064873" | jq
-curl "https://alexandria.ooheynerds.com/api/search/combined?q=Stephen%20King&limit=10" | jq
-curl "https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter&limit=10" | jq
-
-# Legacy search endpoints (still supported)
-curl "https://alexandria.ooheynerds.com/api/search?isbn=9780439064873" | jq
-curl "https://alexandria.ooheynerds.com/api/search?title=harry%20potter&limit=10" | jq
-curl "https://alexandria.ooheynerds.com/api/search?author=rowling&limit=20&offset=40" | jq
-
-# Database stats
-curl "https://alexandria.ooheynerds.com/api/stats" | jq
-```
-
-### Cover Images
+### API Examples
 
 ```bash
-# Get cover image (large/medium/small)
+# Combined search (auto-detects ISBN/author/title)
+curl "https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter" | jq
+
+# Get cover image
 curl "https://alexandria.ooheynerds.com/covers/9780439064873/large" -o cover.webp
 
-# Check if cover exists
-curl "https://alexandria.ooheynerds.com/covers/9780439064873/status" | jq
-
-# Batch cover processing
-curl -X POST "https://alexandria.ooheynerds.com/covers/batch" \
-  -H "Content-Type: application/json" \
-  -d '{"isbns":["9780439064873","9781234567890"]}'
-```
-
-### Enrichment
-
-```bash
-# Direct batch enrichment (up to 1000 ISBNs)
-curl -X POST "https://alexandria.ooheynerds.com/api/enrich/batch-direct" \
-  -H "Content-Type: application/json" \
-  -d '{"isbns":["9780439064873"],"source":"my_app"}' | jq
-
-# Author bibliography (fetch + enrich)
-curl -X POST "https://alexandria.ooheynerds.com/api/authors/enrich-bibliography" \
-  -H "Content-Type: application/json" \
-  -d '{"author_name":"Brandon Sanderson"}' | jq
-
-# Check ISBNdb quota
+# Check quota
 curl "https://alexandria.ooheynerds.com/api/quota/status" | jq
 ```
 
 ### Type-Safe Clients
 
-**TypeScript (openapi-fetch):**
 ```bash
-# Generate types
-npx openapi-typescript https://alexandria.ooheynerds.com/openapi.json -o alexandria-types.ts
-npm install openapi-fetch
+# TypeScript
+npx openapi-typescript https://alexandria.ooheynerds.com/openapi.json -o types.ts
+
+# Python
+datamodel-codegen --url https://alexandria.ooheynerds.com/openapi.json -o models.py
 ```
 
-```typescript
-import createClient from "openapi-fetch";
-import type { paths } from "./alexandria-types";
-
-const client = createClient<paths>({
-  baseUrl: "https://alexandria.ooheynerds.com"
-});
-
-// Fully typed with IntelliSense!
-const { data } = await client.GET("/api/search", {
-  params: { query: { isbn: "9780439064873" } }
-});
-```
-
-**Python (httpx + pydantic):**
-```bash
-pip install datamodel-code-generator
-datamodel-codegen \
-  --url https://alexandria.ooheynerds.com/openapi.json \
-  --output alexandria_models.py
-```
+**Full examples:** [docs/api/API-SEARCH-ENDPOINTS.md](./docs/api/API-SEARCH-ENDPOINTS.md)
 
 ---
 
@@ -385,49 +329,21 @@ curl https://alexandria.ooheynerds.com/api/stats | jq
 
 ---
 
-## 🗺️ Development Roadmap
+## 🗺️ Roadmap
 
-### ✅ Phase 1-2: Complete (Infrastructure + Database)
-- Cloudflare Tunnel on Unraid
-- Hyperdrive connection pooling
-- Search API (ISBN, title, author)
-- Cover processing pipeline
-- Enrichment API with queues
-- TypeScript migration (v2.0.0)
+**Production (Complete):** Infrastructure, enrichment pipeline, search optimization, combined search endpoint
 
-### ✅ Phase 2.5-2.10: Complete (Enrichment)
-- R2 cover storage with multi-size variants
-- ISBNdb Premium integration (3 req/sec, 1000 ISBN batches)
-- Smart Resolution pipeline (ISBNdb → Google Books → OpenLibrary)
-- Queue-based background processing
-- Quota management (15K daily calls)
-- Author diversity enrichment (Wikidata)
-
-### ✅ Phase 3-5: Complete (Performance & Search)
-- [x] pg_trgm fuzzy search
-- [x] GIN trigram indexes
-- [x] Query result caching (KV)
-- [x] CDN caching headers
-- [x] Queue optimization (10x throughput improvement)
-- [x] Combined search with auto-detection (Jan 5, 2026)
-- [x] Pagination support
-- [x] Cross-repo contract testing (Issue #90)
-
-### 🚧 Phase 4: In Progress (Bulk Harvesting)
-- [x] Top-1000 author tier harvest (Issue #111) - 70% complete
-- [x] Wikidata enrichment cron job (Issue #110) - COMPLETE
-- [x] Author deduplication (Issue #114) - COMPLETE
-- [ ] Complete remaining 299 authors (Issue #111)
-- [ ] Enhance author metadata in search results (Issue #120)
-
-### 📋 Phase 6: Future (Advanced Features)
+**Current Work:**
+- Author metadata expansion (bulk harvesting automation)
 - Search analytics tracking
 - Export results (CSV/JSON)
-- Semantic search with embeddings
-- CI/CD pipeline (GitHub Actions)
-- Wikipedia + LLM fallback for authors (Issue #113)
 
-**Full roadmap:** [TODO.md](./TODO.md)
+**Future:**
+- Semantic search with embeddings
+- CI/CD pipeline automation
+- Wikipedia + LLM fallback enrichment
+
+**Full roadmap:** [TODO.md](./TODO.md) | **Issues:** [CURRENT-STATUS.md](./docs/CURRENT-STATUS.md)
 
 ---
 
