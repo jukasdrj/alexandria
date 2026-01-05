@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-01-05
+
+### Fixed
+- **NPM Package**: Updated `AuthorReference` interface to include enriched author metadata (#120)
+  - Added `bio`, `gender`, `nationality`, `birth_year`, `death_year`, `wikidata_id`, `image` fields
+  - Types now match actual API response from combined search endpoint
+  - Ensures type-safe consumption of enriched author data in consuming applications
+
+### Changed
+- Combined search endpoint now returns full author metadata in all query types (ISBN, author, title)
+- Fixed OpenLibrary URL construction (removed double `/authors/` prefix)
+
 ## [2.2.2] - 2026-01-05
 
 ### Fixed

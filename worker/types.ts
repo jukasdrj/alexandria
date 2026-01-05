@@ -155,12 +155,22 @@ export type QueueEnrichment = z.infer<typeof QueueEnrichmentSchema>;
 // =================================================================================
 
 /**
- * Author reference in search results
+ * Author reference in search results (enriched with metadata from enriched_authors table)
+ * @since 2.2.3 - Added enriched author metadata fields
  */
 export interface AuthorReference {
   name: string;
   key: string;                    // e.g., "/authors/OL7234434A"
   openlibrary: string;            // e.g., "https://openlibrary.org/authors/OL7234434A"
+
+  // Enriched metadata (from enriched_authors table)
+  bio?: string | null;            // Author biography
+  gender?: string | null;         // e.g., "male", "female", "Unknown"
+  nationality?: string | null;    // e.g., "United States", "British"
+  birth_year?: number | null;     // Birth year
+  death_year?: number | null;     // Death year
+  wikidata_id?: string | null;    // Wikidata identifier (e.g., "Q35064")
+  image?: string | null;          // Author photo URL (from author_photo_url column)
 }
 
 export interface BookResult {
