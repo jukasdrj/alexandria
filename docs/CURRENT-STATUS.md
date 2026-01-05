@@ -4,8 +4,11 @@
 
 ## 🎯 Active Issues
 
+### P1 - HIGH Priority
+1. **#114** - Author normalization database migration (awaiting direct DB connection)
+
 ### P2 - MEDIUM Priority
-1. **#118** - Auto-healing/recovery system for bulk author harvesting
+2. **#118** - Auto-healing/recovery system for bulk author harvesting
 
 ### P3 - LOW Priority (Future Enhancements)
 3. **#117** - Semantic search with Cloudflare Vectorize
@@ -135,13 +138,14 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 
 ---
 
-### #114: Author Deduplication (DEPLOYED - Jan 4)
-**Implemented author name normalization for 14.7M authors:**
-- Added `normalized_name` column to `enriched_authors`
+### #114: Author Deduplication (⚠️ PENDING DB MIGRATION)
+**Implementation ready, awaiting direct database connection:**
+- Migration script: `migrations/005_add_author_normalization.sql`
+- Will add `normalized_name` column to `enriched_authors`
 - PostgreSQL function: `normalize_author_name()` with 9 normalization rules
 - 3 performance indexes (GIN trigram + B-tree)
 - Auto-normalize trigger for data consistency
-- Updated search endpoints to use normalized names
+- Worker code ready to use normalized names
 
 **Normalization Rules:**
 - Lowercase conversion
@@ -158,7 +162,8 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 - ~1-2% duplicate reduction
 - Migration time: 30-60 minutes
 
-**Documentation:** `docs/AUTHOR-NORMALIZATION.md`
+**Documentation:** `docs/planning/AUTHOR-NORMALIZATION.md`
+**Next Step:** Run migration when direct DB connection available
 
 ---
 
@@ -218,8 +223,8 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 ### Phase 4: Author Enrichment Expansion
 - [x] `/api/authors/enrich-bibliography` endpoint
 - [x] Scripts: `expand-author-bibliographies.js`, `e2e-author-enrichment-test.js`
-- [x] Run large-scale author expansion (#111 - 70% complete)
-- [x] Author deduplication (#114)
+- [x] Run large-scale author expansion (#111 - 81.8% complete)
+- [ ] Author deduplication (#114 - awaiting DB migration)
 
 ### Phase 5: Advanced Features
 - [ ] Combined search (`/api/search?q={query}`)
@@ -249,13 +254,15 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 
 ## 🎯 Recommended Next Actions
 
-### Immediate (Today)
-1. **Complete Top-1000 Harvest (#111)** - ~10 minutes remaining
-2. **Verify author normalization migration** - Check backfill completion
+### Immediate (When DB Access Available)
+1. **Run Author Normalization Migration (#114)** - Execute `migrations/005_add_author_normalization.sql`
+   - Estimated time: 30-60 minutes for 14.7M authors
+   - Will add `normalized_name` column and indexes
+   - Deploy updated Worker code after migration
 
 ### Short-term (This Week)
-3. **Wikipedia + LLM Fallback (#113)** - For authors without Wikidata
-4. **GitHub Actions Automation (#100)** - Automated harvesting pipeline
+2. **Wikipedia + LLM Fallback (#113)** - For authors without Wikidata
+3. **GitHub Actions Automation (#100)** - Automated harvesting pipeline
 
 ### Long-term (Next Month)
 5. **Combined Search Endpoint** - Phase 5 feature
@@ -294,7 +301,7 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 
 **Database:**
 - 54.8M editions
-- 14.7M authors (normalization deployed)
+- 14.7M authors (normalization pending migration)
 - 28.6M enriched editions
 - 21.2M enriched works
 

@@ -1,7 +1,7 @@
 # Author Name Normalization & Deduplication
 
 **Issue**: #114
-**Status**: ✅ Implemented (Not Deployed)
+**Status**: ⚠️ PENDING DATABASE MIGRATION - Awaiting direct DB connection
 **Migration**: `migrations/005_add_author_normalization.sql`
 
 ## Problem

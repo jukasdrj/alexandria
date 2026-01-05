@@ -2,6 +2,7 @@
 
 **Date:** Dec 14, 2025
 **From:** Alexandria project cleanup
+**Status:** ⚠️ STILL PENDING - Resources still bound to bendv3 as of Jan 5, 2026
 
 ## Summary
 
