@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-01-05
+
+### Added
+- **Combined Search Endpoint** (#120): Fully operational `/api/search/combined` with intelligent query detection
+  - Auto-detects query type: ISBN (regex) → Author (DB lookup) → Title (fallback)
+  - Type-specific KV caching: ISBN (24h TTL), Author/Title (1h TTL)
+  - Query normalization and confidence scoring
+  - Comprehensive metadata in responses (cache hits, timing, detection confidence)
+  - Fixed schema mismatches in enriched tables queries
+  - Successfully deployed and tested on production
+
+### Fixed
+- **Enriched Tables Schema**: Corrected column references in combined search queries
+  - Fixed `work_id` → `work_key` throughout all queries
+  - Fixed `edition_id` → `isbn` for proper joins
+  - Fixed `cover_url` → `cover_url_large` for cover images
+  - Fixed `edition_key` → `openlibrary_edition_id` for OpenLibrary URLs
+  - Simplified author fields to match actual schema (name, key, openlibrary URL)
+
+### Documentation
+- Updated README.md to recommend combined search endpoint
+- Updated CLAUDE.md to reflect Phase 1-5 completion
+- Created GitHub Issue #120 for future author metadata enhancement
+- Updated all documentation dates to January 5, 2026
+
+## [2.2.0] - 2026-01-04
+
 ### Added
 - **Author Name Normalization** (#114): Complete author deduplication system
   - Added `normalized_name` column to `enriched_authors` table

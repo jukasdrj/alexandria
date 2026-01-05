@@ -1,6 +1,6 @@
 # Alexandria Documentation Index
 
-**Last Updated:** January 2, 2026
+**Last Updated:** January 5, 2026
 
 > **Quick Start:** New to Alexandria? Start with [README.md](../README.md) → [CURRENT-STATUS.md](./CURRENT-STATUS.md) → [CLAUDE.md](../CLAUDE.md)
 
@@ -20,7 +20,7 @@
 ## 🔌 API Documentation
 
 ### Endpoints & Integration
-- **[api/API-SEARCH-ENDPOINTS.md](./api/API-SEARCH-ENDPOINTS.md)** - Search API documentation (ISBN, title, author)
+- **[api/API-SEARCH-ENDPOINTS.md](./api/API-SEARCH-ENDPOINTS.md)** - Search API documentation (combined search with auto-detection)
 - **[api/ISBNDB-ENDPOINTS.md](./api/ISBNDB-ENDPOINTS.md)** - ISBNdb Premium API integration
 - **[api/ISBNDB-ENRICHMENT.md](./api/ISBNDB-ENRICHMENT.md)** - Smart resolution pipeline
 
