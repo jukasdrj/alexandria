@@ -43,7 +43,12 @@ export const BookResultSchema = z.object({
   title: z.string(),
   authors: z.array(AuthorReferenceSchema),
   isbn: z.string().nullable(),
-  coverUrl: z.string().nullable(),
+  coverUrl: z.string().nullable().describe('Legacy: Single cover URL (typically large)'),
+  coverUrls: z.object({
+    large: z.string(),
+    medium: z.string(),
+    small: z.string(),
+  }).nullable().optional().describe('Modern: Multiple sizes via /covers/:isbn/:size endpoint'),
   coverSource: z.enum(['r2', 'external', 'external-fallback', 'enriched-cached']).nullable(),
   publish_date: z.string().nullable(),
   publishers: z.string().nullable().describe('Publisher name as string'),

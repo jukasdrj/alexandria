@@ -516,11 +516,19 @@ app.openapi(searchRoute, async (c) => {
         image: a.image,
       }));
 
+      // Generate coverUrls object if ISBN is available
+      const coverUrls = row.isbn ? {
+        large: `https://alexandria.ooheynerds.com/covers/${row.isbn}/large`,
+        medium: `https://alexandria.ooheynerds.com/covers/${row.isbn}/medium`,
+        small: `https://alexandria.ooheynerds.com/covers/${row.isbn}/small`,
+      } : null;
+
       return {
         title: row.title,
         authors,
         isbn: row.isbn,
-        coverUrl,
+        coverUrl,          // Legacy: direct URL
+        coverUrls,         // Modern: size-specific URLs
         coverSource: coverUrl ? 'enriched-cached' as const : null,
         publish_date: row.publish_date,
         publishers: row.publishers,

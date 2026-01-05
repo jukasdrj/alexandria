@@ -210,11 +210,22 @@ async function searchByTitle(
  * Converts database row to API response format
  */
 function formatSearchResult(row: any): BookResult {
+	const isbn = row.isbn;
+	const coverUrl = row.cover_url || null;
+
+	// Generate coverUrls object if ISBN is available (for /covers/:isbn/:size endpoint)
+	const coverUrls = isbn ? {
+		large: `https://alexandria.ooheynerds.com/covers/${isbn}/large`,
+		medium: `https://alexandria.ooheynerds.com/covers/${isbn}/medium`,
+		small: `https://alexandria.ooheynerds.com/covers/${isbn}/small`,
+	} : null;
+
 	return {
 		title: row.title || '',
 		authors: Array.isArray(row.authors) ? row.authors : [],
-		isbn: row.isbn || null,
-		coverUrl: row.cover_url || null,
+		isbn: isbn || null,
+		coverUrl,              // Legacy: direct URL (typically large)
+		coverUrls,             // Modern: size-specific URLs
 		coverSource: row.cover_source || null,
 		publish_date: row.publish_date || null,
 		publishers: row.publishers || null,

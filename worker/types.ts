@@ -178,8 +178,16 @@ export interface BookResult {
   title: string;
   authors: AuthorReference[];     // Array of author objects with name, key, openlibrary URL
   isbn: string | null;
-  coverUrl: string | null;
+
+  // Cover images (dual format for backward compatibility)
+  coverUrl: string | null;        // Legacy: Single cover URL (typically large)
+  coverUrls?: {                   // Modern: Multiple sizes via /covers/:isbn/:size endpoint
+    large: string;
+    medium: string;
+    small: string;
+  } | null;
   coverSource: 'r2' | 'external' | 'external-fallback' | 'enriched-cached' | null;
+
   publish_date: string | null;
   publishers: string | null;      // Publisher name as string
   pages: number | null;           // Page count as number

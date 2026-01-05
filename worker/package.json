@@ -1,6 +1,6 @@
 {
   "name": "alexandria-worker",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "type": "module",
   "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types, Zod validation, OpenAPI spec, and intelligent search",
   "main": "src/index.ts",
@@ -42,7 +42,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "echo 'Publishing alexandria-worker v2.2.3 - AuthorReference interface updated with enriched metadata fields'"
+    "prepublishOnly": "echo 'Publishing alexandria-worker v2.2.4 - BookResult interface updated with coverUrls object for multiple cover sizes'"
   },
   "keywords": [
     "cloudflare",

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.4] - 2026-01-05
+
+### Added
+- **Cover URLs Enhancement**: BookResult now includes both legacy and modern cover URL formats
+  - `coverUrl` - Legacy single cover URL (backward compatible)
+  - `coverUrls` - New object with multiple sizes: `{ large, medium, small }`
+  - Cover URLs use the `/covers/:isbn/:size` endpoint
+  - All sizes are already available through existing R2 infrastructure
+  - Provides consumers flexibility to choose optimal image size for their use case
+
+### Changed
+- Updated `BookResult` interface in types.ts to include optional `coverUrls` object
+- Updated search endpoints (`/api/search` and `/api/search/combined`) to return both formats
+- Updated `BookResultSchema` Zod schema to validate new coverUrls field
+
 ## [2.2.3] - 2026-01-05
 
 ### Fixed
