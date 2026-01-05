@@ -14,6 +14,31 @@
 
 ---
 
+## ✅ Recently Completed (January 5, 2026)
+
+### Combined Search Endpoint (COMPLETED - Jan 5)
+**Deployed unified search with intelligent query detection:**
+- Auto-detects query type: ISBN → Author → Title (fallback)
+- Type-specific KV caching (ISBN: 24h, Author/Title: 1h)
+- Endpoint: `GET /api/search/combined?q={query}`
+- Full documentation in `docs/api/API-SEARCH-ENDPOINTS.md`
+- Fixed schema mismatches in enriched tables queries
+- Deployed and verified working
+
+**Examples:**
+```bash
+# ISBN (auto-detected)
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=9780439064873'
+
+# Author (auto-detected)
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=Stephen%20King'
+
+# Title (fallback)
+curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
+```
+
+---
+
 ## ✅ Recently Completed (January 4, 2026)
 
 ### #90: Cross-repo Contract Testing (COMPLETED - Jan 4)

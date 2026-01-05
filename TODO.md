@@ -190,6 +190,11 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
   - Added CDN-Cache-Control with stale-while-revalidate=600
   - Added Vary: Accept-Encoding for proper cache separation
   - Applied to /api/search and /api/search/combined endpoints
+- [x] **Combined Search Endpoint** (Jan 5, 2026)
+  - Intelligent query type detection (ISBN/author/title)
+  - Type-specific caching: ISBN (24h), Author/Title (1h)
+  - Endpoint: `GET /api/search/combined?q={query}`
+  - Documented in `docs/api/API-SEARCH-ENDPOINTS.md`
 - [x] **Optimized combined search endpoint** (Dec 8, 2025)
   - Migrated from base JSONB tables to enriched tables
   - ISBN: ~530ms (down from base table queries)
@@ -262,8 +267,8 @@ Similarity operator (%):  48,556ms ❌ (too fuzzy, returns 1M+ candidates)
 
 ## Phase 5: Advanced Features
 
-- [ ] Combined search (`/api/search?q={query}`)
-- [ ] Pagination support for search results
+- [x] Combined search (`/api/search/combined?q={query}`) ✅ **COMPLETE - Jan 5, 2026**
+- [x] Pagination support for search results ✅ **COMPLETE**
 - [ ] Export results (CSV, JSON)
 - [ ] Search analytics tracking
 - [ ] Semantic search with embeddings

@@ -32,42 +32,34 @@ async function searchByISBN(
 ): Promise<{ data: any[]; total: number }> {
 	const results: any[] = await sql`
 		SELECT
-			e.edition_id,
-			e.isbn_13 AS isbn,
+			e.isbn AS isbn,
 			e.title,
-			e.publish_date,
-			e.publishers,
-			e.pages,
-			e.binding,
+			e.publication_date AS publish_date,
+			e.publisher AS publishers,
+			e.page_count AS pages,
+			e.format AS binding,
 			w.title AS work_title,
-			e.openlibrary_edition_url,
-			w.openlibrary_work_url,
-			e.cover_url,
+			CONCAT('https://openlibrary.org/books/', e.openlibrary_edition_id) AS openlibrary_edition_url,
+			CONCAT('https://openlibrary.org/works/', e.work_key) AS openlibrary_work_url,
+			e.cover_url_large AS cover_url,
 			e.cover_source,
 			COALESCE(
 				json_agg(
 					DISTINCT jsonb_build_object(
 						'name', a.name,
 						'key', a.author_key,
-						'openlibrary', a.openlibrary_author_url,
-						'gender', a.gender,
-						'nationality', a.nationality,
-						'birth_year', a.birth_year,
-						'death_year', a.death_year,
-						'bio', a.bio,
-						'wikidata_id', a.wikidata_id,
-						'image', a.image_url
+						'openlibrary', CONCAT('https://openlibrary.org/authors/', a.author_key)
 					)
-				) FILTER (WHERE a.author_id IS NOT NULL),
+				) FILTER (WHERE a.author_key IS NOT NULL),
 				'[]'::json
 			) AS authors
 		FROM edition_isbns ei
-		JOIN enriched_editions e ON ei.edition_id = e.edition_id
-		LEFT JOIN enriched_works w ON e.work_id = w.work_id
-		LEFT JOIN author_works aw ON w.work_id = aw.work_id
-		LEFT JOIN enriched_authors a ON aw.author_id = a.author_id
+		JOIN enriched_editions e ON ei.isbn = e.isbn
+		LEFT JOIN enriched_works w ON e.work_key = w.work_key
+		LEFT JOIN author_works aw ON w.work_key = aw.work_key
+		LEFT JOIN enriched_authors a ON aw.author_key = a.author_key
 		WHERE ei.isbn = ${isbn}
-		GROUP BY e.edition_id, w.work_id
+		GROUP BY e.isbn, e.title, e.publication_date, e.publisher, e.page_count, e.format, e.cover_url_large, e.cover_source, e.openlibrary_edition_id, e.work_key, w.title
 		LIMIT ${limit} OFFSET ${offset}
 	`;
 
@@ -88,53 +80,45 @@ async function searchByAuthor(
 ): Promise<{ data: any[]; total: number }> {
 	const [countResult, dataResult] = await Promise.all([
 		sql`
-			SELECT COUNT(DISTINCT e.edition_id)::int AS total
+			SELECT COUNT(DISTINCT e.isbn)::int AS total
 			FROM enriched_authors a
-			JOIN author_works aw ON a.author_id = aw.author_id
-			JOIN enriched_works w ON aw.work_id = w.work_id
-			JOIN enriched_editions e ON e.work_id = w.work_id
+			JOIN author_works aw ON a.author_key = aw.author_key
+			JOIN enriched_works w ON aw.work_key = w.work_key
+			JOIN enriched_editions e ON e.work_key = w.work_key
 			WHERE a.normalized_name = ${name}
 		`,
 		sql`
 			SELECT
-				e.edition_id,
-				e.isbn_13 AS isbn,
+				e.isbn AS isbn,
 				e.title,
-				e.publish_date,
-				e.publishers,
-				e.pages,
-				e.binding,
+				e.publication_date AS publish_date,
+				e.publisher AS publishers,
+				e.page_count AS pages,
+				e.format AS binding,
 				w.title AS work_title,
-				e.openlibrary_edition_url,
-				w.openlibrary_work_url,
-				e.cover_url,
+				CONCAT('https://openlibrary.org/books/', e.openlibrary_edition_id) AS openlibrary_edition_url,
+				CONCAT('https://openlibrary.org/works/', e.work_key) AS openlibrary_work_url,
+				e.cover_url_large AS cover_url,
 				e.cover_source,
 				COALESCE(
 					json_agg(
 						DISTINCT jsonb_build_object(
 							'name', a2.name,
 							'key', a2.author_key,
-							'openlibrary', a2.openlibrary_author_url,
-							'gender', a2.gender,
-							'nationality', a2.nationality,
-							'birth_year', a2.birth_year,
-							'death_year', a2.death_year,
-							'bio', a2.bio,
-							'wikidata_id', a2.wikidata_id,
-							'image', a2.image_url
+							'openlibrary', CONCAT('https://openlibrary.org/authors/', a2.author_key)
 						)
-					) FILTER (WHERE a2.author_id IS NOT NULL),
+					) FILTER (WHERE a2.author_key IS NOT NULL),
 					'[]'::json
 				) AS authors
 			FROM enriched_authors a
-			JOIN author_works aw ON a.author_id = aw.author_id
-			JOIN enriched_works w ON aw.work_id = w.work_id
-			JOIN enriched_editions e ON e.work_id = w.work_id
-			LEFT JOIN author_works aw2 ON w.work_id = aw2.work_id
-			LEFT JOIN enriched_authors a2 ON aw2.author_id = a2.author_id
+			JOIN author_works aw ON a.author_key = aw.author_key
+			JOIN enriched_works w ON aw.work_key = w.work_key
+			JOIN enriched_editions e ON e.work_key = w.work_key
+			LEFT JOIN author_works aw2 ON w.work_key = aw2.work_key
+			LEFT JOIN enriched_authors a2 ON aw2.author_key = a2.author_key
 			WHERE a.normalized_name = ${name}
-			GROUP BY e.edition_id, w.work_id
-			ORDER BY e.publish_date DESC NULLS LAST
+			GROUP BY e.isbn, e.title, e.publication_date, e.publisher, e.page_count, e.format, e.cover_url_large, e.cover_source, e.openlibrary_edition_id, e.work_key, w.title
+			ORDER BY e.publication_date DESC NULLS LAST
 			LIMIT ${limit} OFFSET ${offset}
 		`,
 	]);
@@ -154,52 +138,44 @@ async function searchByTitle(
 	limit: number,
 	offset: number
 ): Promise<{ data: any[]; total: number }> {
+	const titlePattern = `%${title}%`;
 	const [countResult, dataResult] = await Promise.all([
 		sql`
-			SELECT COUNT(DISTINCT e.edition_id)::int AS total
+			SELECT COUNT(DISTINCT e.isbn)::int AS total
 			FROM enriched_works w
-			JOIN enriched_editions e ON e.work_id = w.work_id
-			WHERE w.title % ${title}
+			JOIN enriched_editions e ON e.work_key = w.work_key
+			WHERE w.title ILIKE ${titlePattern}
 		`,
 		sql`
 			SELECT
-				e.edition_id,
-				e.isbn_13 AS isbn,
+				e.isbn AS isbn,
 				e.title,
-				e.publish_date,
-				e.publishers,
-				e.pages,
-				e.binding,
+				e.publication_date AS publish_date,
+				e.publisher AS publishers,
+				e.page_count AS pages,
+				e.format AS binding,
 				w.title AS work_title,
-				e.openlibrary_edition_url,
-				w.openlibrary_work_url,
-				e.cover_url,
+				CONCAT('https://openlibrary.org/books/', e.openlibrary_edition_id) AS openlibrary_edition_url,
+				CONCAT('https://openlibrary.org/works/', e.work_key) AS openlibrary_work_url,
+				e.cover_url_large AS cover_url,
 				e.cover_source,
-				similarity(w.title, ${title}) AS score,
 				COALESCE(
 					json_agg(
 						DISTINCT jsonb_build_object(
 							'name', a.name,
 							'key', a.author_key,
-							'openlibrary', a.openlibrary_author_url,
-							'gender', a.gender,
-							'nationality', a.nationality,
-							'birth_year', a.birth_year,
-							'death_year', a.death_year,
-							'bio', a.bio,
-							'wikidata_id', a.wikidata_id,
-							'image', a.image_url
+							'openlibrary', CONCAT('https://openlibrary.org/authors/', a.author_key)
 						)
-					) FILTER (WHERE a.author_id IS NOT NULL),
+					) FILTER (WHERE a.author_key IS NOT NULL),
 					'[]'::json
 				) AS authors
 			FROM enriched_works w
-			JOIN enriched_editions e ON e.work_id = w.work_id
-			LEFT JOIN author_works aw ON w.work_id = aw.work_id
-			LEFT JOIN enriched_authors a ON aw.author_id = a.author_id
-			WHERE w.title % ${title}
-			GROUP BY e.edition_id, w.work_id, w.title
-			ORDER BY score DESC, e.publish_date DESC NULLS LAST
+			JOIN enriched_editions e ON e.work_key = w.work_key
+			LEFT JOIN author_works aw ON w.work_key = aw.work_key
+			LEFT JOIN enriched_authors a ON aw.author_key = a.author_key
+			WHERE w.title ILIKE ${titlePattern}
+			GROUP BY e.isbn, e.title, e.publication_date, e.publisher, e.page_count, e.format, e.cover_url_large, e.cover_source, e.openlibrary_edition_id, e.work_key, w.title
+			ORDER BY e.publication_date DESC NULLS LAST
 			LIMIT ${limit} OFFSET ${offset}
 		`,
 	]);
