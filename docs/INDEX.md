@@ -11,6 +11,7 @@
 ### Essential Reading
 - **[../README.md](../README.md)** - Project overview and quick start
 - **[../CLAUDE.md](../CLAUDE.md)** - Complete development guide (42KB, authoritative)
+- **[../MASTER-TODO.md](../MASTER-TODO.md)** - Comprehensive todo list (task-centric view)
 - **[CURRENT-STATUS.md](./CURRENT-STATUS.md)** - Active issues and priorities (P1/P2/P3)
 - **[../TODO.md](../TODO.md)** - Development roadmap and phase tracking
 - **[../CHANGELOG.md](../CHANGELOG.md)** - Version history
@@ -21,6 +22,7 @@
 
 ### Endpoints & Integration
 - **[api/API-SEARCH-ENDPOINTS.md](./api/API-SEARCH-ENDPOINTS.md)** - Search API documentation (combined search with auto-detection)
+- **[api/API-IDENTIFIER-RESOLUTION.md](./api/API-IDENTIFIER-RESOLUTION.md)** - VIAF/ISNI → Wikidata crosswalk endpoint
 - **[api/ISBNDB-ENDPOINTS.md](./api/ISBNDB-ENDPOINTS.md)** - ISBNdb Premium API integration
 - **[api/ISBNDB-ENRICHMENT.md](./api/ISBNDB-ENRICHMENT.md)** - Smart resolution pipeline
 
@@ -94,10 +96,20 @@
 
 ---
 
+## 📝 Planning & Strategy
+
+### Active Planning Documents
+- **[planning/DOCUMENTATION_HEALTH_REPORT.md](./planning/DOCUMENTATION_HEALTH_REPORT.md)** - Documentation audit (Jan 4, 2026)
+- **[planning/AUTHOR-NORMALIZATION.md](./planning/AUTHOR-NORMALIZATION.md)** - Author deduplication strategy (Issue #114)
+- **[planning/PLAN-CONTRACT-TESTING.md](./planning/PLAN-CONTRACT-TESTING.md)** - Cross-repo type safety plan
+
+---
+
 ## 📦 Archive
 
 ### 2025 Documentation
 - **[archive/2025/](./archive/2025/)** - Outdated/completed documentation
+  - `ISSUE-114-SUMMARY.md` - Author normalization completion summary
   - `HARVEST-TOP1000-DEC30.md` - Dec 2025 harvest run
   - `HARVESTING_TODOS.md` - Old harvesting checklist
   - `ALEXANDRIA_SCHEMA.md` - Legacy schema docs
@@ -158,6 +170,7 @@ npx wrangler queues list | grep alexandria
 - **Operations** → `operations/`
 - **Harvesting** → `harvesting/`
 - **Infrastructure** → `infrastructure/`
+- **Planning & Strategy** → `planning/`
 - **Archived** → `archive/2025/`
 
 ### By Task
@@ -169,7 +182,8 @@ npx wrangler queues list | grep alexandria
 
 ### By Priority
 - **P1 Issues** → CURRENT-STATUS.md
-- **Current Work** → TODO.md
+- **All Tasks** → MASTER-TODO.md (comprehensive task list)
+- **Current Work** → TODO.md (phase-based roadmap)
 - **Recent Changes** → CHANGELOG.md
 
 ---
@@ -182,8 +196,9 @@ npx wrangler queues list | grep alexandria
 - Prefix with type: `API-`, `ISSUE-`, `GUIDE-`
 
 ### Location
-- **Root** - Only README, CLAUDE, TODO, CHANGELOG
+- **Root** - Only README, CLAUDE, TODO, CHANGELOG, MASTER-TODO
 - **docs/** - All other documentation
+- **docs/planning/** - Strategy and planning documents
 - **docs/archive/** - Superseded or completed documentation
 
 ### Maintenance
