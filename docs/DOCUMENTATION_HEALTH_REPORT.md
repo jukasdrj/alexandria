@@ -13,7 +13,7 @@ The following items represent discrepancies where documentation contradicts the 
 The following endpoints are documented in `docs/api/API-SEARCH-ENDPOINTS.md` but **do not exist** in the `worker/src` codebase:
 
 *   **`POST /api/isbns/check`** (Bulk ISBN Existence Check)
-    *   *Status:* Mentioned as "Completed" in `TODO.md` (Phase 2.9), but code is missing from `worker/src/routes/`.
+    *   *Status:* Mentioned as "Completed" in `TODO.md` (Phase 2.10), but code is missing from `worker/src/routes/`.
 *   **`POST /api/queue/drain/enrichment`** (Manual Enrichment Queue Drain)
     *   *Status:* Completely missing from codebase.
 *   **`POST /api/queue/drain/covers`** (Manual Cover Queue Drain)
