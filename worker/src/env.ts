@@ -61,6 +61,18 @@ export interface Env {
   // Webhook Integration
   BEND_WEBHOOK_URL?: string;
   ALEXANDRIA_WEBHOOK_SECRET?: string;
+
+  // Harvest configuration (Issue #135)
+  HARVEST_MIN_YEAR: string;
+  HARVEST_MAX_YEAR: string;
+  HARVEST_ISBN_PREFIXES: string;
+  HARVEST_BATCH_SIZE: string;
+  HARVEST_SORT_BY: string;
+  HARVEST_QUEUE_DEFAULT: string;
+
+  // Parallel enrichment configuration (Issue #133)
+  ENABLE_PARALLEL_ENRICHMENT: string;
+  PARALLEL_CONCURRENCY_LIMIT: string;
 }
 
 // Logger type is imported from lib/logger.js for consistency

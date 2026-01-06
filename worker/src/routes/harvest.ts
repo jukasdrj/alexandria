@@ -13,15 +13,11 @@ import type { AppBindings, Env } from '../env.js';
 import postgres from 'postgres';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 import { QuotaManager } from '../services/quota-manager.js';
+import { parseHarvestConfig, buildISBNPrefixFilter, buildYearFilter } from '../lib/harvest-config.js';
+import { batchUpdateCoverUrls } from '../services/batch-operations.js';
+import type { Logger } from '../lib/logger.js';
 
 const app = new OpenAPIHono<AppBindings>();
-
-// =================================================================================
-// Constants
-// =================================================================================
-
-const MIN_YEAR = 2000;
-const MAX_YEAR = new Date().getFullYear();
 
 // =================================================================================
 // Schemas
@@ -91,6 +87,9 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
   const startTime = Date.now();
   console.log('[CoverHarvest:Scheduled] Starting scheduled harvest');
 
+  // Parse harvest configuration
+  const harvestConfig = parseHarvestConfig(env);
+
   // Initialize QuotaManager
   const quotaManager = new QuotaManager(env.QUOTA_KV);
 
@@ -118,12 +117,16 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
   });
 
   try {
-    const BATCH_SIZE = 1000;
+    // Build ISBN prefix filter
+    const isbnPrefixFilter = buildISBNPrefixFilter(harvestConfig.isbnPrefixes);
 
-    // Build year pattern for regex: matches years from MIN_YEAR to MAX_YEAR
-    const yearPattern = `^(${Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i).join('|')})$`;
+    // Build year pattern for regex
+    const yearPattern = `^(${Array.from(
+      { length: harvestConfig.maxYear - harvestConfig.minYear + 1 },
+      (_, i) => harvestConfig.minYear + i
+    ).join('|')})$`;
 
-    // Query OpenLibrary editions without covers (English ISBNs only, 2000-present)
+    // Query OpenLibrary editions without covers
     const editionsResult = await sql`
       SELECT isbn
       FROM enriched_editions
@@ -131,10 +134,10 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
         AND cover_url_large IS NULL
         AND isbn IS NOT NULL
         AND LENGTH(isbn) = 13
-        AND (isbn LIKE '9780%' OR isbn LIKE '9781%')
+        AND (${sql.unsafe(isbnPrefixFilter)})
         AND publication_date ~ ${yearPattern}
-      ORDER BY publication_date DESC NULLS LAST, created_at DESC
-      LIMIT ${BATCH_SIZE}
+      ORDER BY ${sql.unsafe(harvestConfig.sortBy)} DESC NULLS LAST
+      LIMIT ${harvestConfig.batchSize}
     `;
 
     const isbns = (editionsResult as unknown as { isbn: string }[]).map(row => row.isbn);
@@ -152,11 +155,11 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
     // Record API call in quota manager
     await quotaManager.recordApiCall(1);
 
-    let editionsUpdated = 0;
     let coversQueued = 0;
     let noCoverUrl = 0;
 
-    // Update editions with cover URLs and queue downloads
+    // Prepare batch updates
+    const updates = [];
     for (const [isbn, data] of batchData) {
       const coverUrl = data.coverUrls?.original || data.coverUrls?.large;
 
@@ -165,33 +168,39 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
         continue;
       }
 
-      try {
-        // Update edition with cover URLs
-        await sql`
-          UPDATE enriched_editions
-          SET
-            cover_url_large = ${data.coverUrls?.large || coverUrl},
-            cover_url_medium = ${data.coverUrls?.medium || coverUrl},
-            cover_url_small = ${data.coverUrls?.small || coverUrl},
-            cover_url_original = ${data.coverUrls?.original || null},
-            cover_source = 'isbndb',
-            updated_at = NOW()
-          WHERE isbn = ${isbn}
-        `;
-        editionsUpdated++;
+      updates.push({
+        isbn,
+        cover_url_large: data.coverUrls?.large || coverUrl,
+        cover_url_medium: data.coverUrls?.medium || coverUrl,
+        cover_url_small: data.coverUrls?.small || coverUrl,
+        cover_url_original: data.coverUrls?.original || null,
+        cover_source: 'isbndb',
+      });
+    }
 
-        // Queue cover download for WebP processing
+    // Batch update all editions
+    const simpleLogger: Logger = {
+      info: (msg: string, meta?: unknown) => console.log(`[INFO] ${msg}`, meta),
+      error: (msg: string, meta?: unknown) => console.error(`[ERROR] ${msg}`, meta),
+      warn: (msg: string, meta?: unknown) => console.warn(`[WARN] ${msg}`, meta),
+      debug: (msg: string, meta?: unknown) => console.debug(`[DEBUG] ${msg}`, meta),
+    };
+
+    const batchResult = await batchUpdateCoverUrls(sql, updates, simpleLogger);
+
+    // Queue cover downloads
+    for (const update of updates) {
+      try {
         await env.COVER_QUEUE.send({
-          isbn,
-          provider_url: coverUrl,
+          isbn: update.isbn,
+          provider_url: update.cover_url_original || update.cover_url_large,
           priority: 'normal',
           source: 'scheduled_harvest',
         });
         coversQueued++;
-
       } catch (error) {
-        console.error('[CoverHarvest:Scheduled] Update failed', {
-          isbn,
+        console.error('[CoverHarvest:Scheduled] Queue failed', {
+          isbn: update.isbn,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -203,9 +212,11 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
     console.log('[CoverHarvest:Scheduled] Complete', {
       isbns_queried: isbns.length,
       found_in_isbndb: batchData.size,
-      editions_updated: editionsUpdated,
+      editions_updated: batchResult.rows_affected,
       covers_queued: coversQueued,
       no_cover_url: noCoverUrl,
+      batch_duration_ms: batchResult.duration_ms,
+      chunks_processed: batchResult.chunks_processed,
       duration_ms: Date.now() - startTime,
       quota_used_today: updatedQuota.used_today,
       quota_remaining: updatedQuota.buffer_remaining,

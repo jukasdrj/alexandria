@@ -50,7 +50,17 @@
     "ENABLE_COVER_PROCESSING": "true",
     "ENABLE_ANALYTICS": "true",
 
-    "BEND_WEBHOOK_URL": "https://api.oooefam.net/v3/webhooks/alexandria/enrichment-complete"
+    "BEND_WEBHOOK_URL": "https://api.oooefam.net/v3/webhooks/alexandria/enrichment-complete",
+
+    "HARVEST_MIN_YEAR": "2000",
+    "HARVEST_MAX_YEAR": "",
+    "HARVEST_ISBN_PREFIXES": "9780,9781",
+    "HARVEST_BATCH_SIZE": "1000",
+    "HARVEST_SORT_BY": "publication_date",
+    "HARVEST_QUEUE_DEFAULT": "false",
+
+    "ENABLE_PARALLEL_ENRICHMENT": "false",
+    "PARALLEL_CONCURRENCY_LIMIT": "8"
   },
 
   "hyperdrive": [

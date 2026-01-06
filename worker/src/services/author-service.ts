@@ -10,6 +10,7 @@ import { enrichWork, enrichEdition } from './enrichment-service.js';
 import { findOrCreateWork, linkWorkToAuthors } from './work-utils.js';
 import { createQuotaManager } from './quota-manager.js';
 import { fetchWikidataMultipleBatches } from '../../services/wikidata-client.js';
+import { Semaphore } from '../lib/concurrency.js';
 
 // =================================================================================
 // Types
@@ -945,88 +946,194 @@ export async function enrichAuthorBibliography(
   }
 
   // DIRECTLY enrich from the data we already have (NO re-fetch from ISBNdb!)
-  for (const book of isbnsToEnrich) {
-    try {
-      // Find or create work (deduplication via consensus-driven algorithm)
-      // Order: ISBN lookup → Author-scoped fuzzy title → Exact title → Generate new
-      const { workKey, isNew: isNewWork } = await findOrCreateWork(
-        sql,
-        book.isbn,
-        book.title,
-        book.authors
-      );
+  // Check if parallel enrichment is enabled (feature flag for gradual rollout)
+  const enableParallel = env.ENABLE_PARALLEL_ENRICHMENT === 'true';
+  const concurrencyLimit = parseInt(env.PARALLEL_CONCURRENCY_LIMIT || '8', 10);
 
-      // Only create enriched_work if it's genuinely new
-      if (isNewWork) {
-        await enrichWork(sql, {
-          work_key: workKey,
-          title: book.title,
-          description: book.synopsis,
-          subject_tags: book.subjects,
-          primary_provider: 'isbndb',
-        }, logger);
-      }
+  if (enableParallel && isbnsToEnrich.length > 1) {
+    logger.info('[EnrichBibliography] Using parallel enrichment', {
+      count: isbnsToEnrich.length,
+      concurrency: concurrencyLimit
+    });
 
-      // ALWAYS link work to authors (idempotent via ON CONFLICT DO NOTHING)
-      // This fixes the 99.8% orphaned works bug
-      if (book.authors && book.authors.length > 0) {
-        await linkWorkToAuthors(sql, workKey, book.authors);
-      }
+    // Parallel enrichment with semaphore-based concurrency control
+    const semaphore = new Semaphore(concurrencyLimit);
+    const enrichmentResults = await Promise.allSettled(
+      isbnsToEnrich.map(book => semaphore.run(async () => {
+        // Find or create work
+        const { workKey, isNew: isNewWork } = await findOrCreateWork(
+          sql,
+          book.isbn,
+          book.title,
+          book.authors
+        );
 
-      // Create enriched_edition with all the metadata we already have
-      // Prefer image_original for highest quality (but it expires in 2hrs!)
-      const hasCover = book.image_original || book.image;
-      const coverUrls = hasCover ? {
-        original: book.image_original, // High-quality original (best for R2)
-        large: book.image,
-        medium: book.image,
-        small: book.image,
-      } : undefined;
-
-      await enrichEdition(sql, {
-        isbn: book.isbn,
-        title: book.title,
-        publisher: book.publisher,
-        publication_date: book.date_published,
-        page_count: book.pages,
-        language: book.language,
-        primary_provider: 'isbndb',
-        cover_urls: coverUrls,
-        cover_source: hasCover ? 'isbndb' : undefined,
-        work_key: workKey,
-        subjects: book.subjects,
-        binding: book.binding,
-        dewey_decimal: book.dewey_decimal,
-        related_isbns: book.related,
-      }, logger, env);
-
-      results.enriched++;
-
-      // Queue cover download - prefer image_original (expires in 2hrs!) for best quality
-      if (hasCover) {
-        try {
-          const bestCoverUrl = book.image_original || book.image;
-          await env.COVER_QUEUE.send({
-            isbn: book.isbn,
+        // Create work if new
+        if (isNewWork) {
+          await enrichWork(sql, {
             work_key: workKey,
-            provider_url: bestCoverUrl,
-            priority: 'high', // Bump priority since image_original expires!
-            source: 'author_bibliography'
-          });
-          results.covers_queued++;
-        } catch (queueError) {
-          // Don't fail enrichment if cover queue fails
-          logger.warn('[EnrichBibliography] Cover queue failed', {
-            isbn: book.isbn,
-            error: queueError instanceof Error ? queueError.message : String(queueError)
-          });
+            title: book.title,
+            description: book.synopsis,
+            subject_tags: book.subjects,
+            primary_provider: 'isbndb',
+          }, logger);
         }
-      }
 
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      results.failed++;
-      results.errors.push({ isbn: book.isbn, error: message });
+        // Link work to authors
+        if (book.authors && book.authors.length > 0) {
+          await linkWorkToAuthors(sql, workKey, book.authors);
+        }
+
+        // Create edition
+        const hasCover = book.image_original || book.image;
+        const coverUrls = hasCover ? {
+          original: book.image_original,
+          large: book.image,
+          medium: book.image,
+          small: book.image,
+        } : undefined;
+
+        await enrichEdition(sql, {
+          isbn: book.isbn,
+          title: book.title,
+          publisher: book.publisher,
+          publication_date: book.date_published,
+          page_count: book.pages,
+          language: book.language,
+          primary_provider: 'isbndb',
+          cover_urls: coverUrls,
+          cover_source: hasCover ? 'isbndb' : undefined,
+          work_key: workKey,
+          subjects: book.subjects,
+          binding: book.binding,
+          dewey_decimal: book.dewey_decimal,
+          related_isbns: book.related,
+        }, logger, env);
+
+        // Queue cover
+        if (hasCover) {
+          try {
+            const bestCoverUrl = book.image_original || book.image;
+            await env.COVER_QUEUE.send({
+              isbn: book.isbn,
+              work_key: workKey,
+              provider_url: bestCoverUrl,
+              priority: 'high',
+              source: 'author_bibliography'
+            });
+            return { isbn: book.isbn, status: 'success', hasCover: true };
+          } catch (queueError) {
+            logger.warn('[EnrichBibliography] Cover queue failed', {
+              isbn: book.isbn,
+              error: queueError instanceof Error ? queueError.message : String(queueError)
+            });
+          }
+        }
+
+        return { isbn: book.isbn, status: 'success', hasCover: false };
+      }))
+    );
+
+    // Aggregate results
+    for (const result of enrichmentResults) {
+      if (result.status === 'fulfilled') {
+        results.enriched++;
+        if (result.value.hasCover) {
+          results.covers_queued++;
+        }
+      } else {
+        results.failed++;
+        results.errors.push({
+          isbn: 'unknown',
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason)
+        });
+      }
+    }
+  } else {
+    // Sequential fallback (original behavior)
+    for (const book of isbnsToEnrich) {
+      try {
+        // Find or create work (deduplication via consensus-driven algorithm)
+        // Order: ISBN lookup → Author-scoped fuzzy title → Exact title → Generate new
+        const { workKey, isNew: isNewWork } = await findOrCreateWork(
+          sql,
+          book.isbn,
+          book.title,
+          book.authors
+        );
+
+        // Only create enriched_work if it's genuinely new
+        if (isNewWork) {
+          await enrichWork(sql, {
+            work_key: workKey,
+            title: book.title,
+            description: book.synopsis,
+            subject_tags: book.subjects,
+            primary_provider: 'isbndb',
+          }, logger);
+        }
+
+        // ALWAYS link work to authors (idempotent via ON CONFLICT DO NOTHING)
+        // This fixes the 99.8% orphaned works bug
+        if (book.authors && book.authors.length > 0) {
+          await linkWorkToAuthors(sql, workKey, book.authors);
+        }
+
+        // Create enriched_edition with all the metadata we already have
+        // Prefer image_original for highest quality (but it expires in 2hrs!)
+        const hasCover = book.image_original || book.image;
+        const coverUrls = hasCover ? {
+          original: book.image_original, // High-quality original (best for R2)
+          large: book.image,
+          medium: book.image,
+          small: book.image,
+        } : undefined;
+
+        await enrichEdition(sql, {
+          isbn: book.isbn,
+          title: book.title,
+          publisher: book.publisher,
+          publication_date: book.date_published,
+          page_count: book.pages,
+          language: book.language,
+          primary_provider: 'isbndb',
+          cover_urls: coverUrls,
+          cover_source: hasCover ? 'isbndb' : undefined,
+          work_key: workKey,
+          subjects: book.subjects,
+          binding: book.binding,
+          dewey_decimal: book.dewey_decimal,
+          related_isbns: book.related,
+        }, logger, env);
+
+        results.enriched++;
+
+        // Queue cover download - prefer image_original (expires in 2hrs!) for best quality
+        if (hasCover) {
+          try {
+            const bestCoverUrl = book.image_original || book.image;
+            await env.COVER_QUEUE.send({
+              isbn: book.isbn,
+              work_key: workKey,
+              provider_url: bestCoverUrl,
+              priority: 'high', // Bump priority since image_original expires!
+              source: 'author_bibliography'
+            });
+            results.covers_queued++;
+          } catch (queueError) {
+            // Don't fail enrichment if cover queue fails
+            logger.warn('[EnrichBibliography] Cover queue failed', {
+              isbn: book.isbn,
+              error: queueError instanceof Error ? queueError.message : String(queueError)
+            });
+          }
+        }
+
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        results.failed++;
+        results.errors.push({ isbn: book.isbn, error: message });
+      }
     }
   }
 
