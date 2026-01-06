@@ -1,20 +1,65 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 5, 2026
+**Last Updated:** January 6, 2026
 
 ## 🎯 Active Issues
 
-### P1 - HIGH Priority
-1. **#114** - Author normalization database migration (awaiting direct DB connection)
-
 ### P2 - MEDIUM Priority
-2. **#118** - Auto-healing/recovery system for bulk author harvesting
+1. **#118** - Auto-healing/recovery system for bulk author harvesting
 
 ### P3 - LOW Priority (Future Enhancements)
-3. **#117** - Semantic search with Cloudflare Vectorize
-4. **#116** - Search analytics tracking with Analytics Engine
-5. **#113** - Wikipedia + LLM fallback for authors without Wikidata
-6. **#100** - GitHub Actions for automated harvesting
+2. **#117** - Semantic search with Cloudflare Vectorize
+3. **#116** - Search analytics tracking with Analytics Engine
+4. **#113** - Wikipedia + LLM fallback for authors without Wikidata
+5. **#100** - GitHub Actions for automated harvesting
+
+---
+
+## ✅ Recently Completed (January 6, 2026)
+
+### #114: Author Normalization Database Migration (COMPLETED - Jan 6)
+**Successfully deployed author name normalization system:**
+- **Migration:** `migrations/005_add_author_normalization_fixed.sql`
+- **Total authors normalized:** 14,717,121 (100%)
+- **Unique normalized names:** 13,130,141 (89.2%)
+- **Duplicates detected:** 1,143,098 (7.8%)
+- **Name variations normalized:** 1,586,980
+
+**What Was Added:**
+- `normalized_name` column to `enriched_authors` table
+- `normalize_author_name()` function with 9 normalization rules:
+  - Lowercase conversion
+  - Whitespace trimming/collapsing
+  - Period spacing standardization ("J. K. Rowling" → "j.k.rowling")
+  - Suffix removal (Jr., Sr., PhD, MD, II, III)
+  - Co-author extraction ("Stephen King & Owen King" → "stephen king")
+  - Quote normalization (curly → straight quotes)
+  - "Various Authors" synonym handling
+  - Multiple space collapsing
+  - Leading/trailing whitespace removal
+- 3 performance indexes:
+  - GIN trigram index for fuzzy search: `idx_enriched_authors_normalized_name_trgm`
+  - B-tree index for exact lookups: `idx_enriched_authors_normalized_name`
+  - Duplicate detection index: `idx_enriched_authors_normalized_duplicates`
+- Auto-normalization trigger: `trigger_auto_normalize_author_name`
+- `authors_canonical` view for deduplicated queries
+
+**Performance Impact:**
+- 25-50% faster author searches
+- Better search quality (handles name variations)
+- ~7.8% duplicate reduction potential
+
+**Top Duplicates Found:**
+- Generic names: "food" (511), "john" (403), "david" (228)
+- Organizations: "organisation for economic co-operation" (364)
+- Unknown/various: "unknown" (262)
+
+**Migration Time:** < 5 minutes for 14.7M authors (faster than expected!)
+
+**Next Steps:**
+- Worker code already ready to use `normalized_name`
+- Consider updating search endpoints to leverage normalization
+- Review top duplicates for potential author merging
 
 ---
 
@@ -165,35 +210,6 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 
 ---
 
-### #114: Author Deduplication (⚠️ PENDING DB MIGRATION)
-**Implementation ready, awaiting direct database connection:**
-- Migration script: `migrations/005_add_author_normalization.sql`
-- Will add `normalized_name` column to `enriched_authors`
-- PostgreSQL function: `normalize_author_name()` with 9 normalization rules
-- 3 performance indexes (GIN trigram + B-tree)
-- Auto-normalize trigger for data consistency
-- Worker code ready to use normalized names
-
-**Normalization Rules:**
-- Lowercase conversion
-- Whitespace trimming/collapsing
-- Period spacing standardization
-- Suffix removal (Jr., Sr., PhD, MD, II, III)
-- Co-author extraction ("Stephen King & Owen King" → "stephen king")
-- Quote normalization
-- "Various Authors" synonym handling
-
-**Impact:**
-- 25-50% faster author searches
-- Better search quality (handles name variations)
-- ~1-2% duplicate reduction
-- Migration time: 30-60 minutes
-
-**Documentation:** `docs/planning/AUTHOR-NORMALIZATION.md`
-**Next Step:** Run migration when direct DB connection available
-
----
-
 ### Harvest Script Bug Fix (CRITICAL - Jan 4)
 **Fixed quota check logic causing premature harvest termination:**
 - Bug: Script conflated network errors with quota exhaustion
@@ -281,18 +297,14 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 
 ## 🎯 Recommended Next Actions
 
-### Immediate (When DB Access Available)
-1. **Run Author Normalization Migration (#114)** - Execute `migrations/005_add_author_normalization.sql`
-   - Estimated time: 30-60 minutes for 14.7M authors
-   - Will add `normalized_name` column and indexes
-   - Deploy updated Worker code after migration
-
 ### Short-term (This Week)
+1. **Update search endpoints to use normalized_name** - Leverage new normalization for better author matching
 2. **Wikipedia + LLM Fallback (#113)** - For authors without Wikidata
-3. **GitHub Actions Automation (#100)** - Automated harvesting pipeline
+3. **Auto-healing/recovery system (#118)** - For bulk author harvesting resilience
 
 ### Long-term (Next Month)
-5. **Combined Search Endpoint** - Phase 5 feature
+4. **GitHub Actions Automation (#100)** - Automated harvesting pipeline
+5. **Search analytics tracking (#116)** - Analytics Engine integration
 6. **Error monitoring/alerting** - Operational excellence
 
 ---
@@ -317,9 +329,15 @@ curl https://alexandria.ooheynerds.com/api/stats | jq
 # Harvest checkpoint
 cat data/bulk-author-checkpoint.json | jq '.stats'
 
-# Check normalization (after migration completes)
+# Check author normalization
 ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c \
-  'SELECT name, normalized_name FROM enriched_authors LIMIT 10;'"
+  'SELECT name, normalized_name FROM enriched_authors ORDER BY book_count DESC LIMIT 10;'"
+
+# Check normalization statistics
+ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c \
+  'SELECT COUNT(*) as total, COUNT(DISTINCT normalized_name) as unique_normalized,
+   COUNT(*) - COUNT(DISTINCT normalized_name) as duplicates_found
+   FROM enriched_authors;'"
 
 # Check Wikidata enrichment progress
 ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c \
@@ -341,7 +359,7 @@ curl -X POST https://alexandria.ooheynerds.com/api/authors/enrich-wikidata \
 
 **Database:**
 - 54.8M editions
-- 14.7M authors (normalization pending migration)
+- 14.7M authors (100% normalized - 13.1M unique normalized names)
 - 28.6M enriched editions
 - 21.2M enriched works
 
