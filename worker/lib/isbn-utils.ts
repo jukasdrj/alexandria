@@ -10,10 +10,8 @@
 /**
  * Foreign ISBN prefixes (non-English language markets)
  * These ISBNs have low success rates in ISBNdb (English-focused database)
- *
- * Format: 'prefix': 'Language/Region'
  */
-const FOREIGN_ISBN_PREFIXES = {
+const FOREIGN_ISBN_PREFIXES: Record<string, string> = {
   // Romance languages
   '978-2': 'French',
   '978-84': 'Spanish',
@@ -51,7 +49,7 @@ const FOREIGN_ISBN_PREFIXES = {
  * English ISBN prefixes (US, UK, Canada, Australia, etc.)
  * These have the highest success rates in ISBNdb
  */
-const ENGLISH_ISBN_PREFIXES = [
+const ENGLISH_ISBN_PREFIXES: string[] = [
   '978-0',   // English language - international
   '978-1',   // English language - international
   '0',       // ISBN-10 English
@@ -60,10 +58,10 @@ const ENGLISH_ISBN_PREFIXES = [
 
 /**
  * Normalize ISBN to standard format (remove hyphens, spaces, validate)
- * @param {string} isbn - ISBN-10 or ISBN-13
- * @returns {string|null} Normalized ISBN or null if invalid
+ * @param isbn - ISBN-10 or ISBN-13
+ * @returns Normalized ISBN or null if invalid
  */
-export function normalizeISBN(isbn) {
+export function normalizeISBN(isbn: string | null | undefined): string | null {
   if (!isbn) return null;
 
   // Remove hyphens, spaces, and convert to uppercase
@@ -86,10 +84,10 @@ export function normalizeISBN(isbn) {
 
 /**
  * Check if ISBN is likely from an English language market
- * @param {string} isbn - Normalized ISBN
- * @returns {boolean} True if likely English, false otherwise
+ * @param isbn - Normalized ISBN
+ * @returns True if likely English, false otherwise
  */
-export function isLikelyEnglishISBN(isbn) {
+export function isLikelyEnglishISBN(isbn: string | null | undefined): boolean {
   if (!isbn) return false;
 
   const normalized = normalizeISBN(isbn);
@@ -101,10 +99,10 @@ export function isLikelyEnglishISBN(isbn) {
 
 /**
  * Check if ISBN is from a known foreign (non-English) market
- * @param {string} isbn - Normalized ISBN
- * @returns {boolean} True if foreign language, false otherwise
+ * @param isbn - Normalized ISBN
+ * @returns True if foreign language, false otherwise
  */
-export function isForeignISBN(isbn) {
+export function isForeignISBN(isbn: string | null | undefined): boolean {
   if (!isbn) return false;
 
   const normalized = normalizeISBN(isbn);
@@ -122,10 +120,10 @@ export function isForeignISBN(isbn) {
 
 /**
  * Get the language/region for an ISBN based on prefix
- * @param {string} isbn - Normalized ISBN
- * @returns {string|null} Language/region name or null if unknown
+ * @param isbn - Normalized ISBN
+ * @returns Language/region name or null if unknown
  */
-export function getISBNLanguage(isbn) {
+export function getISBNLanguage(isbn: string | null | undefined): string | null {
   if (!isbn) return null;
 
   const normalized = normalizeISBN(isbn);
@@ -147,13 +145,23 @@ export function getISBNLanguage(isbn) {
 }
 
 /**
- * Filter a list of ISBNs to only English language ISBNs
- * @param {string[]} isbns - Array of ISBNs
- * @param {Object} options - Filtering options
- * @param {boolean} options.allowUnknown - Allow ISBNs with unknown language (default: true)
- * @returns {string[]} Filtered array of ISBNs
+ * Options for filtering English ISBNs
  */
-export function filterEnglishISBNs(isbns, options = {}) {
+export interface FilterEnglishISBNsOptions {
+  /** Allow ISBNs with unknown language (default: true) */
+  allowUnknown?: boolean;
+}
+
+/**
+ * Filter a list of ISBNs to only English language ISBNs
+ * @param isbns - Array of ISBNs
+ * @param options - Filtering options
+ * @returns Filtered array of ISBNs
+ */
+export function filterEnglishISBNs(
+  isbns: string[],
+  options: FilterEnglishISBNsOptions = {}
+): string[] {
   const { allowUnknown = true } = options;
 
   return isbns.filter(isbn => {
@@ -172,19 +180,23 @@ export function filterEnglishISBNs(isbns, options = {}) {
 }
 
 /**
- * @typedef {Object} ISBNValidationResult
- * @property {string[]} valid - Array of valid normalized ISBNs
- * @property {string[]} invalid - Array of invalid ISBNs
+ * Result of ISBN validation batch operation
  */
+export interface ISBNValidationResult {
+  /** Array of valid normalized ISBNs */
+  valid: string[];
+  /** Array of invalid ISBNs */
+  invalid: string[];
+}
 
 /**
  * Validate and normalize a batch of ISBNs
- * @param {string[]} isbns - Array of ISBNs
- * @returns {ISBNValidationResult} Object with valid and invalid ISBNs
+ * @param isbns - Array of ISBNs
+ * @returns Object with valid and invalid ISBNs
  */
-export function validateISBNBatch(isbns) {
-  const valid = [];
-  const invalid = [];
+export function validateISBNBatch(isbns: string[]): ISBNValidationResult {
+  const valid: string[] = [];
+  const invalid: string[] = [];
 
   for (const isbn of isbns) {
     const normalized = normalizeISBN(isbn);
@@ -200,12 +212,12 @@ export function validateISBNBatch(isbns) {
 
 /**
  * Deduplicate ISBNs (case-insensitive, normalized)
- * @param {string[]} isbns - Array of ISBNs
- * @returns {string[]} Deduplicated array of normalized ISBNs
+ * @param isbns - Array of ISBNs
+ * @returns Deduplicated array of normalized ISBNs
  */
-export function deduplicateISBNs(isbns) {
-  const seen = new Set();
-  const result = [];
+export function deduplicateISBNs(isbns: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
 
   for (const isbn of isbns) {
     const normalized = normalizeISBN(isbn);
@@ -221,10 +233,10 @@ export function deduplicateISBNs(isbns) {
 /**
  * Check if ISBN should be sent to ISBNdb API
  * Filters out foreign ISBNs and invalid formats
- * @param {string} isbn - ISBN to check
- * @returns {boolean} True if should query ISBNdb, false otherwise
+ * @param isbn - ISBN to check
+ * @returns True if should query ISBNdb, false otherwise
  */
-export function shouldQueryISBNdb(isbn) {
+export function shouldQueryISBNdb(isbn: string | null | undefined): boolean {
   const normalized = normalizeISBN(isbn);
   if (!normalized) return false;
 
@@ -241,12 +253,12 @@ export function shouldQueryISBNdb(isbn) {
 
 /**
  * Partition ISBNs into batches of specified size
- * @param {string[]} isbns - Array of ISBNs
- * @param {number} batchSize - Size of each batch (default: 100)
- * @returns {string[][]} Array of ISBN batches
+ * @param isbns - Array of ISBNs
+ * @param batchSize - Size of each batch (default: 100)
+ * @returns Array of ISBN batches
  */
-export function partitionISBNs(isbns, batchSize = 100) {
-  const batches = [];
+export function partitionISBNs(isbns: string[], batchSize: number = 100): string[][] {
+  const batches: string[][] = [];
 
   for (let i = 0; i < isbns.length; i += batchSize) {
     batches.push(isbns.slice(i, i + batchSize));
@@ -256,23 +268,32 @@ export function partitionISBNs(isbns, batchSize = 100) {
 }
 
 /**
- * @typedef {Object} ISBNBatchStats
- * @property {number} total - Total ISBNs in batch
- * @property {number} valid - Valid ISBNs count
- * @property {number} invalid - Invalid ISBNs count
- * @property {number} english - English ISBNs count
- * @property {number} foreign - Foreign ISBNs count
- * @property {number} unknown - Unknown language ISBNs count
- * @property {Record<string, number>} languages - Count by language
+ * Statistics about ISBN batch composition
  */
+export interface ISBNBatchStats {
+  /** Total ISBNs in batch */
+  total: number;
+  /** Valid ISBNs count */
+  valid: number;
+  /** Invalid ISBNs count */
+  invalid: number;
+  /** English ISBNs count */
+  english: number;
+  /** Foreign ISBNs count */
+  foreign: number;
+  /** Unknown language ISBNs count */
+  unknown: number;
+  /** Count by language */
+  languages: Record<string, number>;
+}
 
 /**
  * Get statistics about ISBN batch composition
- * @param {string[]} isbns - Array of ISBNs
- * @returns {ISBNBatchStats} Statistics object
+ * @param isbns - Array of ISBNs
+ * @returns Statistics object
  */
-export function getISBNBatchStats(isbns) {
-  const stats = {
+export function getISBNBatchStats(isbns: string[]): ISBNBatchStats {
+  const stats: ISBNBatchStats = {
     total: isbns.length,
     valid: 0,
     invalid: 0,
@@ -297,7 +318,9 @@ export function getISBNBatchStats(isbns) {
     } else if (isForeignISBN(normalized)) {
       stats.foreign++;
       const language = getISBNLanguage(normalized);
-      stats.languages[language] = (stats.languages[language] || 0) + 1;
+      if (language) {
+        stats.languages[language] = (stats.languages[language] || 0) + 1;
+      }
     } else {
       stats.unknown++;
     }
