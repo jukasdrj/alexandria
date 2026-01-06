@@ -534,10 +534,11 @@ app.openapi(authorDetailsRoute, async (c) => {
 
 /**
  * Scheduled Wikidata Enrichment Handler
- * Runs daily at 2 AM UTC to enrich authors without Wikidata data
+ * Runs daily at 2 AM UTC to enrich authors with Wikidata IDs but missing enriched data
  *
- * Target: 1,000 authors/day
- * Strategy: Query authors without wikidata_id, process in batches
+ * Target: 5,000 authors/day (100,894 pending → ~20 days to complete)
+ * Strategy: Query authors with wikidata_id but not yet enriched (wikidata_enriched_at IS NULL)
+ * Uses optimized index: idx_enriched_authors_wikidata_unenriched
  */
 export async function handleScheduledWikidataEnrichment(env: any): Promise<void> {
   const startTime = Date.now();
@@ -551,18 +552,20 @@ export async function handleScheduledWikidataEnrichment(env: any): Promise<void>
   });
 
   try {
-    const TARGET_AUTHORS = 1000;
+    const TARGET_AUTHORS = 5000;
 
-    // Query authors without Wikidata IDs (prioritize those with most books)
+    // Query authors WITH Wikidata IDs that haven't been enriched yet
+    // Uses optimized index: idx_enriched_authors_wikidata_unenriched
     const authorsResult = await sql`
-      SELECT DISTINCT ea.author_key, ea.name
+      SELECT DISTINCT ea.author_key, ea.name, ea.wikidata_id
       FROM enriched_authors ea
-      WHERE ea.wikidata_id IS NULL
+      WHERE ea.wikidata_id IS NOT NULL
+        AND ea.wikidata_enriched_at IS NULL
         AND ea.name IS NOT NULL
         AND ea.name != ''
         AND ea.name != 'Various'
         AND ea.name != 'Unknown'
-      ORDER BY RANDOM()
+      ORDER BY ea.book_count DESC NULLS LAST
       LIMIT ${TARGET_AUTHORS}
     `;
 

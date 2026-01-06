@@ -20,6 +20,29 @@
 
 ## ✅ Recently Completed (January 5, 2026)
 
+### CRITICAL: Wikidata Enrichment Cron Bug Fix (COMPLETED - Jan 5)
+**Fixed critical bug causing enrichment to stall for 3 days:**
+- **Issue:** Cron job query was looking for authors WITHOUT Wikidata IDs instead of those needing enrichment
+- **Impact:** 100,894 authors with Wikidata IDs were stuck pending enrichment since Jan 2
+- **Root Cause:** Query used `WHERE wikidata_id IS NULL` instead of `WHERE wikidata_id IS NOT NULL AND wikidata_enriched_at IS NULL`
+- **Fix:** Corrected SQL query in `worker/src/routes/authors.ts:560-568`
+- **Performance Boost:** Increased TARGET_AUTHORS from 1,000 to 5,000 per day
+- **Timeline:** Will complete 100,844 pending authors in ~20 days (by Jan 25)
+- **Optimization:** Now uses indexed query and prioritizes by `book_count DESC`
+- **Verification:** Tested with 50 authors - all enriched successfully
+- **Deployed:** Version `a0e6ada7-5d65-45a4-a7bc-f4535876b3f2`
+
+**Status Before Fix:**
+- Enriched: 73,533 authors
+- Pending: 100,894 authors
+- Last enrichment: Jan 2, 2026 (3 days ago)
+
+**Status After Fix:**
+- Enriched: 73,583 authors
+- Pending: 100,844 authors
+- Last enrichment: Jan 5, 2026 (working)
+- Processing rate: 5,000 authors/day via cron (2 AM UTC)
+
 ### #111: Top-1000 Author Tier Harvest (COMPLETED - Jan 5)
 **Completed substantial author bibliography harvest:**
 - 818 authors processed (81.8% of top-1000 goal)
@@ -107,17 +130,21 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 
 ---
 
-### #110: Wikidata Enrichment Cron Job (COMPLETED - Jan 4)
+### #110: Wikidata Enrichment Cron Job (COMPLETED - Jan 4, FIXED - Jan 5)
 **Set up automated daily Wikidata enrichment:**
 - Daily cron trigger: `0 2 * * *` (2 AM UTC)
-- Target: 1,000 authors/day without Wikidata IDs
+- Target: ~~1,000~~ **5,000 authors/day** (increased Jan 5)
 - Parallel execution with cover harvest cron
 - Worker deployed with active cron trigger
 
 **Implementation:**
 - `worker/src/routes/authors.ts`: `handleScheduledWikidataEnrichment()`
 - `worker/wrangler.jsonc`: Cron trigger configuration
-- Queries authors without `wikidata_id`, processes in batches
+- ~~Queries authors without `wikidata_id`, processes in batches~~ (WRONG - Fixed Jan 5)
+- **FIXED (Jan 5):** Now queries authors WITH `wikidata_id` but not yet enriched (`wikidata_enriched_at IS NULL`)
+- Uses optimized index: `idx_enriched_authors_wikidata_unenriched`
+
+**Bug Note:** Initial implementation had incorrect WHERE clause, causing 3-day stall. Fixed and deployed Jan 5.
 
 ---
 
@@ -293,6 +320,19 @@ cat data/bulk-author-checkpoint.json | jq '.stats'
 # Check normalization (after migration completes)
 ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c \
   'SELECT name, normalized_name FROM enriched_authors LIMIT 10;'"
+
+# Check Wikidata enrichment progress
+ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c \
+  'SELECT
+    COUNT(*) FILTER (WHERE wikidata_id IS NOT NULL) as total_with_wikidata,
+    COUNT(*) FILTER (WHERE wikidata_enriched_at IS NOT NULL) as enriched,
+    COUNT(*) FILTER (WHERE wikidata_id IS NOT NULL AND wikidata_enriched_at IS NULL) as pending,
+    MAX(wikidata_enriched_at) as last_enriched
+  FROM enriched_authors;'"
+
+# Test Wikidata enrichment manually (50 authors)
+curl -X POST https://alexandria.ooheynerds.com/api/authors/enrich-wikidata \
+  -H 'Content-Type: application/json' -d '{"limit": 50}' | jq
 ```
 
 ---
@@ -305,14 +345,22 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c
 - 28.6M enriched editions
 - 21.2M enriched works
 
+**Wikidata Enrichment (Jan 5, 2026):**
+- Authors with Wikidata IDs: 174,427
+- Enriched: 73,583 (42%)
+- Pending: 100,844 (58%)
+- Processing rate: 5,000/day via cron
+- ETA: ~20 days (Jan 25, 2026)
+- Cron bug fixed: Jan 5, 2026
+
 **ISBNdb Quota:**
 - Daily limit: 15,000 calls
 - Current usage: ~2,000/15,000 (13%)
 - Reset: Daily at midnight UTC
 
 **Infrastructure:**
-- Worker: Deployed (Version: 19f72c71-8d62-44ea-b261-e1458618d6d2)
-- Cron jobs: Active (daily 2 AM UTC)
+- Worker: Deployed (Version: a0e6ada7-5d65-45a4-a7bc-f4535876b3f2)
+- Cron jobs: Active (daily 2 AM UTC) - **FIXED Jan 5**
 - Tunnel: Operational (4 connections)
 - Queues: Processing normally
 - Tests: 575/588 passing (13 integration tests require Tailscale)
