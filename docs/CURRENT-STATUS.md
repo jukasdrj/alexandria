@@ -17,6 +17,42 @@
 
 ## ✅ Recently Completed (January 6, 2026)
 
+### Critical Security & Reliability Fixes (COMPLETED - Jan 6)
+**Resolved three high-priority issues in production:**
+
+**Issue #122 - SQL Injection Risk (SECURITY - CRITICAL)**
+- Added `sanitizeSqlPattern()` function to escape SQL pattern characters (%, _, \)
+- Applied sanitization to all ILIKE queries in search endpoints (5 locations)
+- Prevents SQL injection via pattern manipulation in title/author searches
+- **Commit:** b774631
+- **Deployment:** Version 9630c5e0-389f-48e7-8f4c-9a1459583fa8
+- **Validation:** SQL patterns with special characters safely escaped in production
+
+**Issue #140 - Module-level Caches (RELIABILITY - CRITICAL)**
+- Converted module-level caches to request-scoped parameters in work-utils.ts
+- Fixed non-deterministic behavior in Cloudflare Workers isolates
+- Functions updated: `findOrCreateAuthor()`, `linkWorkToAuthors()`, `findOrCreateWork()`
+- All 4 callers updated with local Map instances (queue-handlers, author-service, books routes)
+- **Impact:** Eliminates cross-request cache contamination and Worker isolate suspension issues
+- **Commit:** b774631
+
+**Issue #141 - Work Duplication (DATA INTEGRITY - CRITICAL)**
+- Fixed `processEnrichmentQueue()` bypassing deduplication logic
+- Replaced `crypto.randomUUID()` with proper `findOrCreateWork()` flow
+- Added missing author linking via `linkWorkToAuthors()`
+- Prevents duplicate work entries and orphaned works in enriched tables
+- **Impact:** Proper work deduplication now active in queue processing
+- **Commit:** b774631
+
+**Additional Fix:**
+- Fixed duplicate `cover_url_large` field in search.ts query (line 370)
+
+**Code Review:** ✅ Approved by Grok (grok-4-1-fast-non-reasoning)
+**Tests:** 589/589 passing
+**Deployed:** January 6, 2026 @ 22:31 UTC
+
+---
+
 ### TypeScript Type Safety & Logging Improvements (COMPLETED - Jan 6)
 **Enhanced code quality with type-safe patterns:**
 - **Type Safety:** Replaced `sql: any` with proper `Sql` type in query-detector.ts
