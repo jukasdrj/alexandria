@@ -21,6 +21,18 @@ import {
 import { smartResolveISBN, shouldResolveExternally } from '../../services/smart-enrich.js';
 
 // =================================================================================
+// Helper Functions
+// =================================================================================
+
+/**
+ * Sanitize user input for SQL ILIKE patterns
+ * Escapes special pattern characters: %, _, \
+ */
+function sanitizeSqlPattern(input: string): string {
+  return input.replace(/[%_\\]/g, '\\$&');
+}
+
+// =================================================================================
 // OpenLibrary Fallback Queries
 // =================================================================================
 
@@ -65,7 +77,7 @@ async function fallbackISBNSearch(sql: SqlClient, isbn: string): Promise<Edition
 }
 
 async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number, offset: number): Promise<{ total: number; results: EditionSearchResult[] }> {
-  const titlePattern = `%${title}%`;
+  const titlePattern = `%${sanitizeSqlPattern(title)}%`;
 
   const [countResult, dataResult] = await Promise.all([
     sql`
@@ -113,7 +125,7 @@ async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number,
 }
 
 async function fallbackAuthorSearch(sql: SqlClient, author: string, limit: number, offset: number): Promise<EditionSearchResult[]> {
-  const authorPattern = `%${author}%`;
+  const authorPattern = `%${sanitizeSqlPattern(author)}%`;
 
   const dataResult = await sql`
     WITH matching_editions AS (
@@ -337,7 +349,7 @@ app.openapi(searchRoute, async (c) => {
 
     } else if (title) {
       // OPTIMIZED: Query enriched_editions with ILIKE for fast partial match
-      const titlePattern = `%${title}%`;
+      const titlePattern = `%${sanitizeSqlPattern(title)}%`;
       const [countResult, dataResult] = await Promise.all([
         sql`
           SELECT COUNT(*)::int AS total
@@ -354,8 +366,7 @@ app.openapi(searchRoute, async (c) => {
             ew.title AS work_title,
             ee.edition_key,
             ee.work_key,
-            ee.cover_url_large,
-            ee.cover_url_large,
+            ee.cover_url_large AS cover_url,
             ee.cover_url_medium,
             ee.cover_url_small,
             ee.binding,

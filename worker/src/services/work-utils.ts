@@ -8,18 +8,17 @@
 import postgres from 'postgres';
 import { formatPgArray } from './utils.js';
 
-// Cache for author lookups within a request (reduces DB queries)
-const authorKeyCache = new Map<string, string>();
-
-// Cache for work lookups (ISBN → work_key)
-const workKeyCache = new Map<string, string>();
-
 /**
  * Find or create an author by name, returning the author_key
+ *
+ * @param sql - PostgreSQL connection
+ * @param authorName - Name of the author
+ * @param authorKeyCache - Request-scoped cache for author lookups (reduces DB queries)
  */
 export async function findOrCreateAuthor(
   sql: ReturnType<typeof postgres>,
-  authorName: string
+  authorName: string,
+  authorKeyCache: Map<string, string>
 ): Promise<string> {
   // Check cache first
   const cached = authorKeyCache.get(authorName.toLowerCase());
@@ -68,14 +67,20 @@ export async function findOrCreateAuthor(
 /**
  * Link a work to its authors in work_authors_enriched
  * Uses ON CONFLICT DO NOTHING for idempotency (safe to call multiple times)
+ *
+ * @param sql - PostgreSQL connection
+ * @param workKey - Work key to link authors to
+ * @param authorNames - Array of author names
+ * @param authorKeyCache - Request-scoped cache for author lookups
  */
 export async function linkWorkToAuthors(
   sql: ReturnType<typeof postgres>,
   workKey: string,
-  authorNames: string[]
+  authorNames: string[],
+  authorKeyCache: Map<string, string>
 ): Promise<void> {
   for (let i = 0; i < authorNames.length; i++) {
-    const authorKey = await findOrCreateAuthor(sql, authorNames[i]);
+    const authorKey = await findOrCreateAuthor(sql, authorNames[i], authorKeyCache);
     await sql`
       INSERT INTO work_authors_enriched (work_key, author_key, author_order)
       VALUES (${workKey}, ${authorKey}, ${i + 1})
@@ -92,12 +97,21 @@ export async function linkWorkToAuthors(
  * 2. Author-scoped fuzzy title match - find work by same author with similar title (0.8 threshold)
  * 3. Exact title match - fallback for works without author links yet (risky for common titles)
  * 4. Generate new synthetic key - only if no match found
+ *
+ * @param sql - PostgreSQL connection
+ * @param isbn - ISBN to look up
+ * @param title - Title of the work
+ * @param authorNames - Array of author names
+ * @param workKeyCache - Request-scoped cache for work lookups (ISBN → work_key)
+ * @param authorKeyCache - Request-scoped cache for author lookups
  */
 export async function findOrCreateWork(
   sql: ReturnType<typeof postgres>,
   isbn: string,
   title: string,
-  authorNames: string[]
+  authorNames: string[],
+  workKeyCache: Map<string, string>,
+  authorKeyCache: Map<string, string>
 ): Promise<{ workKey: string; isNew: boolean }> {
   // Check cache first (ISBN → work_key)
   const cached = workKeyCache.get(isbn);
@@ -121,7 +135,7 @@ export async function findOrCreateWork(
   if (authorNames && authorNames.length > 0) {
     // Get or create author keys first
     const authorKeys = await Promise.all(
-      authorNames.slice(0, 3).map(name => findOrCreateAuthor(sql, name)) // Limit to first 3 authors
+      authorNames.slice(0, 3).map(name => findOrCreateAuthor(sql, name, authorKeyCache)) // Limit to first 3 authors
     );
 
     // Format author keys as PostgreSQL array literal for ANY() clause
@@ -159,12 +173,4 @@ export async function findOrCreateWork(
   const newKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
   workKeyCache.set(isbn, newKey);
   return { workKey: newKey, isNew: true };
-}
-
-/**
- * Clear the in-memory caches (useful between requests or for testing)
- */
-export function clearWorkUtilsCaches(): void {
-  authorKeyCache.clear();
-  workKeyCache.clear();
 }

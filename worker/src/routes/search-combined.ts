@@ -143,6 +143,14 @@ async function searchByAuthor(
 }
 
 /**
+ * Sanitize user input for SQL ILIKE patterns
+ * Escapes special pattern characters: %, _, \
+ */
+function sanitizeSqlPattern(input: string): string {
+	return input.replace(/[%_\\]/g, '\\$&');
+}
+
+/**
  * Search by title using GIN trigram indexes (fuzzy search)
  */
 async function searchByTitle(
@@ -151,7 +159,7 @@ async function searchByTitle(
 	limit: number,
 	offset: number
 ): Promise<{ data: any[]; total: number }> {
-	const titlePattern = `%${title}%`;
+	const titlePattern = `%${sanitizeSqlPattern(title)}%`;
 	const [countResult, dataResult] = await Promise.all([
 		sql`
 			SELECT COUNT(DISTINCT e.isbn)::int AS total

@@ -12,6 +12,7 @@ import { processAndStoreCover, coversExist } from '../../services/jsquash-proces
 import { fetchBestCover, fetchISBNdbCover } from '../../services/cover-fetcher.js';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 import { enrichEdition, enrichWork } from './enrichment-service.js';
+import { findOrCreateWork, linkWorkToAuthors } from './work-utils.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
 import { Logger } from '../../lib/logger.js';
 import { QuotaManager } from './quota-manager.js';
@@ -400,23 +401,41 @@ export async function processEnrichmentQueue(
       api_calls_saved: results.api_calls_saved,
     });
 
+    // Create request-scoped caches for work/author deduplication
+    const localAuthorKeyCache = new Map<string, string>();
+    const localWorkKeyCache = new Map<string, string>();
+
     // 3. Process each ISBN result
     for (const [isbn, externalData] of enrichmentData) {
       const message = isbnMessages.get(isbn);
       if (!message) continue;
 
       try {
-        // Generate a work key for grouping editions
-        const workKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
+        // Use findOrCreateWork for proper deduplication
+        const { workKey, isNew: isNewWork } = await findOrCreateWork(
+          sql,
+          isbn,
+          externalData.title,
+          externalData.authors || [],
+          localWorkKeyCache,
+          localAuthorKeyCache
+        );
 
-        // First, create the enriched_work so FK constraint is satisfied
-        await enrichWork(sql, {
-          work_key: workKey,
-          title: externalData.title,
-          description: externalData.description,
-          subject_tags: externalData.subjects,
-          primary_provider: 'isbndb',
-        }, logger);
+        // Only create enriched_work if it's genuinely new
+        if (isNewWork) {
+          await enrichWork(sql, {
+            work_key: workKey,
+            title: externalData.title,
+            description: externalData.description,
+            subject_tags: externalData.subjects,
+            primary_provider: 'isbndb',
+          }, logger);
+        }
+
+        // Link work to authors (fixes orphaned works)
+        if (externalData.authors && externalData.authors.length > 0) {
+          await linkWorkToAuthors(sql, workKey, externalData.authors, localAuthorKeyCache);
+        }
 
         // Then enrich the edition (stores metadata + cover URLs)
         await enrichEdition(

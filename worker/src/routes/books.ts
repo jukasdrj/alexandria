@@ -511,6 +511,10 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
           });
         }
 
+        // Create request-scoped caches for work/author deduplication
+        const localAuthorKeyCache = new Map<string, string>();
+        const localWorkKeyCache = new Map<string, string>();
+
         // Enrich new books
         for (const book of booksToEnrich) {
           const isbn = book.isbn13 || book.isbn;
@@ -518,7 +522,7 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
 
           try {
             const { workKey, isNew: isNewWork } = await findOrCreateWork(
-              sql, isbn, book.title || 'Unknown', book.authors || []
+              sql, isbn, book.title || 'Unknown', book.authors || [], localWorkKeyCache, localAuthorKeyCache
             );
 
             if (isNewWork) {
@@ -532,7 +536,7 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
             }
 
             if (book.authors && book.authors.length > 0) {
-              await linkWorkToAuthors(sql, workKey, book.authors);
+              await linkWorkToAuthors(sql, workKey, book.authors, localAuthorKeyCache);
             }
 
             const hasCover = !!(book.image_original || book.image);

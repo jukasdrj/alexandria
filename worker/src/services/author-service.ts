@@ -950,6 +950,10 @@ export async function enrichAuthorBibliography(
   const enableParallel = env.ENABLE_PARALLEL_ENRICHMENT === 'true';
   const concurrencyLimit = parseInt(env.PARALLEL_CONCURRENCY_LIMIT || '8', 10);
 
+  // Create request-scoped caches for work/author deduplication
+  const localAuthorKeyCache = new Map<string, string>();
+  const localWorkKeyCache = new Map<string, string>();
+
   if (enableParallel && isbnsToEnrich.length > 1) {
     logger.info('[EnrichBibliography] Using parallel enrichment', {
       count: isbnsToEnrich.length,
@@ -960,12 +964,14 @@ export async function enrichAuthorBibliography(
     const semaphore = new Semaphore(concurrencyLimit);
     const enrichmentResults = await Promise.allSettled(
       isbnsToEnrich.map(book => semaphore.run(async () => {
-        // Find or create work
+        // Find or create work (with request-scoped caches)
         const { workKey, isNew: isNewWork } = await findOrCreateWork(
           sql,
           book.isbn,
           book.title,
-          book.authors
+          book.authors,
+          localWorkKeyCache,
+          localAuthorKeyCache
         );
 
         // Create work if new
@@ -979,9 +985,9 @@ export async function enrichAuthorBibliography(
           }, logger);
         }
 
-        // Link work to authors
+        // Link work to authors (with request-scoped cache)
         if (book.authors && book.authors.length > 0) {
-          await linkWorkToAuthors(sql, workKey, book.authors);
+          await linkWorkToAuthors(sql, workKey, book.authors, localAuthorKeyCache);
         }
 
         // Create edition
@@ -1059,7 +1065,9 @@ export async function enrichAuthorBibliography(
           sql,
           book.isbn,
           book.title,
-          book.authors
+          book.authors,
+          localWorkKeyCache,
+          localAuthorKeyCache
         );
 
         // Only create enriched_work if it's genuinely new
@@ -1076,7 +1084,7 @@ export async function enrichAuthorBibliography(
         // ALWAYS link work to authors (idempotent via ON CONFLICT DO NOTHING)
         // This fixes the 99.8% orphaned works bug
         if (book.authors && book.authors.length > 0) {
-          await linkWorkToAuthors(sql, workKey, book.authors);
+          await linkWorkToAuthors(sql, workKey, book.authors, localAuthorKeyCache);
         }
 
         // Create enriched_edition with all the metadata we already have
