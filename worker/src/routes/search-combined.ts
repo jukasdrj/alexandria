@@ -91,7 +91,7 @@ async function searchByAuthor(
 			JOIN author_works aw ON a.author_key = aw.author_key
 			JOIN enriched_works w ON aw.work_key = w.work_key
 			JOIN enriched_editions e ON e.work_key = w.work_key
-			WHERE a.normalized_name = ${name}
+			WHERE a.normalized_name = normalize_author_name(${name})
 		`,
 		sql`
 			SELECT
@@ -129,7 +129,7 @@ async function searchByAuthor(
 			JOIN enriched_editions e ON e.work_key = w.work_key
 			LEFT JOIN author_works aw2 ON w.work_key = aw2.work_key
 			LEFT JOIN enriched_authors a2 ON aw2.author_key = a2.author_key
-			WHERE a.normalized_name = ${name}
+			WHERE a.normalized_name = normalize_author_name(${name})
 			GROUP BY e.isbn, e.title, e.publication_date, e.publisher, e.page_count, e.format, e.cover_url_large, e.cover_source, e.openlibrary_edition_id, e.work_key, w.title
 			ORDER BY e.publication_date DESC NULLS LAST
 			LIMIT ${limit} OFFSET ${offset}

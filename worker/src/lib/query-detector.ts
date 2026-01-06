@@ -149,13 +149,14 @@ export async function detectQueryType(
 
 	// Stage 2: Author detection (with heuristic pre-filter)
 	if (matchesAuthorPattern(trimmed)) {
-		const normalized = trimmed.toLowerCase().trim();
+		// Use raw trimmed string - let DB handle normalization
+		const normalized = trimmed;
 
-		// Quick DB lookup for exact match
+		// Quick DB lookup for exact match using DB normalization function
 		try {
 			const result = await sql`
 				SELECT 1 FROM enriched_authors
-				WHERE normalized_name = ${normalized}
+				WHERE normalized_name = normalize_author_name(${normalized})
 				LIMIT 1
 			`;
 

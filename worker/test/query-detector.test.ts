@@ -201,10 +201,14 @@ describe('query-detector', () => {
 		// Mock SQL connection for testing
 		// Tagged template literal receives: sql`...` -> sql(strings, ...values)
 		const mockSqlWithAuthor = async (strings: TemplateStringsArray, ...values: any[]) => {
-			const normalized = values[0]; // First parameter value
-			// Simulate DB having "j. k. rowling" and "stephen king"
+			const rawInput = values[0]; // First parameter value (raw user input)
+			// Simulate what normalize_author_name() would do in the database
+			// The query is: WHERE normalized_name = normalize_author_name(${rawInput})
+			// So we simulate having normalized versions of "J. K. Rowling" and "Stephen King"
+			const normalized = rawInput.toLowerCase().trim();
 			if (
 				normalized === 'j. k. rowling' ||
+				normalized === 'j.k. rowling' ||
 				normalized === 'stephen king'
 			) {
 				return [{ exists: 1 }]; // Found
@@ -259,7 +263,7 @@ describe('query-detector', () => {
 					mockSqlWithAuthor
 				);
 				expect(result.type).toBe('author');
-				expect(result.normalized).toBe('j. k. rowling');
+				expect(result.normalized).toBe('J. K. Rowling'); // Now returns raw trimmed input
 				expect(result.confidence).toBe('high');
 			});
 
@@ -269,7 +273,7 @@ describe('query-detector', () => {
 					mockSqlWithAuthor
 				);
 				expect(result.type).toBe('author');
-				expect(result.normalized).toBe('stephen king');
+				expect(result.normalized).toBe('Stephen King'); // Now returns raw trimmed input
 				expect(result.confidence).toBe('high');
 			});
 
@@ -346,7 +350,7 @@ describe('query-detector', () => {
 					mockSqlWithAuthor
 				);
 				expect(result.type).toBe('author');
-				expect(result.normalized).toBe('stephen king');
+				expect(result.normalized).toBe('Stephen King'); // Returns trimmed input (whitespace removed)
 			});
 		});
 	});
