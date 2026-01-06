@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.5] - 2026-01-06
+
+### Changed
+- **Code Quality**: Improved TypeScript type safety and logging consistency
+  - Replaced `sql: any` with `Sql` type in query-detector for better type checking
+  - Added `Logger.forScheduled()` static method for cron task logging
+  - Replaced console.* calls with structured Logger in lifecycle handlers (fetch, queue, scheduled)
+  - Enhanced error handling in query-detector with cleaner catch blocks
+  - All changes maintain backward compatibility
+
 ## [2.2.4] - 2026-01-05
 
 ### Added
