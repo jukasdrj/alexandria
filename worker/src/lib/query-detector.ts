@@ -3,6 +3,8 @@
  * Implements 3-stage cascade: ISBN -> Author -> Title
  */
 
+import type { Sql } from 'postgres';
+
 export type QueryType = 'isbn' | 'author' | 'title';
 
 export interface DetectionResult {
@@ -134,7 +136,7 @@ export function matchesAuthorPattern(query: string): boolean {
  */
 export async function detectQueryType(
 	query: string,
-	sql: any
+	sql: Sql
 ): Promise<DetectionResult> {
 	const trimmed = query.trim();
 
@@ -167,9 +169,8 @@ export async function detectQueryType(
 					confidence: 'high',
 				};
 			}
-		} catch (err) {
-			// DB error - fall through to title search
-			console.error('Author lookup failed:', err);
+		} catch {
+			// DB error - silently fall through to title search
 		}
 	}
 

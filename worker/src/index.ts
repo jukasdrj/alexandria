@@ -217,8 +217,10 @@ export default {
 
   // Scheduled cron handler (runs daily at 2 AM UTC)
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
+    const logger = Logger.forScheduled(env);
+
     try {
-      console.log('[Cron] Scheduled event triggered:', event.cron);
+      logger.info('Scheduled event triggered', { cron: event.cron });
 
       // Run both scheduled tasks in parallel
       await Promise.all([
@@ -226,22 +228,24 @@ export default {
         handleScheduledWikidataEnrichment(env)
       ]);
 
-      console.log('[Cron] All scheduled tasks completed');
+      logger.info('All scheduled tasks completed');
     } catch (error) {
-      console.error('[Cron] Scheduled handler error:', error);
+      logger.error('Scheduled handler error', { error });
       throw error;
     }
   },
 
   // Queue consumer handler
   async queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext) {
+    const logger = Logger.forQueue(env, batch.queue, batch.messages.length);
+
     switch (batch.queue) {
       case 'alexandria-cover-queue':
         return await processCoverQueue(batch as MessageBatch<CoverQueueMessage>, env);
       case 'alexandria-enrichment-queue':
         return await processEnrichmentQueue(batch as MessageBatch<EnrichmentQueueMessage>, env);
       default:
-        console.error(`Unknown queue: ${batch.queue}`);
+        logger.error('Unknown queue', { queue: batch.queue });
         batch.messages.forEach((msg: Message) => msg.ack());
     }
   },

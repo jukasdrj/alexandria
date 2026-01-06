@@ -84,6 +84,21 @@ class Logger {
   }
 
   /**
+   * Create a scheduled/cron-scoped logger
+   *
+   * For tracking scheduled task execution
+   *
+   * @param {Env} env - Worker environment bindings
+   * @returns {Logger} Scheduled-scoped logger instance
+   */
+  static forScheduled(env) {
+    return new Logger(env, {
+      taskId: crypto.randomUUID().slice(0, 8),
+      type: 'scheduled'
+    });
+  }
+
+  /**
    * Internal log method - handles level filtering and formatting
    *
    * @private
