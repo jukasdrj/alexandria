@@ -81,7 +81,7 @@ export class Logger {
     const configuredLevel = env.LOG_LEVEL?.toLowerCase() as LogLevel | undefined;
     this.level = LOG_LEVELS[configuredLevel || 'info'] ?? LOG_LEVELS.info;
 
-    // Parse structured logging flag (default: true)
+    // Parse structured logging flag (default: false, requires explicit 'true')
     this.structured = env.STRUCTURED_LOGGING === 'true';
 
     // Parse feature flags for analytics
