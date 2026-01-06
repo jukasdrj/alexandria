@@ -11,11 +11,18 @@
  * @module lib/logger
  */
 
+import type { Env } from '../src/env.js';
+
+/**
+ * Log level type
+ */
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
 /**
  * Log level enumeration with priority values
  * Lower numbers = more verbose, higher numbers = less verbose
  */
-const LOG_LEVELS = {
+const LOG_LEVELS: Record<LogLevel, number> = {
   debug: 0,
   info: 1,
   warn: 2,
@@ -23,22 +30,56 @@ const LOG_LEVELS = {
 };
 
 /**
+ * Context metadata for logging
+ */
+interface LogContext {
+  requestId?: string;
+  batchId?: string;
+  queueName?: string;
+  batchSize?: number;
+  taskId?: string;
+  type?: 'http' | 'queue' | 'scheduled';
+  [key: string]: unknown;
+}
+
+/**
+ * Log entry structure
+ */
+interface LogEntry extends LogContext {
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+}
+
+/**
+ * Additional data for log entries
+ */
+type LogData = Record<string, unknown>;
+
+/**
  * Logger class for structured, context-aware logging
  */
-class Logger {
+export class Logger {
+  private env: Env;
+  private context: LogContext;
+  private level: number;
+  private structured: boolean;
+  private perfLoggingEnabled: boolean;
+  private queryLoggingEnabled: boolean;
+
   /**
    * Create a new Logger instance
    *
-   * @param {Env} env - Worker environment bindings
-   * @param {object} context - Contextual metadata (requestId, batchId, type, etc.)
+   * @param env - Worker environment bindings
+   * @param context - Contextual metadata (requestId, batchId, type, etc.)
    */
-  constructor(env, context = {}) {
+  constructor(env: Env, context: LogContext = {}) {
     this.env = env;
     this.context = context;
 
     // Parse log level from environment (default: info)
-    const configuredLevel = env.LOG_LEVEL?.toLowerCase() || 'info';
-    this.level = LOG_LEVELS[configuredLevel] ?? LOG_LEVELS.info;
+    const configuredLevel = env.LOG_LEVEL?.toLowerCase() as LogLevel | undefined;
+    this.level = LOG_LEVELS[configuredLevel || 'info'] ?? LOG_LEVELS.info;
 
     // Parse structured logging flag (default: true)
     this.structured = env.STRUCTURED_LOGGING === 'true';
@@ -53,11 +94,11 @@ class Logger {
    *
    * Extracts cf-ray header as requestId for distributed tracing
    *
-   * @param {Env} env - Worker environment bindings
-   * @param {Request} request - HTTP request object
-   * @returns {Logger} Request-scoped logger instance
+   * @param env - Worker environment bindings
+   * @param request - HTTP request object
+   * @returns Request-scoped logger instance
    */
-  static forRequest(env, request) {
+  static forRequest(env: Env, request: Request): Logger {
     return new Logger(env, {
       requestId: request.headers.get('cf-ray') || crypto.randomUUID().slice(0, 8),
       type: 'http'
@@ -69,12 +110,12 @@ class Logger {
    *
    * For tracking batch processing in queue consumers
    *
-   * @param {Env} env - Worker environment bindings
-   * @param {string} queueName - Name of the queue being processed
-   * @param {number} batchSize - Number of messages in the batch
-   * @returns {Logger} Queue-scoped logger instance
+   * @param env - Worker environment bindings
+   * @param queueName - Name of the queue being processed
+   * @param batchSize - Number of messages in the batch
+   * @returns Queue-scoped logger instance
    */
-  static forQueue(env, queueName, batchSize) {
+  static forQueue(env: Env, queueName: string, batchSize: number): Logger {
     return new Logger(env, {
       queueName,
       batchSize,
@@ -88,10 +129,10 @@ class Logger {
    *
    * For tracking scheduled task execution
    *
-   * @param {Env} env - Worker environment bindings
-   * @returns {Logger} Scheduled-scoped logger instance
+   * @param env - Worker environment bindings
+   * @returns Scheduled-scoped logger instance
    */
-  static forScheduled(env) {
+  static forScheduled(env: Env): Logger {
     return new Logger(env, {
       taskId: crypto.randomUUID().slice(0, 8),
       type: 'scheduled'
@@ -102,15 +143,15 @@ class Logger {
    * Internal log method - handles level filtering and formatting
    *
    * @private
-   * @param {string} level - Log level (debug, info, warn, error)
-   * @param {string} message - Log message
-   * @param {object} data - Additional structured data
+   * @param level - Log level (debug, info, warn, error)
+   * @param message - Log message
+   * @param data - Additional structured data
    */
-  _log(level, message, data = {}) {
+  private _log(level: LogLevel, message: string, data: LogData = {}): void {
     // Filter by configured log level
     if (LOG_LEVELS[level] < this.level) return;
 
-    const entry = {
+    const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
       message,
@@ -135,10 +176,10 @@ class Logger {
    *
    * Use for detailed debugging information, disabled in production
    *
-   * @param {string} message - Debug message
-   * @param {object} [data] - Additional structured data
+   * @param message - Debug message
+   * @param data - Additional structured data
    */
-  debug(message, data) {
+  debug(message: string, data?: LogData): void {
     this._log('debug', message, data);
   }
 
@@ -147,10 +188,10 @@ class Logger {
    *
    * Use for normal operational events
    *
-   * @param {string} message - Info message
-   * @param {object} [data] - Additional structured data
+   * @param message - Info message
+   * @param data - Additional structured data
    */
-  info(message, data) {
+  info(message: string, data?: LogData): void {
     this._log('info', message, data);
   }
 
@@ -159,10 +200,10 @@ class Logger {
    *
    * Use for potentially harmful situations that should be reviewed
    *
-   * @param {string} message - Warning message
-   * @param {object} [data] - Additional structured data
+   * @param message - Warning message
+   * @param data - Additional structured data
    */
-  warn(message, data) {
+  warn(message: string, data?: LogData): void {
     this._log('warn', message, data);
   }
 
@@ -171,10 +212,10 @@ class Logger {
    *
    * Use for error conditions that should be investigated
    *
-   * @param {string} message - Error message
-   * @param {object} [data] - Additional structured data
+   * @param message - Error message
+   * @param data - Additional structured data
    */
-  error(message, data) {
+  error(message: string, data?: LogData): void {
     this._log('error', message, data);
   }
 
@@ -183,11 +224,11 @@ class Logger {
    *
    * Writes to ANALYTICS dataset when ENABLE_PERFORMANCE_LOGGING=true
    *
-   * @param {string} operation - Operation name (e.g., 'search', 'cover_process')
-   * @param {number} durationMs - Operation duration in milliseconds
-   * @param {object} [metadata] - Additional metadata for analytics
+   * @param operation - Operation name (e.g., 'search', 'cover_process')
+   * @param durationMs - Operation duration in milliseconds
+   * @param metadata - Additional metadata for analytics
    */
-  perf(operation, durationMs, metadata = {}) {
+  perf(operation: string, durationMs: number, metadata: LogData = {}): void {
     if (!this.perfLoggingEnabled) return;
 
     if (!this.env.ANALYTICS) {
@@ -216,11 +257,11 @@ class Logger {
    *
    * Writes to QUERY_ANALYTICS dataset when ENABLE_QUERY_LOGGING=true
    *
-   * @param {string} operation - Query operation name (e.g., 'isbn_search', 'title_search')
-   * @param {number} durationMs - Query duration in milliseconds
-   * @param {object} [metadata] - Additional metadata (e.g., result_count, cache_hit)
+   * @param operation - Query operation name (e.g., 'isbn_search', 'title_search')
+   * @param durationMs - Query duration in milliseconds
+   * @param metadata - Additional metadata (e.g., result_count, cache_hit)
    */
-  query(operation, durationMs, metadata = {}) {
+  query(operation: string, durationMs: number, metadata: LogData = {}): void {
     if (!this.queryLoggingEnabled) return;
 
     if (!this.env.QUERY_ANALYTICS) {
@@ -244,8 +285,3 @@ class Logger {
     }
   }
 }
-
-/**
- * Export Logger class
- */
-export { Logger };
