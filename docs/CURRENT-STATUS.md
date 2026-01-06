@@ -56,10 +56,17 @@
 
 **Migration Time:** < 5 minutes for 14.7M authors (faster than expected!)
 
+**Worker Integration:** (COMPLETED - Jan 6)
+- ✅ Updated query-detector.ts to use `normalize_author_name()` DB function
+- ✅ Updated search-combined.ts author search endpoint
+- ✅ Updated search.ts author search endpoint
+- ✅ All 589 tests passing
+- ✅ Deployed commit: `b8f1eaf`
+
 **Next Steps:**
-- Worker code already ready to use `normalized_name`
-- Consider updating search endpoints to leverage normalization
+- Monitor search performance improvements
 - Review top duplicates for potential author merging
+- Consider adding normalization metrics to Analytics Engine
 
 ---
 
@@ -298,9 +305,9 @@ curl 'https://alexandria.ooheynerds.com/api/search/combined?q=harry%20potter'
 ## 🎯 Recommended Next Actions
 
 ### Short-term (This Week)
-1. **Update search endpoints to use normalized_name** - Leverage new normalization for better author matching
-2. **Wikipedia + LLM Fallback (#113)** - For authors without Wikidata
-3. **Auto-healing/recovery system (#118)** - For bulk author harvesting resilience
+1. **Wikipedia + LLM Fallback (#113)** - For authors without Wikidata
+2. **Auto-healing/recovery system (#118)** - For bulk author harvesting resilience
+3. **Monitor normalized_name performance** - Track search speed improvements
 
 ### Long-term (Next Month)
 4. **GitHub Actions Automation (#100)** - Automated harvesting pipeline
