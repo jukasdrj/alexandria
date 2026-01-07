@@ -175,11 +175,17 @@ export interface CoverQueueMessage {
 
 /**
  * Enrichment queue message
+ *
+ * Supports both single ISBN and batch modes:
+ * - Single: { isbn: "9780..." } - Legacy format from bendv3
+ * - Batch: { isbns: ["9780...", "9781..."] } - Backfill format for efficiency
  */
 export interface EnrichmentQueueMessage {
-  isbn: string;
+  isbn?: string;          // Single ISBN (bendv3 pattern)
+  isbns?: string[];       // Batch ISBNs (backfill pattern)
   priority?: string;
   source?: string;
+  job_id?: string;        // Optional job tracking for backfill
 }
 
 /**
