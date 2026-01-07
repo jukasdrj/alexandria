@@ -138,6 +138,52 @@ Host tower
 | `sabnzbd` | `lscr.io/linuxserver/sabnzbd` | `8080` | Usenet downloader |
 | `qbittorrent` | `lscr.io/linuxserver/qbittorrent` | `8085`, `6881` | Torrent client |
 
+**⚠️ Critical: Docker Container Permissions**
+
+All LinuxServer.io containers (qBittorrent, SABnzbd, etc.) MUST use:
+- **PUID=99** (nobody)
+- **PGID=100** (users)
+
+This ensures proper NFS permissions for file operations from Mac/other clients.
+
+**Verify Container User:**
+```bash
+ssh tower "docker inspect qbittorrent --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '(PUID|PGID)'"
+# Expected output:
+# PUID=99
+# PGID=100
+```
+
+**Fix Incorrect PUID:**
+```bash
+# Stop and remove container
+ssh tower "docker stop qbittorrent && docker rm qbittorrent"
+
+# Recreate with correct PUID (example for qBittorrent)
+ssh tower "docker run -d \
+  --name=qbittorrent \
+  --net=media \
+  -e PUID=99 \
+  -e PGID=100 \
+  -e TZ=America/Chicago \
+  -e WEBUI_PORT=8085 \
+  -e TORRENTING_PORT=6881 \
+  -p 8085:8085 \
+  -p 6881:6881 \
+  -p 6881:6881/udp \
+  -v /mnt/user/appdata/qbittorrentLS:/config \
+  -v /mnt/user/data/:/downloads \
+  --restart unless-stopped \
+  lscr.io/linuxserver/qbittorrent"
+```
+
+**Fix Existing File Permissions:**
+```bash
+ssh tower "chown -R nobody:users /mnt/user/data/torrents_incoming && \
+  chmod -R 755 /mnt/user/data/torrents_incoming && \
+  find /mnt/user/data/torrents_incoming -type f -exec chmod 644 {} \;"
+```
+
 #### 📊 Monitoring Stack
 | Container | Image | Port | Purpose |
 |-----------|-------|------|---------|
@@ -201,6 +247,69 @@ Host tower
 - **Mac:** Connected
 - **Green:** `100.76.189.58`
 - **Tower:** `100.120.125.46`
+
+---
+
+## 🗄️ Database Access
+
+### NFS Share Access (Mac ↔ Tower)
+
+**Tower exports two NFS shares:**
+- `/mnt/user/domains` - VMs, databases, development files
+- `/mnt/user/data` - Media files, torrents, backups (72TB)
+
+**Mac Auto-mount Configuration:**
+
+Shares are mounted on-demand at `/Tower/` via macOS automounter:
+- `/Tower/domains` → `Tower:/mnt/user/domains`
+- `/Tower/data` → `Tower:/mnt/user/data`
+
+**Setup Files:**
+- `/etc/auto_master` - Automount master config
+- `/etc/auto_tower` - Tower NFS map
+
+**Mount Configuration (`/etc/auto_tower`):**
+```
+domains		-fstype=nfs,resvport,rw,bg,hard,intr,rsize=65536,wsize=65536,timeo=14,nolocks	192.168.1.240:/mnt/user/domains
+data		-fstype=nfs,resvport,rw,bg,hard,intr,rsize=65536,wsize=65536,timeo=14,nolocks	192.168.1.240:/mnt/user/data
+```
+
+**Auto-mount Entry (`/etc/auto_master`):**
+```
+/Tower			auto_tower	-nobrowse,nosuid
+```
+
+**Reload Automounter:**
+```bash
+sudo automount -vc
+```
+
+**Access Shares:**
+```bash
+# Shares auto-mount on first access
+ls /Tower/domains
+ls /Tower/data
+
+# Add to Finder favorites (⌘-drag folder icon to sidebar)
+open /Tower
+```
+
+**Finder View Preferences:**
+```bash
+# Set global defaults (List view, folders on top)
+defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
+defaults write com.apple.finder _FXSortFoldersFirst -bool true
+defaults write com.apple.finder _FXSortFoldersFirstOnDesktop -bool true
+killall Finder
+```
+
+**Troubleshooting:**
+
+If shares won't mount or show permission errors:
+1. Check Tower NFS exports: `showmount -e 192.168.1.240`
+2. Verify automount config: `sudo automount -cv`
+3. Check mount options: `nfsstat -m | grep Tower`
+4. Fix permissions on Tower (see Docker section)
 
 ---
 
@@ -480,9 +589,76 @@ cd ~/dev_repos/bendv3 && npm run tail
 
 ---
 
+## 🔧 Common Issues & Solutions
+
+### NFS Permission Denied / Can't Delete Files
+
+**Symptoms:**
+- "The operation can't be completed because some items had to be skipped"
+- Files/folders owned by UID 1000 instead of nobody
+- Can't move/delete downloaded files
+
+**Root Cause:** Docker container running with wrong PUID
+
+**Solution:**
+```bash
+# 1. Check container PUID
+ssh tower "docker inspect CONTAINER_NAME --format '{{range .Config.Env}}{{println .}}{{end}}' | grep PUID"
+
+# 2. If PUID != 99, recreate container with PUID=99 (see Download Stack section)
+
+# 3. Fix existing files
+ssh tower "chown -R nobody:users /mnt/user/data/PROBLEM_DIR && \
+  chmod -R 755 /mnt/user/data/PROBLEM_DIR"
+```
+
+### NFS Shares Won't Mount
+
+**Symptoms:**
+- Finder sidebar shows disconnected folder
+- "Original item can't be found" error
+- `/Tower` directory empty
+
+**Solution:**
+```bash
+# 1. Trigger auto-mount by accessing directory
+ls /Tower/domains
+ls /Tower/data
+
+# 2. If still fails, check NFS exports
+showmount -e 192.168.1.240
+
+# 3. Restart automounter
+sudo automount -vc
+
+# 4. Check macOS logs for errors
+log show --predicate 'process == "automountd"' --last 5m
+```
+
+### Finder View Settings Won't Stick
+
+**Symptoms:**
+- View resets to icons/columns every folder
+- "Folders on top" unchecks itself
+- Custom column order disappears
+
+**Solution:**
+```bash
+# 1. Remove corrupted .DS_Store files
+find /Tower -name ".DS_Store" -delete 2>/dev/null
+
+# 2. Set global defaults
+/tmp/fix_finder_views.sh
+
+# 3. In any folder: ⌘J → "Use as Defaults"
+```
+
+---
+
 ## 📝 Version History
 
 | Date | Change |
 |------|--------|
+| 2026-01-06 | Added NFS automount setup, Docker PUID/PGID requirements, troubleshooting |
 | 2025-12-27 | Added Docker infrastructure (20 containers) |
 | 2025-12-27 | Initial creation |

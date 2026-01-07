@@ -147,6 +147,29 @@ cd ~/dev_repos/alex/worker && npm run deploy
 cd ~/dev_repos/bendv3 && npm run deploy
 ```
 
+### Fix NFS Permission Issues
+```bash
+# Quick fix for Docker container permission problems
+cd ~/dev_repos/alex/scripts
+./fix-nfs-permissions.sh qbittorrent /mnt/user/data/adult/torrents_incoming
+
+# Or for any container/path
+./fix-nfs-permissions.sh [container_name] [path_on_tower]
+```
+
+### Mount Tower NFS Shares (Mac)
+```bash
+# Shares auto-mount on access
+ls /Tower/domains
+ls /Tower/data
+
+# Manually trigger mount
+sudo automount -vc
+
+# Check mount status
+nfsstat -m | grep Tower
+```
+
 ---
 
 ## 📂 Path Configuration
@@ -201,4 +224,5 @@ nano ~/.ssh/config
 
 | Date | Change |
 |------|--------|
+| 2026-01-06 | Added NFS mount commands and fix-nfs-permissions.sh script |
 | 2025-12-27 | Initial documentation |
