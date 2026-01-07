@@ -190,7 +190,20 @@ export async function resolveISBNViaTitle(
         };
       }
 
-      throw new Error(`ISBNdb error: ${response.status}`);
+      // Critical: Don't swallow auth/quota errors
+      if (response.status === 401 || response.status === 403) {
+        const errorMsg = `ISBNdb authentication failed (${response.status}). Check ISBNDB_API_KEY configuration.`;
+        logger.error('[ISBNResolution] Auth error', { title, author, status: response.status });
+        throw new Error(errorMsg);
+      }
+
+      if (response.status === 429) {
+        const errorMsg = `ISBNdb rate limit exceeded (${response.status}). Quota may be exhausted.`;
+        logger.error('[ISBNResolution] Rate limit error', { title, author });
+        throw new Error(errorMsg);
+      }
+
+      throw new Error(`ISBNdb API error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json() as ISBNdbSearchResponse;
@@ -300,10 +313,23 @@ export async function resolveISBNViaTitle(
     };
 
   } catch (error) {
-    logger.error('[ISBNResolution] Error', {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    // Critical: Re-throw auth/quota/API errors - don't mask as "not_found"
+    if (errorMsg.includes('authentication') || errorMsg.includes('rate limit') || errorMsg.includes('API error')) {
+      logger.error('[ISBNResolution] Critical error - re-throwing', {
+        title,
+        author,
+        error: errorMsg,
+      });
+      throw error;
+    }
+
+    // For network/timeout/parse errors, log and return not_found
+    logger.warn('[ISBNResolution] Non-critical error, treating as not_found', {
       title,
       author,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
     });
 
     return {

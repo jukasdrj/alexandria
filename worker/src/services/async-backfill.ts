@@ -87,11 +87,16 @@ export async function createJobStatus(
     updated_at: new Date().toISOString(),
   };
 
-  await kv.put(
-    `${JOB_STATUS_PREFIX}${job_id}`,
-    JSON.stringify(status),
-    { expirationTtl: JOB_STATUS_TTL }
-  );
+  try {
+    await kv.put(
+      `${JOB_STATUS_PREFIX}${job_id}`,
+      JSON.stringify(status),
+      { expirationTtl: JOB_STATUS_TTL }
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to create job status in KV: ${errorMsg}. Job ${job_id} will not be trackable.`);
+  }
 }
 
 /**
@@ -102,22 +107,27 @@ export async function updateJobStatus(
   job_id: string,
   updates: Partial<BackfillJobStatus>
 ): Promise<void> {
-  const existing = await getJobStatus(kv, job_id);
-  if (!existing) {
-    throw new Error(`Job ${job_id} not found`);
+  try {
+    const existing = await getJobStatus(kv, job_id);
+    if (!existing) {
+      throw new Error(`Job ${job_id} not found in KV - may have expired or never been created`);
+    }
+
+    const updated: BackfillJobStatus = {
+      ...existing,
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+
+    await kv.put(
+      `${JOB_STATUS_PREFIX}${job_id}`,
+      JSON.stringify(updated),
+      { expirationTtl: JOB_STATUS_TTL }
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to update job ${job_id} status: ${errorMsg}`);
   }
-
-  const updated: BackfillJobStatus = {
-    ...existing,
-    ...updates,
-    updated_at: new Date().toISOString(),
-  };
-
-  await kv.put(
-    `${JOB_STATUS_PREFIX}${job_id}`,
-    JSON.stringify(updated),
-    { expirationTtl: JOB_STATUS_TTL }
-  );
 }
 
 /**
@@ -127,12 +137,17 @@ export async function getJobStatus(
   kv: KVNamespace,
   job_id: string
 ): Promise<BackfillJobStatus | null> {
-  const data = await kv.get(`${JOB_STATUS_PREFIX}${job_id}`);
-  if (!data) {
-    return null;
-  }
+  try {
+    const data = await kv.get(`${JOB_STATUS_PREFIX}${job_id}`);
+    if (!data) {
+      return null;
+    }
 
-  return JSON.parse(data) as BackfillJobStatus;
+    return JSON.parse(data) as BackfillJobStatus;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to get job status for ${job_id}: ${errorMsg}. KV data may be corrupted.`);
+  }
 }
 
 // =================================================================================
@@ -146,10 +161,12 @@ export async function getJobStatus(
  * 1. Run hybrid workflow (Gemini → ISBNdb ISBN resolution)
  * 2. Update job status: "processing"
  * 3. Send resolved ISBNs to ENRICHMENT_QUEUE (existing infrastructure!)
- * 4. Update job status: "enriching" (ENRICHMENT_QUEUE will handle the rest)
- * 5. Mark as "complete" (enrichment happens async)
+ * 4. Update job status: "enriching" (ENRICHMENT_QUEUE will handle ISBNdb fetch + DB writes)
+ * 5. Mark as "complete" - THIS JOB is done (enrichment continues async in separate queue)
  *
- * Note: We don't wait for enrichment to complete - that's handled by existing queue
+ * IMPORTANT: "complete" status means THIS BACKFILL JOB completed its work
+ * (Gemini generation → ISBN resolution → queuing for enrichment).
+ * The actual ISBNdb fetching + database writes happen async in ENRICHMENT_QUEUE.
  */
 export async function processBackfillJob(
   message: BackfillQueueMessage,
@@ -215,15 +232,37 @@ export async function processBackfillJob(
 
     for (let i = 0; i < isbnsToEnrich.length; i += enrichmentBatchSize) {
       const batch = isbnsToEnrich.slice(i, i + enrichmentBatchSize);
+      const batchNum = Math.floor(i / enrichmentBatchSize) + 1;
 
-      await env.ENRICHMENT_QUEUE.send({
-        isbns: batch,
-        source: `backfill-${year}-${month.toString().padStart(2, '0')}`,
-        priority: 'low', // Background job, low priority
-        job_id, // Link back to backfill job
-      });
+      try {
+        await env.ENRICHMENT_QUEUE.send({
+          isbns: batch,
+          source: `backfill-${year}-${month.toString().padStart(2, '0')}`,
+          priority: 'low', // Background job, low priority
+          job_id, // Link back to backfill job
+        });
 
-      totalSent += batch.length;
+        totalSent += batch.length;
+        logger.debug('[AsyncBackfill] Sent batch to enrichment queue', {
+          job_id,
+          batch_num: batchNum,
+          batch_size: batch.length,
+        });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error('[AsyncBackfill] Failed to send batch to enrichment queue', {
+          job_id,
+          batch_num: batchNum,
+          batch_size: batch.length,
+          error: errorMsg,
+        });
+
+        // Critical: If we can't queue enrichment, the job is failing
+        throw new Error(
+          `Failed to send batch ${batchNum} to enrichment queue: ${errorMsg}. ` +
+          `${totalSent} of ${isbnsToEnrich.length} ISBNs sent before failure.`
+        );
+      }
     }
 
     logger.info('[AsyncBackfill] Sent ISBNs to enrichment queue', {
@@ -245,13 +284,14 @@ export async function processBackfillJob(
       },
     });
 
-    // Note: We mark as "complete" here because enrichment happens async
-    // The ENRICHMENT_QUEUE consumer will handle the actual ISBNdb calls
+    // IMPORTANT: "complete" means the BACKFILL JOB is done, NOT enrichment itself
+    // The ENRICHMENT_QUEUE consumer handles actual ISBNdb fetching + DB writes async
+    // This job's responsibility was: Gemini → ISBN resolution → queue ISBNs
     const duration = Date.now() - startTime;
 
     await updateJobStatus(env.QUOTA_KV, job_id, {
       status: 'complete',
-      progress: `Backfill queued successfully. ${totalSent} ISBNs will be enriched async via ENRICHMENT_QUEUE.`,
+      progress: `Backfill job complete. ${totalSent} ISBNs queued for async enrichment via ENRICHMENT_QUEUE.`,
       completed_at: new Date().toISOString(),
       duration_ms: duration,
     });

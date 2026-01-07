@@ -829,7 +829,7 @@ export async function testGeminiConnection(
   } catch (error) {
     return {
       success: false,
-      model: GEMINI_MODELS.PRIMARY,
+      model: GEMINI_MODELS.FLASH,
       error: error instanceof Error ? error.message : String(error),
     };
   }

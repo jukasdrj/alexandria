@@ -341,33 +341,58 @@ export async function processEnrichmentQueue(
 
   try {
     // 1. Collect all ISBNs from batch messages
+    // Support both single ISBN (bendv3) and batch ISBNs (backfill) formats
     const isbnMessages = new Map<string, QueueMessage<EnrichmentQueueMessage>>();
     const isbnsToFetch: string[] = [];
 
     for (const message of batch.messages) {
-      const { isbn } = message.body;
-      const normalizedISBN = normalizeISBN(isbn);
+      const { isbn, isbns } = message.body;
 
-      if (!normalizedISBN) {
-        logger.warn('Invalid ISBN format', { isbn });
+      // Extract ISBNs from either format
+      const rawISBNs = isbn ? [isbn] : (isbns || []);
+
+      if (rawISBNs.length === 0) {
+        logger.warn('Message missing both isbn and isbns fields', { message: message.body });
         results.failed++;
-        results.errors.push({ isbn, error: 'Invalid ISBN format' });
-        message.ack(); // Don't retry invalid ISBNs
+        results.errors.push({ isbn: 'unknown', error: 'Missing ISBN data' });
+        message.ack(); // Don't retry invalid messages
         continue;
       }
 
-      // Check if this ISBN previously failed (cache check)
-      const cacheKey = `isbn_not_found:${normalizedISBN}`;
-      const cachedNotFound = await env.CACHE.get(cacheKey);
-      if (cachedNotFound) {
-        logger.debug('ISBN previously failed, skipping', { isbn: normalizedISBN });
-        results.cached++;
-        message.ack(); // Don't retry known failures
-        continue;
+      // Process each ISBN in the message
+      for (const rawISBN of rawISBNs) {
+        const normalizedISBN = normalizeISBN(rawISBN);
+
+        if (!normalizedISBN) {
+          logger.warn('Invalid ISBN format', { isbn: rawISBN });
+          results.failed++;
+          results.errors.push({ isbn: rawISBN, error: 'Invalid ISBN format' });
+          continue; // Skip this ISBN but continue with others in batch
+        }
+
+        // Check if this ISBN previously failed (cache check)
+        const cacheKey = `isbn_not_found:${normalizedISBN}`;
+        const cachedNotFound = await env.CACHE.get(cacheKey);
+        if (cachedNotFound) {
+          logger.debug('ISBN previously failed, skipping', { isbn: normalizedISBN });
+          results.cached++;
+          continue; // Skip this ISBN but continue with others
+        }
+
+        isbnMessages.set(normalizedISBN, message);
+        isbnsToFetch.push(normalizedISBN);
       }
 
-      isbnMessages.set(normalizedISBN, message);
-      isbnsToFetch.push(normalizedISBN);
+      // Only ack message if all its ISBNs were processed (cached or queued)
+      // If any ISBN needs fetching, we'll ack after successful enrichment
+      const allCached = rawISBNs.every(isbn => {
+        const normalized = normalizeISBN(isbn);
+        return !normalized || !isbnsToFetch.includes(normalized);
+      });
+
+      if (allCached) {
+        message.ack();
+      }
     }
 
     if (isbnsToFetch.length === 0) {
