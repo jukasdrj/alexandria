@@ -17,9 +17,13 @@ import { parseHarvestConfig, buildISBNPrefixFilter } from '../lib/harvest-config
 import { batchUpdateCoverUrls } from '../services/batch-operations.js';
 import type { Logger } from '../../lib/logger.js';
 import { HarvestState } from '../services/harvest-state.js';
-import { deduplicateISBNs, type ISBNCandidate } from '../services/deduplication.js';
+import { deduplicateISBNs } from '../services/deduplication.js';
 import { enrichEdition } from '../services/enrichment-service.js';
 import type { EnrichEditionRequest } from '../services/types.js';
+import { 
+  generateCuratedBookList, 
+  testGeminiConnection,
+} from '../services/gemini-backfill.js';
 
 const app = new OpenAPIHono<AppBindings>();
 
@@ -118,6 +122,57 @@ app.openapi(quotaStatusRoute, async (c) => {
     last_reset: status.last_reset,
     next_reset_in_hours: status.next_reset_in_hours,
   });
+});
+
+// =================================================================================
+// GET /api/harvest/gemini/test - Test Gemini API connection
+// =================================================================================
+
+const GeminiTestResponseSchema = z.object({
+  success: z.boolean(),
+  model: z.string(),
+  error: z.string().optional(),
+  message: z.string().optional(),
+});
+
+const geminiTestRoute = createRoute({
+  method: 'get',
+  path: '/api/harvest/gemini/test',
+  tags: ['Harvest'],
+  summary: 'Test Gemini API Connection',
+  description: 'Validates Gemini API key and model access. Useful for debugging backfill issues.',
+  responses: {
+    200: {
+      description: 'Test result',
+      content: {
+        'application/json': {
+          schema: GeminiTestResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+app.openapi(geminiTestRoute, async (c) => {
+  const logger = c.get('logger');
+  
+  logger.info('[GeminiTest] Testing API connection');
+  
+  const result = await testGeminiConnection(c.env, logger);
+  
+  if (result.success) {
+    return c.json({
+      success: true,
+      model: result.model,
+      message: 'Gemini API connection successful. Native structured output is working.',
+    });
+  } else {
+    return c.json({
+      success: false,
+      model: result.model,
+      error: result.error,
+    });
+  }
 });
 
 // =================================================================================
@@ -277,7 +332,8 @@ app.openapi(backfillRoute, async (c) => {
 
   try {
     // Call Gemini API to get curated book list for year/month
-    const curatedBooks: ISBNCandidate[] = await generateCuratedBookList(
+    // Uses native structured output with ISBN validation
+    const { candidates: curatedBooks, stats: geminiStats } = await generateCuratedBookList(
       year,
       month,
       c.env,
@@ -285,10 +341,15 @@ app.openapi(backfillRoute, async (c) => {
     );
 
     if (curatedBooks.length === 0) {
-      logger.warn('[Backfill] No books found for period', { year, month });
+      logger.warn('[Backfill] No books found for period', { 
+        year, 
+        month,
+        gemini_stats: geminiStats,
+      });
       return c.json({
         success: false,
         error: 'No books found for this period',
+        gemini_stats: geminiStats,
       }, 400);
     }
 
@@ -296,6 +357,10 @@ app.openapi(backfillRoute, async (c) => {
       year,
       month,
       total_books: curatedBooks.length,
+      model_used: geminiStats.model_used,
+      valid_isbns: geminiStats.valid_isbns,
+      invalid_isbns: geminiStats.invalid_isbns,
+      high_confidence: geminiStats.high_confidence,
     });
 
     // Step 1: Deduplicate (3-tier: exact → related → fuzzy)
@@ -444,153 +509,6 @@ app.openapi(backfillRoute, async (c) => {
     }, 500);
   }
 });
-
-// =================================================================================
-// Helper Functions
-// =================================================================================
-
-/**
- * Zod schema for validating Gemini API book responses
- */
-const GeminiBookSchema = z.object({
-  title: z.string().min(1).max(500),
-  author: z.string().min(1).max(200),
-  isbn: z.string().regex(/^\d{10,13}$/).optional(),
-});
-
-const GeminiResponseSchema = z.array(GeminiBookSchema);
-
-/**
- * Generate curated book list for a specific year/month using Gemini API
- *
- * Prompts Gemini to suggest ~100 culturally significant, bestselling, or
- * award-winning books from the specified period.
- *
- * @param year - Year to generate list for
- * @param month - Month to generate list for (1-12)
- * @param env - Environment with GEMINI_API_KEY secret
- * @param logger - Logger instance
- * @returns Array of ISBNCandidate objects
- */
-async function generateCuratedBookList(
-  year: number,
-  month: number,
-  env: Env,
-  logger: Logger
-): Promise<ISBNCandidate[]> {
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                     'July', 'August', 'September', 'October', 'November', 'December'];
-  const monthName = monthNames[month - 1];
-
-  const prompt = `Generate a curated list of approximately 100 culturally significant, bestselling, or award-winning books published or prominently featured in ${monthName} ${year}.
-
-Include:
-- NYT Bestsellers from this period
-- Award winners (Pulitzer, Booker, National Book Award, etc.)
-- Debut novels that made an impact
-- Popular genre fiction (mystery, romance, sci-fi, fantasy)
-- Notable non-fiction (memoirs, history, science)
-- International literature that gained prominence in English-speaking markets
-
-For each book, provide:
-- title (required)
-- author (required, use primary author for multi-author works)
-- isbn (ISBN-13 preferred, ISBN-10 acceptable, omit if unknown)
-
-Return ONLY a JSON array of book objects. No markdown formatting, no explanations.
-Example format:
-[
-  {"title": "The Martian", "author": "Andy Weir", "isbn": "9780553418026"},
-  {"title": "All the Light We Cannot See", "author": "Anthony Doerr"}
-]`;
-
-  try {
-    // Get Gemini API key from secrets
-    const geminiApiKey = await env.GEMINI_API_KEY.get();
-    if (!geminiApiKey) {
-      throw new Error('GEMINI_API_KEY not configured');
-    }
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiApiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 8192,
-          },
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json() as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>;
-        };
-      }>;
-    };
-
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      throw new Error('No response text from Gemini API');
-    }
-
-    // Strip markdown code blocks if present (Gemini sometimes wraps JSON)
-    const cleanedText = text.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-
-    // Parse and validate JSON response with Zod
-    let books: z.infer<typeof GeminiResponseSchema>;
-    try {
-      const parsed = JSON.parse(cleanedText);
-      books = GeminiResponseSchema.parse(parsed);
-    } catch (parseError) {
-      logger.error('[GenerateCuratedList] Invalid Gemini response format', {
-        year,
-        month,
-        text: cleanedText.substring(0, 200), // Log first 200 chars for debugging
-        error: parseError instanceof Error ? parseError.message : String(parseError),
-      });
-      return [];
-    }
-
-    // Convert to ISBNCandidate format
-    const candidates: ISBNCandidate[] = books
-      .filter(b => b.isbn) // Only include books with ISBNs
-      .map(b => ({
-        isbn: b.isbn!,
-        title: b.title,
-        authors: [b.author],
-        source: `gemini-${year}-${month.toString().padStart(2, '0')}`,
-      }));
-
-    logger.info('[GenerateCuratedList] Generated book list', {
-      year,
-      month,
-      total_books: books.length,
-      with_isbn: candidates.length,
-    });
-
-    return candidates;
-
-  } catch (error) {
-    logger.error('[GenerateCuratedList] Failed to generate list', {
-      year,
-      month,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-}
 
 // =================================================================================
 // Scheduled Handler (called by cron every 5 minutes)

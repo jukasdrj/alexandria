@@ -4,18 +4,55 @@
 
 ## 🎯 Active Issues
 
+### P1 - HIGH Priority (Blocker)
+1. **Gemini API Key Required** - Backfill blocked until Gemini API key is configured
+   - Current Google Books API key does NOT have Generative Language API access
+   - Need to create key in Google AI Studio: https://aistudio.google.com/
+   - Add to Cloudflare Secrets Store and update wrangler.jsonc
+
 ### P2 - MEDIUM Priority
-1. **#118** - Auto-healing/recovery system for bulk author harvesting
+2. **#118** - Auto-healing/recovery system for bulk author harvesting
 
 ### P3 - LOW Priority (Future Enhancements)
-2. **#117** - Semantic search with Cloudflare Vectorize
-3. **#116** - Search analytics tracking with Analytics Engine
-4. **#113** - Wikipedia + LLM fallback for authors without Wikidata
-5. **#100** - GitHub Actions for automated harvesting
+3. **#117** - Semantic search with Cloudflare Vectorize
+4. **#116** - Search analytics tracking with Analytics Engine
+5. **#113** - Wikipedia + LLM fallback for authors without Wikidata
+6. **#100** - GitHub Actions for automated harvesting
 
 ---
 
 ## ✅ Recently Completed (January 6, 2026)
+
+### Gemini Backfill Integration (COMPLETED - Jan 6)
+**Implemented production-ready Gemini API integration for historical book harvesting:**
+
+**New Service: `gemini-backfill.ts`**
+- Native structured output using `responseMimeType: 'application/json'` + `responseSchema`
+- ISBN-13 and ISBN-10 checksum validation (filters hallucinated ISBNs)
+- ISBN normalization (ISBN-10 → ISBN-13 conversion)
+- Confidence scoring per ISBN (`high`, `low`, `unknown`)
+- Model selection: Gemini 3 Flash (latest), fallback to 2.5 Flash/Pro
+
+**Model Selection Strategy:**
+- Pre-2015 data: `gemini-2.5-pro` (better historical recall)
+- Post-2015 data: `gemini-3-flash-preview` (fastest, latest)
+- Fallback: `gemini-2.5-flash` (stable)
+
+**New Endpoint: `GET /api/harvest/gemini/test`**
+- Tests Gemini API connection and model access
+- Validates native structured output is working
+
+**Updated Backfill Response:**
+- Now includes `gemini_stats` with generation quality metrics
+- Shows `valid_isbns`, `invalid_isbns`, model used, confidence breakdown
+
+**Tests:** 16 new ISBN validation tests (605 total passing)
+**Documentation:** `docs/harvesting/GEMINI-BACKFILL-INTEGRATION.md`
+**Deployment:** Version `cde52c33-9ea7-4d2a-b5c5-8c767b19eebe`
+
+**⚠️ BLOCKED:** Requires Gemini API key (see Active Issues above)
+
+---
 
 ### Critical Security & Reliability Fixes (COMPLETED - Jan 6)
 **Resolved three high-priority issues in production:**
