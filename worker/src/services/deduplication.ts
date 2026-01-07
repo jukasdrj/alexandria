@@ -4,7 +4,8 @@
  * Strategy:
  * 1. Exact match: Check if ISBN already exists in enriched_editions
  * 2. Related ISBNs: Check ISBNdb's related_isbns field (hardcover → paperback → ebook links)
- * 3. Fuzzy match: Title + author similarity using PostgreSQL trigram indexes
+ * 3. Fuzzy match: Title similarity using PostgreSQL trigram indexes (0.6 threshold)
+ *    Note: Author matching not implemented due to complex join requirements
  *
  * Used by harvest operations to avoid re-enriching existing books.
  */
@@ -254,13 +255,14 @@ async function deduplicateFuzzyMatch(
         const author = (candidate.authors![0] || '').toLowerCase();
 
         // Use PostgreSQL trigram similarity (requires pg_trgm extension)
-        // Combine title and author similarity for better matching
+        // Note: Author similarity not implemented due to complex join structure
+        // (authors stored in separate tables: enriched_authors, author_works)
+        // Using title-only matching with higher threshold to compensate
         const similar = await sql`
           SELECT
             isbn,
             title,
-            similarity(LOWER(title), ${title}) as title_sim,
-            0.5 as author_sim
+            similarity(LOWER(title), ${title}) as title_sim
           FROM enriched_editions
           WHERE similarity(LOWER(title), ${title}) > ${FUZZY_SIMILARITY_THRESHOLD}
           ORDER BY title_sim DESC
@@ -272,18 +274,15 @@ async function deduplicateFuzzyMatch(
             isbn: string;
             title: string;
             title_sim: number;
-            author_sim: number;
           };
 
-          // Combined score (weighted: title 70%, author 30%)
-          const combinedScore = bestMatch.title_sim * 0.7 + bestMatch.author_sim * 0.3;
-
-          if (combinedScore > FUZZY_SIMILARITY_THRESHOLD) {
+          // Using title-only similarity (author matching would require complex joins)
+          if (bestMatch.title_sim > FUZZY_SIMILARITY_THRESHOLD) {
             matchedISBNs.add(candidate.isbn);
             found.push({
               isbn: candidate.isbn,
               matched_isbn: bestMatch.isbn,
-              similarity: combinedScore,
+              similarity: bestMatch.title_sim,
             });
           }
         }
