@@ -147,7 +147,7 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 **Flow**: `POST /api/harvest/backfill`
 ```
 1. Gemini API → Generate ISBNs for year/month
-   - Model: gemini-2.5-flash (monthly), gemini-2.5-pro (annual batches)
+   - Model: gemini-2.5-flash (monthly), gemini-3-flash-preview (annual/large batches)
    - Native structured output with confidence scoring
    - Validates ISBN checksums before proceeding
 
@@ -176,8 +176,9 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 - Logs clearly indicate when all ISBNs were deduplicated (success, not failure)
 
 **Model Selection**:
-- Monthly backfill (1-2 months): gemini-2.5-flash (fast, cost-effective)
-- Annual backfill (large batches): gemini-2.5-pro (better reasoning for bulk)
+- Monthly backfill (1-2 months): gemini-2.5-flash (stable, cost-effective)
+- Annual backfill (large batches): gemini-3-flash-preview (next-gen, better reasoning)
+- Experimental testing: gemini-3-pro-preview (advanced reasoning)
 
 **Idempotency**: Month completion tracked in `QUOTA_KV` - prevents re-running same month
 

@@ -16,8 +16,9 @@ Following Gemini Pro's recommendation, we use **monthly-focused prompts** rather
 5. **Manageable Scope**: 100 books/month = ~1,200/year (sustainable)
 
 **Model Selection**:
-- Monthly: `gemini-2.5-flash` (fast, cost-effective)
-- Annual (if needed): `gemini-2.5-pro` (better reasoning for bulk)
+- Monthly: `gemini-2.5-flash` (stable, cost-effective)
+- Annual/Large batches: `gemini-3-flash-preview` (next-gen, better reasoning)
+- Experimental: `gemini-3-pro-preview` (advanced reasoning, testing only)
 
 ## Success Metrics
 - **Primary**: Hit rate (new ISBNs / total generated)
@@ -318,7 +319,10 @@ Confirm hit rate, quality, and cost efficiency.
 
 1. All variants use same `SYSTEM_INSTRUCTION` from `gemini-backfill.ts`
 2. Temperature: 0.3 (factual accuracy)
-3. Model: `gemini-2.5-flash` for all monthly tests
+3. Models:
+   - Monthly tests: `gemini-2.5-flash` (stable baseline)
+   - Annual tests: `gemini-3-flash-preview` (next-gen)
+   - Experimental: `gemini-3-pro-preview` (optional comparison)
 4. Response schema: Same as current (title, author, isbn, confidence_isbn)
 5. Validation: All ISBNs go through `isValidISBN()` checksum validation
 

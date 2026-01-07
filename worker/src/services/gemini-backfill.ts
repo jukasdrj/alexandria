@@ -69,16 +69,20 @@ export const GEMINI_RESPONSE_SCHEMA = {
 
 /**
  * Model configuration for different scenarios
- * - Flash models: Fast, cost-effective for 1-2 month batches
- * - Pro models: Better reasoning for large annual batches (3+ months worth of data)
+ * - gemini-2.5-flash: Primary model for monthly batches (stable, cost-effective)
+ * - gemini-3-flash-preview: Next-gen flash for annual/large batches (better reasoning)
+ * - gemini-3-pro-preview: Experimental pro for complex reasoning tasks
  */
 export const GEMINI_MODELS = {
-  // Flash: Fast model for small/medium batches (1-2 months)
+  // Primary: Stable flash model for 1-2 month batches
   FLASH: 'gemini-2.5-flash',
-  // Pro: Better reasoning for large batch operations (annual backfill)
-  PRO: 'gemini-2.5-pro',
-  // Fallback: Stable fallback if primary models have issues
-  FALLBACK: 'gemini-2.0-flash',
+  // Secondary: Next-gen flash for large batch operations (annual backfill)
+  FLASH_PREVIEW: 'gemini-3-flash-preview',
+  // Experimental: Pro model for testing and complex reasoning
+  PRO_PREVIEW: 'gemini-3-pro-preview',
+  // Legacy: Deprecated, kept for reference only
+  // @deprecated Use FLASH_PREVIEW for large batches instead
+  FALLBACK: 'gemini-2.5-flash',
 } as const;
 
 /**
@@ -335,7 +339,7 @@ Always return ONLY a valid JSON array matching the provided schema. No explanato
 
 /**
  * Select appropriate model for monthly backfill
- * Flash model is preferred for single month operations (fast, cost-effective)
+ * gemini-2.5-flash is preferred for single month operations (stable, cost-effective)
  */
 function selectModelForMonthly(): string {
   return GEMINI_MODELS.FLASH;
@@ -343,10 +347,10 @@ function selectModelForMonthly(): string {
 
 /**
  * Select appropriate model for annual backfill
- * Pro model is used for large batch operations (better reasoning across many books)
+ * gemini-3-flash-preview is used for large batch operations (better reasoning, faster than pro)
  */
 function selectModelForAnnual(): string {
-  return GEMINI_MODELS.PRO;
+  return GEMINI_MODELS.FLASH_PREVIEW;
 }
 
 /**

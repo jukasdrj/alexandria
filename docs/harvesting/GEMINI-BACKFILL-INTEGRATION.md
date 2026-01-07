@@ -37,10 +37,12 @@ Implemented a production-ready Gemini API integration for historical book harves
 
 ### 2. Model Selection Strategy
 ```typescript
-- Pre-2015 data: gemini-2.5-pro (better historical recall)
-- Post-2015 data: gemini-3-flash-preview (fastest, latest)
+- Monthly backfill (1-2 months): gemini-2.5-flash (stable, cost-effective)
+- Annual/Large batches: gemini-3-flash-preview (next-gen, better reasoning)
+- Experimental testing: gemini-3-pro-preview (advanced reasoning)
 - Fallback: gemini-2.5-flash (stable)
 ```
+**Note**: gemini-2.0-flash deprecated as of Jan 2026
 
 ### 3. ISBN Validation
 - ISBN-13 checksum validation (Mod 10)

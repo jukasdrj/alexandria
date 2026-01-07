@@ -1,6 +1,6 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 6, 2026
+**Last Updated:** January 7, 2026
 
 ## 🎯 Active Issues
 
@@ -33,10 +33,12 @@
 - Confidence scoring per ISBN (`high`, `low`, `unknown`)
 - Model selection: Gemini 3 Flash (latest), fallback to 2.5 Flash/Pro
 
-**Model Selection Strategy:**
-- Pre-2015 data: `gemini-2.5-pro` (better historical recall)
-- Post-2015 data: `gemini-3-flash-preview` (fastest, latest)
+**Model Selection Strategy (Updated Jan 7):**
+- Monthly backfill (1-2 months): `gemini-2.5-flash` (stable, cost-effective)
+- Annual/Large batches: `gemini-3-flash-preview` (next-gen, better reasoning)
+- Experimental testing: `gemini-3-pro-preview` (advanced reasoning)
 - Fallback: `gemini-2.5-flash` (stable)
+- **Deprecated**: gemini-2.0-flash (removed Jan 7)
 
 **New Endpoint: `GET /api/harvest/gemini/test`**
 - Tests Gemini API connection and model access
