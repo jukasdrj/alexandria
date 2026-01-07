@@ -8,6 +8,7 @@ import { rateLimiter, RateLimitPresets } from '../middleware/rate-limiter.js';
 import { Logger } from '../lib/logger.js';
 import { getDashboardHTML } from '../dashboard.js';
 import type { MessageBatch, Message, CoverQueueMessage, EnrichmentQueueMessage } from './services/types.js';
+import type { BackfillQueueMessage } from './services/async-backfill.js';
 
 // Route imports
 import healthRoutes from './routes/health.js';
@@ -25,9 +26,11 @@ import migrateRoutes from './routes/migrate.js';
 import harvestRoutes from './routes/harvest.js';
 import { handleScheduledCoverHarvest } from './routes/harvest.js';
 import { handleScheduledWikidataEnrichment } from './routes/authors.js';
+import backfillAsyncRoutes from './routes/backfill-async.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue } from './services/queue-handlers.js';
+import { processBackfillJob } from './services/async-backfill.js';
 
 // =================================================================================
 // Application Setup
@@ -132,6 +135,7 @@ const subRouters = [
   booksRoutes,
   quotaRoutes,
   harvestRoutes,
+  backfillAsyncRoutes,
   testRoutes,
   migrateRoutes,
 ];
@@ -246,6 +250,20 @@ export default {
         return await processCoverQueue(batch as MessageBatch<CoverQueueMessage>, env);
       case 'alexandria-enrichment-queue':
         return await processEnrichmentQueue(batch as MessageBatch<EnrichmentQueueMessage>, env);
+      case 'alexandria-backfill-queue':
+        // Process each message (batch_size is 1 for backfill queue)
+        for (const message of batch.messages) {
+          try {
+            await processBackfillJob(message.body as BackfillQueueMessage, env, logger);
+            message.ack();
+          } catch (error) {
+            logger.error('[BackfillQueue] Processing failed', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            message.retry();
+          }
+        }
+        break;
       default:
         logger.error('Unknown queue', { queue: batch.queue });
         batch.messages.forEach((msg: Message) => msg.ack());

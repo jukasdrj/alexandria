@@ -136,6 +136,11 @@
         "binding": "COVER_QUEUE",
         "queue": "alexandria-cover-queue",
         "delivery_delay": 0
+      },
+      {
+        "binding": "BACKFILL_QUEUE",
+        "queue": "alexandria-backfill-queue",
+        "delivery_delay": 0
       }
     ],
     "consumers": [
@@ -154,6 +159,14 @@
         "max_retries": 3,
         "dead_letter_queue": "alexandria-cover-dlq",
         "max_concurrency": 10
+      },
+      {
+        "queue": "alexandria-backfill-queue",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 2,
+        "dead_letter_queue": "alexandria-backfill-dlq",
+        "max_concurrency": 1
       }
     ]
   },

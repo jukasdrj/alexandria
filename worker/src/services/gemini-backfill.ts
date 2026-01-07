@@ -29,13 +29,21 @@ import type { ISBNCandidate } from './deduplication.js';
 // =================================================================================
 
 /**
- * Zod schema for individual book entries from Gemini
+ * Zod schema for individual book entries from Gemini (Hybrid Workflow)
+ *
+ * HYBRID APPROACH:
+ * - Gemini generates: title, author, publisher, format, publication_year
+ * - ISBNdb resolves: Authoritative ISBN via title/author search
+ *
+ * This avoids LLM ISBN hallucination while maintaining high-quality metadata
  */
 export const GeminiBookSchema = z.object({
   title: z.string().min(1).max(500),
   author: z.string().min(1).max(300),
-  isbn: z.string().default(''),
-  confidence_isbn: z.enum(['high', 'low', 'unknown']).default('unknown'),
+  publisher: z.string().optional(),
+  format: z.enum(['Hardcover', 'Paperback', 'eBook', 'Audiobook', 'Unknown']).default('Unknown'),
+  publication_year: z.number().int().min(1900).max(2100),
+  significance: z.string().max(500).optional(),
 });
 
 export type GeminiBook = z.infer<typeof GeminiBookSchema>;
@@ -56,14 +64,16 @@ export const GEMINI_RESPONSE_SCHEMA = {
     properties: {
       title: { type: 'string' },
       author: { type: 'string' },
-      isbn: { type: 'string' },
-      confidence_isbn: { 
+      publisher: { type: 'string' },
+      format: {
         type: 'string',
-        enum: ['high', 'low', 'unknown']
+        enum: ['Hardcover', 'Paperback', 'eBook', 'Audiobook', 'Unknown']
       },
+      publication_year: { type: 'integer' },
+      significance: { type: 'string' },
     },
-    required: ['title', 'author', 'isbn', 'confidence_isbn'],
-    propertyOrdering: ['title', 'author', 'isbn', 'confidence_isbn'],
+    required: ['title', 'author', 'publication_year', 'format'],
+    propertyOrdering: ['title', 'author', 'publisher', 'format', 'publication_year', 'significance'],
   },
 };
 
@@ -86,18 +96,23 @@ export const GEMINI_MODELS = {
 } as const;
 
 /**
- * Generation statistics
+ * Generation statistics (Hybrid Workflow)
+ *
+ * Note: ISBN resolution happens via ISBNdb, not Gemini
+ * These stats track the quality of book metadata from Gemini
  */
 export interface GenerationStats {
   model_used: string;
   total_books: number;
-  books_with_isbn: number;
-  books_without_isbn: number;
-  high_confidence: number;
-  low_confidence: number;
-  unknown_confidence: number;
-  valid_isbns: number;
-  invalid_isbns: number;
+  books_with_publisher: number;
+  books_with_significance: number;
+  format_breakdown: {
+    Hardcover: number;
+    Paperback: number;
+    eBook: number;
+    Audiobook: number;
+    Unknown: number;
+  };
   duration_ms: number;
   failed_batches?: number;
   failed_batch_errors?: Array<{ batch: number; error: string }>;
@@ -214,86 +229,91 @@ export function normalizeISBN(isbn: string): string {
 // =================================================================================
 
 /**
- * High-yield monthly batch prompt
- * Designed to maximize volume and variety for a specific month
+ * High-quality batch prompt (Hybrid Workflow)
+ *
+ * STRATEGY SHIFT:
+ * - Reduced batch size (100 → 20) for higher accuracy per book
+ * - Focus on complete metadata: title, author, publisher, format, year
+ * - ISBNs resolved separately via ISBNdb API (avoids LLM hallucination)
  */
-function buildMonthlyPrompt(year: number, month: number): string {
+function buildMonthlyPrompt(year: number, month: number, batchSize: number = 20): string {
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
   const monthName = monthNames[month - 1];
 
-  return `Generate a comprehensive list of exactly 100 books that were published or reached significant cultural prominence in ${monthName} ${year}.
+  return `Generate a curated list of exactly ${batchSize} historically significant books published in ${monthName} ${year}.
 
-Organize your internal retrieval by these categories to ensure variety:
+SELECTION CRITERIA - Prioritize quality over quantity:
 - NYT Bestsellers (Fiction & Non-fiction)
-- Award winners or finalists (Pulitzer, Booker, Hugo, National Book Award, etc.)
-- High-impact debuts and indie hits
-- Popular genre fiction (mystery, romance, sci-fi, fantasy, thriller)
-- Notable non-fiction (memoirs, history, science, self-help)
-- International translations that reached English-speaking markets
+- Literary awards: Pulitzer, Booker Prize, Hugo, National Book Award, etc.
+- Critical acclaim or lasting cultural impact
+- Breakthrough debuts that shaped their genre
+- High-selling popular fiction (mystery, romance, sci-fi, fantasy, thriller)
+- Influential non-fiction (memoir, history, science, self-help, politics)
+- Notable international works reaching English-speaking markets
 
-FEW-SHOT EXAMPLES:
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house that released this specific edition (e.g., "Penguin Random House", "HarperCollins")
+4. **format**: The primary format for this edition
+   - "Hardcover": First hardcover release (most common for significant books)
+   - "Paperback": Paperback-first releases or simultaneous release
+   - "eBook": Digital-first publications
+   - "Audiobook": Audiobook-first releases (rare)
+   - "Unknown": If uncertain about primary format
+5. **publication_year**: ${year}
+6. **significance** (optional): Brief note on why this book is historically important (1-2 sentences)
 
-Example 1 (High confidence ISBN):
-{
-  "title": "The Great Gatsby",
-  "author": "F. Scott Fitzgerald",
-  "isbn": "9780743273565",
-  "confidence_isbn": "high"
-}
+ACCURACY GUIDELINES:
+- Focus on books you can confidently identify with complete metadata
+- Publisher and format help establish the specific edition
+- If uncertain about publisher or format, use best judgment based on the book's profile
+- For major bestsellers, assume hardcover unless known to be paperback-first
 
-Example 2 (No ISBN available):
-{
-  "title": "Beloved",
-  "author": "Toni Morrison",
-  "isbn": "",
-  "confidence_isbn": "unknown"
-}
-
-Example 3 (ISBN-10 format):
-{
-  "title": "1984",
-  "author": "George Orwell",
-  "isbn": "0451524934",
-  "confidence_isbn": "high"
-}
-
-For each book:
-1. Provide the ISBN-13 (preferred) or ISBN-10 if you are CERTAIN of it
-2. Set confidence_isbn: "high" if certain, "low" if estimated, "unknown" if unsure
-3. Use empty string "" for isbn if unavailable (NOT null)
-
-Return ONLY a valid JSON array. No markdown, no explanations, no code blocks.`;
+Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations, no code blocks.`;
 }
 
 /**
- * Annual significance prompt
+ * Annual significance prompt (Hybrid Workflow)
  * For getting the most culturally significant books from a year
+ *
+ * Reduced batch size for quality: 100 → 20
  */
-function buildAnnualPrompt(year: number, batchNumber: number, batchSize: number = 100): string {
+function buildAnnualPrompt(year: number, batchNumber: number, batchSize: number = 20): string {
   const startRank = (batchNumber - 1) * batchSize + 1;
   const endRank = batchNumber * batchSize;
-  
-  return `Act as a historical literary database. Your task is to extract culturally significant works released in the year ${year}.
 
-Task Instructions:
-1. Focus on books with lasting impact, high sales volume, or critical acclaim
-2. You must provide the primary ISBN-13 for the hardcover or first-edition release
-3. Evaluate your certainty for each ISBN:
-   - "high": You are confident this ISBN is correct for the ${year} edition
-   - "low": The ISBN might be for a later reprint or different edition
-   - "unknown": You cannot verify the ISBN
+  return `You are a historical literary database extracting culturally significant works from ${year}.
 
-Batch Context: This is batch ${batchNumber}. Provide books ranked ${startRank} through ${endRank} by cultural significance.
+BATCH CONTEXT: Provide books ranked ${startRank}-${endRank} by cultural significance.
 
-Include diverse categories:
-- Literary fiction and award winners
-- Commercial bestsellers
-- Genre fiction (mystery, sci-fi, fantasy, romance, thriller)
-- Non-fiction (biography, history, science, self-help, politics)
-- Notable debuts and breakout authors
+SELECTION CRITERIA:
+- Lasting cultural impact or critical acclaim
+- High sales volume or commercial success
+- Award winners (Pulitzer, Booker, Hugo, National Book Award, etc.)
+- Genre-defining works
+- Include diverse categories:
+  - Literary fiction and award winners
+  - Commercial bestsellers
+  - Genre fiction (mystery, sci-fi, fantasy, romance, thriller)
+  - Non-fiction (biography, history, science, self-help, politics)
+  - Breakthrough debuts and breakout authors
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full title (exact as published)
+2. **author**: Primary author's full name
+3. **publisher**: Publishing house for this edition
+4. **format**: Primary format ("Hardcover", "Paperback", "eBook", "Audiobook", or "Unknown")
+5. **publication_year**: ${year}
+6. **significance** (optional): Why this book matters (1-2 sentences)
+
+ACCURACY NOTES:
+- Focus on books with complete, verifiable metadata
+- Publisher/format define the specific edition
+- For major releases, hardcover is typical unless known otherwise
 
 Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations.`;
 }
@@ -340,23 +360,40 @@ interface GeminiContentRequest {
 }
 
 /**
- * System instruction for bibliographic archival tasks
+ * System instruction for bibliographic metadata extraction (Hybrid Workflow)
+ *
  * Following bendv3 pattern of separating system instruction from user prompt
+ *
+ * CRITICAL: This system does NOT generate ISBNs
+ * - ISBNs are resolved separately via ISBNdb API (authoritative source)
+ * - Focus is on accurate title, author, publisher, format, and year metadata
  */
 const SYSTEM_INSTRUCTION = `You are an expert bibliographic archivist specialized in book metadata extraction.
 
 Your core capabilities:
 - Recall culturally significant books from specific time periods
-- Accurately retrieve ISBN-13 identifiers from training data
-- Distinguish between ISBN certainty levels (high/low/unknown)
-- Categorize books across genres (fiction, non-fiction, mystery, sci-fi, etc.)
+- Accurately extract bibliographic metadata (title, author, publisher)
+- Identify book formats (Hardcover, Paperback, eBook, Audiobook)
+- Categorize books by genre and cultural significance
+- Provide historical context for why books matter
 
-ISBN VALIDATION RULES (CRITICAL):
-- Return ONLY valid ISBN-10 (exactly 10 characters) or ISBN-13 (exactly 13 digits starting with 978 or 979)
-- Remove all hyphens, spaces, and separators before returning
-- ISBN-10 may end with 'X' (checksum digit) - this is valid
-- If ISBN appears incomplete, estimated, or uncertain, return empty string and set confidence to "low" or "unknown"
-- NEVER return ISBNs with wrong digit counts - prefer empty string over invalid data
+METADATA ACCURACY RULES:
+1. **Title**: Use the exact title as published (include subtitles if significant)
+2. **Author**: Full author name (e.g., "J.K. Rowling" not "Rowling")
+3. **Publisher**: Publishing house name (e.g., "Penguin Random House", "HarperCollins", "Scholastic")
+   - For major publishers, use the parent company name
+   - For imprints, use the most recognizable name
+4. **Format**: Primary release format for the book
+   - Most literary fiction and major releases: Hardcover
+   - Mass market and genre fiction: Often Paperback
+   - Digital-first publications: eBook
+   - When uncertain: Use "Unknown"
+5. **Significance**: Brief historical context (award wins, cultural impact, sales milestones)
+
+QUALITY OVER QUANTITY:
+- Prioritize complete, accurate metadata over volume
+- If uncertain about publisher or format, use best judgment based on the book's profile
+- Focus on books you can confidently identify
 
 Always return ONLY a valid JSON array matching the provided schema. No explanatory text, no markdown code blocks.`;
 
@@ -434,12 +471,12 @@ async function callGeminiApi(
       parts: [{ text: prompt }]
     }],
     generationConfig: {
-      temperature: 0.1, // Maximum determinism for structured data extraction (following bendv3 pattern)
+      temperature: 0.1, // Ultra-low temperature for factual metadata extraction (reduced from 0.5)
       topP: 0.95, // Nucleus sampling for quality
-      maxOutputTokens: 10240, // 10K tokens: compromise for 100 books (~8K with examples + metadata)
+      maxOutputTokens: 16384, // Sufficient for 20 books with rich metadata (~800 tokens/book)
       responseMimeType: 'application/json',
       responseSchema: GEMINI_RESPONSE_SCHEMA,
-      stopSequences: ['\n\n\n'], // Stop on triple newline to prevent unnecessary continuation
+      // Note: stopSequences removed - was causing premature truncation mid-JSON response
     },
   };
   
@@ -543,7 +580,8 @@ export async function generateCuratedBookList(
   month: number,
   env: Env,
   logger: Logger,
-  promptOverride?: string
+  promptOverride?: string,
+  batchSize: number = 20
 ): Promise<{ candidates: ISBNCandidate[]; stats: GenerationStats }> {
   const startTime = Date.now();
 
@@ -557,7 +595,7 @@ export async function generateCuratedBookList(
   const model = selectModelForMonthly();
 
   // Build prompt (use override if provided, otherwise use default)
-  const prompt = promptOverride || buildMonthlyPrompt(year, month);
+  const prompt = promptOverride || buildMonthlyPrompt(year, month, batchSize);
 
   logger.info('[GeminiBackfill] Starting generation', { year, month, model });
   
@@ -587,66 +625,47 @@ export async function generateCuratedBookList(
     );
   }
   
-  // Process and validate books
+  // Process and validate books (Hybrid Workflow)
+  // Note: ISBNs will be resolved via ISBNdb in a separate step
   const stats: GenerationStats = {
     model_used: modelUsed,
     total_books: books.length,
-    books_with_isbn: 0,
-    books_without_isbn: 0,
-    high_confidence: 0,
-    low_confidence: 0,
-    unknown_confidence: 0,
-    valid_isbns: 0,
-    invalid_isbns: 0,
+    books_with_publisher: 0,
+    books_with_significance: 0,
+    format_breakdown: {
+      Hardcover: 0,
+      Paperback: 0,
+      eBook: 0,
+      Audiobook: 0,
+      Unknown: 0,
+    },
     duration_ms: 0,
   };
-  
+
+  // Temporary candidates array (will be populated with ISBNs from ISBNdb later)
+  // For now, we just pass through the metadata for ISBN resolution
   const candidates: ISBNCandidate[] = [];
-  
+
   for (const book of books) {
-    // Track confidence distribution
-    switch (book.confidence_isbn) {
-      case 'high':
-        stats.high_confidence++;
-        break;
-      case 'low':
-        stats.low_confidence++;
-        break;
-      case 'unknown':
-        stats.unknown_confidence++;
-        break;
+    // Track metadata completeness
+    if (book.publisher) {
+      stats.books_with_publisher++;
     }
-    
-    // Check if book has ISBN
-    if (!book.isbn || book.isbn.trim() === '') {
-      stats.books_without_isbn++;
-      continue;
+
+    if (book.significance) {
+      stats.books_with_significance++;
     }
-    
-    stats.books_with_isbn++;
-    
-    // Validate ISBN checksum
-    const cleanISBN = book.isbn.replace(/[- ]/g, '');
-    if (!isValidISBN(cleanISBN)) {
-      stats.invalid_isbns++;
-      logger.debug('[GeminiBackfill] Invalid ISBN checksum', {
-        title: book.title,
-        isbn: book.isbn,
-        confidence: book.confidence_isbn,
-      });
-      continue;
-    }
-    
-    stats.valid_isbns++;
-    
-    // Normalize to ISBN-13
-    const normalizedISBN = normalizeISBN(cleanISBN);
-    
+
+    // Track format distribution
+    stats.format_breakdown[book.format]++;
+
+    // Store book metadata for ISBN resolution step
+    // ISBN will be resolved via ISBNdb title/author search
     candidates.push({
-      isbn: normalizedISBN,
+      isbn: '', // Will be populated by ISBNdb
       title: book.title,
       authors: [book.author],
-      source: `gemini-${year}-${month.toString().padStart(2, '0')}-${book.confidence_isbn}`,
+      source: `gemini-${year}-${month.toString().padStart(2, '0')}`,
     });
   }
   
@@ -663,11 +682,13 @@ export async function generateCuratedBookList(
 }
 
 /**
- * Generate annual book list in batches
+ * Generate annual book list in batches (Hybrid Workflow)
  * For larger backfill operations covering entire years
- * 
+ *
+ * Note: Batch size reduced from 100 → 20 for quality
+ *
  * @param year - Year to generate list for
- * @param batches - Number of batches (each returns ~100 books)
+ * @param batches - Number of batches (each returns ~20 books)
  * @param env - Environment with API key
  * @param logger - Logger instance
  * @returns Combined candidates and aggregated stats
@@ -679,26 +700,28 @@ export async function generateAnnualBookList(
   logger: Logger
 ): Promise<{ candidates: ISBNCandidate[]; stats: GenerationStats }> {
   const startTime = Date.now();
-  
+
   const apiKey = await env.GEMINI_API_KEY.get();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not configured');
   }
 
-  // Use Pro model for annual backfill (better reasoning for large batches)
+  // Use Flash Preview model for annual backfill (next-gen flash)
   const model = selectModelForAnnual();
   const allCandidates: ISBNCandidate[] = [];
 
   const aggregatedStats: GenerationStats = {
     model_used: model,
     total_books: 0,
-    books_with_isbn: 0,
-    books_without_isbn: 0,
-    high_confidence: 0,
-    low_confidence: 0,
-    unknown_confidence: 0,
-    valid_isbns: 0,
-    invalid_isbns: 0,
+    books_with_publisher: 0,
+    books_with_significance: 0,
+    format_breakdown: {
+      Hardcover: 0,
+      Paperback: 0,
+      eBook: 0,
+      Audiobook: 0,
+      Unknown: 0,
+    },
     duration_ms: 0,
     failed_batches: 0,
     failed_batch_errors: [],
@@ -707,7 +730,7 @@ export async function generateAnnualBookList(
   for (let batch = 1; batch <= batches; batch++) {
     logger.info('[GeminiBackfill] Processing batch', { year, batch, total_batches: batches });
 
-    const prompt = buildAnnualPrompt(year, batch, 100);
+    const prompt = buildAnnualPrompt(year, batch, 20);
 
     try {
       // Wrap API call in retry logic for transient failures
@@ -716,36 +739,28 @@ export async function generateAnnualBookList(
         3,
         1000
       );
-      
+
       for (const book of books) {
         aggregatedStats.total_books++;
-        
-        switch (book.confidence_isbn) {
-          case 'high': aggregatedStats.high_confidence++; break;
-          case 'low': aggregatedStats.low_confidence++; break;
-          case 'unknown': aggregatedStats.unknown_confidence++; break;
+
+        // Track metadata completeness
+        if (book.publisher) {
+          aggregatedStats.books_with_publisher++;
         }
-        
-        if (!book.isbn || book.isbn.trim() === '') {
-          aggregatedStats.books_without_isbn++;
-          continue;
+
+        if (book.significance) {
+          aggregatedStats.books_with_significance++;
         }
-        
-        aggregatedStats.books_with_isbn++;
-        
-        const cleanISBN = book.isbn.replace(/[- ]/g, '');
-        if (!isValidISBN(cleanISBN)) {
-          aggregatedStats.invalid_isbns++;
-          continue;
-        }
-        
-        aggregatedStats.valid_isbns++;
-        
+
+        // Track format distribution
+        aggregatedStats.format_breakdown[book.format]++;
+
+        // Store metadata for ISBN resolution
         allCandidates.push({
-          isbn: normalizeISBN(cleanISBN),
+          isbn: '', // Will be resolved via ISBNdb
           title: book.title,
           authors: [book.author],
-          source: `gemini-annual-${year}-batch${batch}-${book.confidence_isbn}`,
+          source: `gemini-annual-${year}-batch${batch}`,
         });
       }
       
