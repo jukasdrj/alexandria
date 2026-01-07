@@ -37,8 +37,12 @@ Storage: R2 isbn/{isbn}/{size}.webp
 
 **Enriched Tables (Alexandria-specific)**:
 - `enriched_works`, `enriched_editions`, `enriched_authors`
+- `external_id_mappings` - Multi-provider ID tracking (partitioned by entity_type)
+- `provider_conflicts` - Conflict detection and resolution
+- `enrichment_log` - Full audit trail of all enrichment operations
 - GIN trigram indexes for fuzzy search (`WHERE title % 'search'`)
 - Use `similarity()` function for match scores (threshold: 0.3)
+- Enrichment tracking: cover availability, provider sources, confidence scores, sync timestamps
 
 ## Configuration
 
@@ -89,6 +93,9 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 - `GET /api/search` - Legacy search (ISBN/title/author)
 - `GET /covers/:isbn/:size` - Serve covers
 - `POST /api/enrich/batch-direct` - Batch enrichment (up to 1000 ISBNs)
+- `POST /api/harvest/backfill` - Historical book backfill (Gemini → Dedup → ISBNdb → Enrich)
+- `GET /api/harvest/backfill/status` - Check backfill progress
+- `GET /api/harvest/gemini/test` - Test Gemini API connection
 - `POST /api/authors/enrich-bibliography` - Author expansion
 - `POST /api/authors/resolve-identifier` - VIAF/ISNI → Wikidata crosswalk
 - `GET /api/quota/status` - ISBNdb quota tracking
@@ -132,6 +139,47 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 **Routing**: `worker/src/index.ts` - `queue()` handler
 
 **Limitation**: Cloudflare max 100 messages/batch. For bulk ops, use `/api/enrich/batch-direct` (1000 ISBNs in one call).
+
+## Backfill Pipeline
+
+**Purpose**: Systematically enrich Alexandria's database with historically significant books using AI-curated lists.
+
+**Flow**: `POST /api/harvest/backfill`
+```
+1. Gemini API → Generate ISBNs for year/month
+   - Model: gemini-2.5-flash (monthly), gemini-2.5-pro (annual batches)
+   - Native structured output with confidence scoring
+   - Validates ISBN checksums before proceeding
+
+2. 3-Tier Deduplication → Filter existing ISBNs
+   - Exact: Check enriched_editions.isbn
+   - Related: Check related_isbns jsonb field
+   - Fuzzy: Trigram title similarity (threshold: 0.6)
+
+3. ISBNdb Batch Enrichment → Fetch metadata
+   - Premium API: 1000 ISBNs per call
+   - Quota-aware with centralized tracking
+   - Only called if dedup finds new ISBNs
+
+4. Database Updates → enriched_editions table
+   - Atomic inserts with conflict resolution
+   - Confidence scoring for work matching
+   - Full audit trail in enrichment_log
+
+5. Cover Queue → Async cover downloads
+   - Priority: low (backfill), medium (user), high (real-time)
+```
+
+**Visibility Improvements** (Jan 2026):
+- Response includes `already_enriched` count explaining why 0 new enrichments
+- Separate API call tracking: `gemini_calls`, `isbndb_calls`, `total_api_calls`
+- Logs clearly indicate when all ISBNs were deduplicated (success, not failure)
+
+**Model Selection**:
+- Monthly backfill (1-2 months): gemini-2.5-flash (fast, cost-effective)
+- Annual backfill (large batches): gemini-2.5-pro (better reasoning for bulk)
+
+**Idempotency**: Month completion tracked in `QUOTA_KV` - prevents re-running same month
 
 ## Cover Processing
 

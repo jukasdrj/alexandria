@@ -71,12 +71,16 @@ const BackfillResponseSchema = z.object({
   stats: z.object({
     total_isbns: z.number(),
     unique_isbns: z.number(),
+    already_enriched: z.number(),
     duplicate_exact: z.number(),
     duplicate_related: z.number(),
     duplicate_fuzzy: z.number(),
     editions_enriched: z.number(),
     covers_queued: z.number(),
     quota_used: z.number(),
+    gemini_calls: z.number(),
+    isbndb_calls: z.number(),
+    total_api_calls: z.number(),
   }),
   progress: z.object({
     months_completed: z.array(z.number()),
@@ -378,15 +382,27 @@ app.openapi(backfillRoute, async (c) => {
     const batches = Math.ceil(isbnsToEnrich.length / batchSize);
     const quotaToUse = Math.min(batches, maxQuota);
 
-    logger.info('[Backfill] Fetching ISBNdb data', {
-      total_isbns: isbnsToEnrich.length,
-      batches_needed: batches,
-      quota_to_use: quotaToUse,
-    });
+    // Check if all ISBNs were deduplicated (already in database)
+    if (isbnsToEnrich.length === 0) {
+      logger.info('[Backfill] All ISBNs already enriched - skipping ISBNdb', {
+        total_generated: curatedBooks.length,
+        exact_matches: dedupResult.stats.duplicate_exact,
+        related_matches: dedupResult.stats.duplicate_related,
+        fuzzy_matches: dedupResult.stats.duplicate_fuzzy,
+        message: 'Deduplication successfully identified all ISBNs in database',
+      });
+    } else {
+      logger.info('[Backfill] Fetching ISBNdb data', {
+        total_isbns: isbnsToEnrich.length,
+        batches_needed: batches,
+        quota_to_use: quotaToUse,
+      });
+    }
 
     let editionsEnriched = 0;
     let coversQueued = 0;
     let quotaUsed = 0;
+    const geminiQuotaUsed = 1; // Track Gemini API call separately
 
     for (let i = 0; i < quotaToUse; i++) {
       const batchStart = i * batchSize;
@@ -478,12 +494,16 @@ app.openapi(backfillRoute, async (c) => {
       stats: {
         total_isbns: curatedBooks.length,
         unique_isbns: dedupResult.toEnrich.length,
+        already_enriched: curatedBooks.length - dedupResult.toEnrich.length,
         duplicate_exact: dedupResult.stats.duplicate_exact,
         duplicate_related: dedupResult.stats.duplicate_related,
         duplicate_fuzzy: dedupResult.stats.duplicate_fuzzy,
         editions_enriched: editionsEnriched,
         covers_queued: coversQueued,
         quota_used: quotaUsed,
+        gemini_calls: geminiQuotaUsed,
+        isbndb_calls: quotaUsed,
+        total_api_calls: geminiQuotaUsed + quotaUsed,
       },
       progress: {
         months_completed: yearProgress?.months_completed || [],

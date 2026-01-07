@@ -1,18 +1,21 @@
 /**
  * Gemini Backfill Service - Native Structured Output for Historical Book Harvesting
- * 
+ *
  * Uses Gemini's native structured output (responseSchema + responseMimeType) to:
  * - Generate curated book lists for specific year/month periods
  * - Ensure consistent JSON output without markdown stripping hacks
  * - Include confidence scoring to track ISBN accuracy
- * 
+ *
  * Model Selection Strategy:
- * - Primary: Gemini 3 Flash (gemini-3-flash-preview) - Latest, fastest, strong reasoning
- * - Fallback: Gemini 2.5 Flash (gemini-2.5-flash) - Stable, good for general use
- * - Historical data (pre-2015): Gemini 2.5 Pro (gemini-2.5-pro) - Better long-term memory
- * 
- * Based on optimization recommendations and Gemini 3 Pro analysis.
- * 
+ * - Monthly backfill (1-2 months): Gemini 2.5 Flash - Fast, cost-effective
+ * - Annual backfill (large batches): Gemini 2.5 Pro - Better reasoning for bulk operations
+ * - Fallback: Gemini 2.0 Flash - Stable fallback if primary models have issues
+ *
+ * Retry Logic:
+ * - Exponential backoff with 3 retries for transient failures
+ * - Does not retry 4xx errors (except 429 rate limits)
+ * - 60-second timeout per API call
+ *
  * @module services/gemini-backfill
  */
 
@@ -66,14 +69,16 @@ export const GEMINI_RESPONSE_SCHEMA = {
 
 /**
  * Model configuration for different scenarios
+ * - Flash models: Fast, cost-effective for 1-2 month batches
+ * - Pro models: Better reasoning for large annual batches (3+ months worth of data)
  */
 export const GEMINI_MODELS = {
-  // Primary: Gemini 3 Flash - Latest, fastest, best for general use
-  PRIMARY: 'gemini-3-flash-preview',
-  // Fallback: Gemini 2.5 Flash - Stable, good performance
-  FALLBACK: 'gemini-2.5-flash',
-  // Historical: Gemini 2.5 Pro - Better for pre-2015 data
-  HISTORICAL: 'gemini-2.5-pro',
+  // Flash: Fast model for small/medium batches (1-2 months)
+  FLASH: 'gemini-2.5-flash',
+  // Pro: Better reasoning for large batch operations (annual backfill)
+  PRO: 'gemini-2.5-pro',
+  // Fallback: Stable fallback if primary models have issues
+  FALLBACK: 'gemini-2.0-flash',
 } as const;
 
 /**
@@ -90,6 +95,8 @@ export interface GenerationStats {
   valid_isbns: number;
   invalid_isbns: number;
   duration_ms: number;
+  failed_batches?: number;
+  failed_batch_errors?: Array<{ batch: number; error: string }>;
 }
 
 // =================================================================================
@@ -275,6 +282,11 @@ interface GeminiApiResponse {
     };
     finishReason?: string;
   }>;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
   error?: {
     code: number;
     message: string;
@@ -282,19 +294,102 @@ interface GeminiApiResponse {
 }
 
 /**
- * Select appropriate model based on year
- * - Historical data (pre-2015) benefits from Pro model's deeper knowledge
- * - Recent data works well with faster Flash models
+ * Gemini API request structure matching bendv3 patterns
  */
-function selectModel(year: number): string {
-  if (year < 2015) {
-    return GEMINI_MODELS.HISTORICAL;
+interface GeminiContentRequest {
+  system_instruction: {
+    parts: Array<{ text: string }>;
+  };
+  contents: Array<{
+    parts: Array<{ text: string }>;
+  }>;
+  generationConfig: {
+    temperature: number;
+    topP: number;
+    maxOutputTokens: number;
+    responseMimeType: string;
+    responseSchema: typeof GEMINI_RESPONSE_SCHEMA;
+  };
+}
+
+/**
+ * System instruction for bibliographic archival tasks
+ * Following bendv3 pattern of separating system instruction from user prompt
+ */
+const SYSTEM_INSTRUCTION = `You are an expert bibliographic archivist specialized in book metadata extraction.
+
+Your core capabilities:
+- Recall culturally significant books from specific time periods
+- Accurately retrieve ISBN-13 identifiers from training data
+- Distinguish between ISBN certainty levels (high/low/unknown)
+- Categorize books across genres (fiction, non-fiction, mystery, sci-fi, etc.)
+
+ISBN VALIDATION RULES (CRITICAL):
+- Return ONLY valid ISBN-10 (exactly 10 characters) or ISBN-13 (exactly 13 digits starting with 978 or 979)
+- Remove all hyphens, spaces, and separators before returning
+- ISBN-10 may end with 'X' (checksum digit) - this is valid
+- If ISBN appears incomplete, estimated, or uncertain, return empty string and set confidence to "low" or "unknown"
+- NEVER return ISBNs with wrong digit counts - prefer empty string over invalid data
+
+Always return ONLY a valid JSON array matching the provided schema. No explanatory text, no markdown code blocks.`;
+
+/**
+ * Select appropriate model for monthly backfill
+ * Flash model is preferred for single month operations (fast, cost-effective)
+ */
+function selectModelForMonthly(): string {
+  return GEMINI_MODELS.FLASH;
+}
+
+/**
+ * Select appropriate model for annual backfill
+ * Pro model is used for large batch operations (better reasoning across many books)
+ */
+function selectModelForAnnual(): string {
+  return GEMINI_MODELS.PRO;
+}
+
+/**
+ * Extended Error type with HTTP status code
+ */
+interface ApiError extends Error {
+  statusCode?: number;
+}
+
+/**
+ * Retry with exponential backoff (following bendv3 pattern)
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 1000
+): Promise<T> {
+  let lastError: ApiError | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as ApiError;
+
+      // Don't retry on 4xx errors (except 429 rate limit)
+      if (lastError.statusCode && lastError.statusCode >= 400 && lastError.statusCode < 500 && lastError.statusCode !== 429) {
+        throw lastError;
+      }
+
+      if (attempt < maxRetries - 1) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
-  return GEMINI_MODELS.PRIMARY;
+
+  throw lastError;
 }
 
 /**
  * Call Gemini API with native structured output
+ * Uses header-based API key authentication (x-goog-api-key) per working bendv3 implementation
  */
 async function callGeminiApi(
   prompt: string,
@@ -302,14 +397,18 @@ async function callGeminiApi(
   model: string,
   logger: Logger
 ): Promise<GeminiBook[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   
   const requestBody = {
+    system_instruction: {
+      parts: [{ text: SYSTEM_INSTRUCTION }]
+    },
     contents: [{
       parts: [{ text: prompt }]
     }],
     generationConfig: {
       temperature: 0.3, // Lower temperature for factual accuracy
+      topP: 0.95, // Nucleus sampling for quality
       maxOutputTokens: 16384, // Allow for large lists
       responseMimeType: 'application/json',
       responseSchema: GEMINI_RESPONSE_SCHEMA,
@@ -318,47 +417,81 @@ async function callGeminiApi(
   
   logger.info('[GeminiBackfill] Calling API', { model, prompt_length: prompt.length });
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  });
+  // Add 60s timeout for large responses
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${errorText}`);
-  }
-  
-  const data = await response.json() as GeminiApiResponse;
-  
-  if (data.error) {
-    throw new Error(`Gemini API error: ${data.error.message}`);
-  }
-  
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  
-  if (!text) {
-    logger.warn('[GeminiBackfill] Empty response from API', { model });
-    return [];
-  }
-  
-  // With native structured output, response should be valid JSON
-  // But we still validate with Zod for type safety
   try {
-    const parsed = JSON.parse(text);
-    const validated = GeminiResponseSchema.parse(parsed);
-    logger.info('[GeminiBackfill] Parsed response', { 
-      model, 
-      book_count: validated.length 
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
     });
-    return validated;
-  } catch (parseError) {
-    logger.error('[GeminiBackfill] Failed to parse response', {
-      model,
-      error: parseError instanceof Error ? parseError.message : String(parseError),
-      text_preview: text.substring(0, 200),
-    });
-    return [];
+    
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      // Sanitize error message (truncate to prevent leaking sensitive info)
+      const safeErrorText = errorText.substring(0, 500);
+      const error = new Error(`Gemini API error ${response.status}: ${safeErrorText}`) as ApiError;
+      error.statusCode = response.status;
+      throw error;
+    }
+
+    const data = await response.json() as GeminiApiResponse;
+
+    if (data.error) {
+      const error = new Error(`Gemini API error: ${data.error.message}`) as ApiError;
+      error.statusCode = data.error.code;
+      throw error;
+    }
+    
+    // Log token usage for cost tracking
+    if (data.usageMetadata) {
+      logger.info('[GeminiBackfill] Token usage', {
+        model,
+        prompt_tokens: data.usageMetadata.promptTokenCount,
+        output_tokens: data.usageMetadata.candidatesTokenCount,
+        total_tokens: data.usageMetadata.totalTokenCount,
+      });
+    }
+    
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!text) {
+      logger.warn('[GeminiBackfill] Empty response from API', { model });
+      return [];
+    }
+    
+    // With native structured output, response should be valid JSON
+    // But we still validate with Zod for type safety
+    try {
+      const parsed = JSON.parse(text);
+      const validated = GeminiResponseSchema.parse(parsed);
+      logger.info('[GeminiBackfill] Parsed response', { 
+        model, 
+        book_count: validated.length 
+      });
+      return validated;
+    } catch (parseError) {
+      logger.error('[GeminiBackfill] Failed to parse response', {
+        model,
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+        text_preview: text.substring(0, 200),
+      });
+      return [];
+    }
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Gemini API request timed out after 60 seconds');
+    }
+    throw error;
   }
 }
 
@@ -384,26 +517,31 @@ export async function generateCuratedBookList(
 ): Promise<{ candidates: ISBNCandidate[]; stats: GenerationStats }> {
   const startTime = Date.now();
   
-  // Get API key
+  // Get API key - GEMINI_API_KEY is bound to Google_books_hardoooe which has Generative Language API access
   const apiKey = await env.GEMINI_API_KEY.get();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not configured');
   }
   
-  // Select model based on year
-  const model = selectModel(year);
-  
+  // Select Flash model for monthly operations (fast, cost-effective)
+  const model = selectModelForMonthly();
+
   // Build prompt
   const prompt = buildMonthlyPrompt(year, month);
-  
+
   logger.info('[GeminiBackfill] Starting generation', { year, month, model });
   
-  // Call API with primary model
+  // Call API with retry and fallback
   let books: GeminiBook[] = [];
   let modelUsed = model;
   
   try {
-    books = await callGeminiApi(prompt, apiKey, model, logger);
+    // Wrap API call in retry logic for transient failures
+    books = await retryWithBackoff(
+      () => callGeminiApi(prompt, apiKey, model, logger),
+      3, // maxRetries
+      1000 // baseDelayMs
+    );
   } catch (error) {
     // Fallback to stable model on error
     logger.warn('[GeminiBackfill] Primary model failed, trying fallback', {
@@ -412,7 +550,11 @@ export async function generateCuratedBookList(
     });
     
     modelUsed = GEMINI_MODELS.FALLBACK;
-    books = await callGeminiApi(prompt, apiKey, GEMINI_MODELS.FALLBACK, logger);
+    books = await retryWithBackoff(
+      () => callGeminiApi(prompt, apiKey, GEMINI_MODELS.FALLBACK, logger),
+      3,
+      1000
+    );
   }
   
   // Process and validate books
@@ -512,10 +654,11 @@ export async function generateAnnualBookList(
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not configured');
   }
-  
-  const model = selectModel(year);
+
+  // Use Pro model for annual backfill (better reasoning for large batches)
+  const model = selectModelForAnnual();
   const allCandidates: ISBNCandidate[] = [];
-  
+
   const aggregatedStats: GenerationStats = {
     model_used: model,
     total_books: 0,
@@ -527,15 +670,22 @@ export async function generateAnnualBookList(
     valid_isbns: 0,
     invalid_isbns: 0,
     duration_ms: 0,
+    failed_batches: 0,
+    failed_batch_errors: [],
   };
-  
+
   for (let batch = 1; batch <= batches; batch++) {
     logger.info('[GeminiBackfill] Processing batch', { year, batch, total_batches: batches });
-    
+
     const prompt = buildAnnualPrompt(year, batch, 100);
-    
+
     try {
-      const books = await callGeminiApi(prompt, apiKey, model, logger);
+      // Wrap API call in retry logic for transient failures
+      const books = await retryWithBackoff(
+        () => callGeminiApi(prompt, apiKey, model, logger),
+        3,
+        1000
+      );
       
       for (const book of books) {
         aggregatedStats.total_books++;
@@ -569,17 +719,23 @@ export async function generateAnnualBookList(
         });
       }
       
-      // Rate limit: Gemini 3 allows 1000 RPM, but let's be conservative
+      // Rate limit: Gemini allows 1000 RPM, but let's be conservative
       if (batch < batches) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      
+
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('[GeminiBackfill] Batch failed', {
         year,
         batch,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
+
+      // Track failed batch
+      aggregatedStats.failed_batches = (aggregatedStats.failed_batches || 0) + 1;
+      aggregatedStats.failed_batch_errors = aggregatedStats.failed_batch_errors || [];
+      aggregatedStats.failed_batch_errors.push({ batch, error: errorMessage });
     }
   }
   
@@ -610,10 +766,15 @@ export async function testGeminiConnection(
     }
     
     const testPrompt = 'List 3 famous books with their ISBN-13. Return JSON array.';
-    const model = GEMINI_MODELS.PRIMARY;
-    
-    const books = await callGeminiApi(testPrompt, apiKey, model, logger);
-    
+    const model = GEMINI_MODELS.FLASH;
+
+    // Use retry logic for more reliable connectivity tests
+    const books = await retryWithBackoff(
+      () => callGeminiApi(testPrompt, apiKey, model, logger),
+      2, // Fewer retries for test
+      500
+    );
+
     return {
       success: books.length > 0,
       model,
