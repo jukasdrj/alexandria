@@ -758,8 +758,8 @@ enrichRoutes.openapi(coverHarvestRoute, async (c) => {
     // Fetch from ISBNdb (single API call for up to 1000 ISBNs)
     const batchData = await fetchISBNdbBatch(isbns, c.env);
 
-    // Record API call in quota manager (CRITICAL: must happen after successful call)
-    await quotaManager.recordApiCall(1);
+    // Note: Quota already reserved via checkQuota(1, true) on line 702
+    // No need to call recordApiCall() - that would double-count
 
     logger.info('Cover harvest: ISBNdb call complete', {
       found: batchData.size,
