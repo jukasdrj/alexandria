@@ -52,8 +52,8 @@ const BackfillStatusResponseSchema = z.object({
 });
 
 const BackfillRequestSchema = z.object({
-  year: z.number().int().min(2005).max(new Date().getFullYear()).optional()
-    .describe('Specific year to backfill (2005-present). If omitted, processes next incomplete year.'),
+  year: z.number().int().min(2005).max(2030).optional()
+    .describe('Specific year to backfill (2005-2030). If omitted, processes next incomplete year.'),
   month: z.number().int().min(1).max(12).optional()
     .describe('Specific month to backfill (1-12). If omitted, processes next incomplete month.'),
   max_quota: z.number().int().min(1).max(1000).default(100)
