@@ -22,6 +22,7 @@ import booksRoutes from './routes/books.js';
 import quotaRoutes from './routes/quota.js';
 import testRoutes from './routes/test.js';
 import migrateRoutes from './routes/migrate.js';
+import harvestRoutes from './routes/harvest.js';
 import { handleScheduledCoverHarvest } from './routes/harvest.js';
 import { handleScheduledWikidataEnrichment } from './routes/authors.js';
 
@@ -130,6 +131,7 @@ const subRouters = [
   authorsRoutes,
   booksRoutes,
   quotaRoutes,
+  harvestRoutes,
   testRoutes,
   migrateRoutes,
 ];
