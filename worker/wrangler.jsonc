@@ -115,6 +115,11 @@
       "binding": "GOOGLE_BOOKS_API_KEY",
       "store_id": "b0562ac16fde468c8af12717a6c88400",
       "secret_name": "Google_books_hardoooe"
+    },
+    {
+      "binding": "GEMINI_API_KEY",
+      "store_id": "b0562ac16fde468c8af12717a6c88400",
+      "secret_name": "Google_books_hardoooe"
     }
   ],
 

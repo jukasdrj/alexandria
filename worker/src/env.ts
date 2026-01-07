@@ -25,6 +25,9 @@ export interface Env {
   GOOGLE_BOOKS_API_KEY: {
     get(): Promise<string | null>;
   };
+  GEMINI_API_KEY: {
+    get(): Promise<string | null>;
+  };
 
   // Queue bindings
   ENRICHMENT_QUEUE: Queue;
