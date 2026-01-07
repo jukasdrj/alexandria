@@ -436,7 +436,7 @@ async function callGeminiApi(
     generationConfig: {
       temperature: 0.1, // Maximum determinism for structured data extraction (following bendv3 pattern)
       topP: 0.95, // Nucleus sampling for quality
-      maxOutputTokens: 8192, // Match bendv3's proven setting (100 books ~6K tokens)
+      maxOutputTokens: 10240, // 10K tokens: compromise for 100 books (~8K with examples + metadata)
       responseMimeType: 'application/json',
       responseSchema: GEMINI_RESPONSE_SCHEMA,
       stopSequences: ['\n\n\n'], // Stop on triple newline to prevent unnecessary continuation
