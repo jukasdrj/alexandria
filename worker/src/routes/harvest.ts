@@ -62,12 +62,20 @@ const BackfillRequestSchema = z.object({
     .describe('Specific month to backfill (1-12). If omitted, processes next incomplete month.'),
   max_quota: z.number().int().min(1).max(1000).default(100)
     .describe('Maximum ISBNdb API calls to use for this backfill (default: 100)'),
+  dry_run: z.boolean().optional().default(false)
+    .describe('If true, skips ISBNdb enrichment and returns only dedup analysis (for experiments)'),
+  experiment_id: z.string().optional()
+    .describe('Optional experiment identifier for A/B testing (e.g., "diversity-v1")'),
+  prompt_override: z.string().optional()
+    .describe('Optional custom prompt to use instead of default (for prompt testing)'),
 });
 
 const BackfillResponseSchema = z.object({
   success: z.boolean(),
   year: z.number(),
   month: z.number(),
+  dry_run: z.boolean().optional(),
+  experiment_id: z.string().optional(),
   stats: z.object({
     total_isbns: z.number(),
     unique_isbns: z.number(),
@@ -81,6 +89,11 @@ const BackfillResponseSchema = z.object({
     gemini_calls: z.number(),
     isbndb_calls: z.number(),
     total_api_calls: z.number(),
+    high_confidence: z.number().optional(),
+    low_confidence: z.number().optional(),
+    unknown_confidence: z.number().optional(),
+    valid_isbns: z.number().optional(),
+    invalid_isbns: z.number().optional(),
   }),
   progress: z.object({
     months_completed: z.array(z.number()),
@@ -275,6 +288,9 @@ app.openapi(backfillRoute, async (c) => {
   const requestedYear = body.year;
   const requestedMonth = body.month;
   const maxQuota = body.max_quota || 100;
+  const dryRun = body.dry_run || false;
+  const experimentId = body.experiment_id;
+  const promptOverride = body.prompt_override;
 
   // Initialize services
   const quotaManager = new QuotaManager(c.env.QUOTA_KV);
@@ -341,7 +357,8 @@ app.openapi(backfillRoute, async (c) => {
       year,
       month,
       c.env,
-      logger
+      logger,
+      promptOverride
     );
 
     if (curatedBooks.length === 0) {
@@ -382,29 +399,43 @@ app.openapi(backfillRoute, async (c) => {
     const batches = Math.ceil(isbnsToEnrich.length / batchSize);
     const quotaToUse = Math.min(batches, maxQuota);
 
-    // Check if all ISBNs were deduplicated (already in database)
-    if (isbnsToEnrich.length === 0) {
-      logger.info('[Backfill] All ISBNs already enriched - skipping ISBNdb', {
-        total_generated: curatedBooks.length,
-        exact_matches: dedupResult.stats.duplicate_exact,
-        related_matches: dedupResult.stats.duplicate_related,
-        fuzzy_matches: dedupResult.stats.duplicate_fuzzy,
-        message: 'Deduplication successfully identified all ISBNs in database',
-      });
-    } else {
-      logger.info('[Backfill] Fetching ISBNdb data', {
-        total_isbns: isbnsToEnrich.length,
-        batches_needed: batches,
-        quota_to_use: quotaToUse,
-      });
-    }
-
     let editionsEnriched = 0;
     let coversQueued = 0;
     let quotaUsed = 0;
     const geminiQuotaUsed = 1; // Track Gemini API call separately
 
-    for (let i = 0; i < quotaToUse; i++) {
+    // DRY-RUN MODE: Skip ISBNdb enrichment, only return dedup analysis
+    if (dryRun) {
+      logger.info('[Backfill:DryRun] Skipping ISBNdb enrichment', {
+        total_generated: curatedBooks.length,
+        new_isbns: isbnsToEnrich.length,
+        exact_matches: dedupResult.stats.duplicate_exact,
+        related_matches: dedupResult.stats.duplicate_related,
+        fuzzy_matches: dedupResult.stats.duplicate_fuzzy,
+        experiment_id: experimentId,
+      });
+
+      // Skip to response
+    } else {
+      // NORMAL MODE: Enrich via ISBNdb
+      // Check if all ISBNs were deduplicated (already in database)
+      if (isbnsToEnrich.length === 0) {
+        logger.info('[Backfill] All ISBNs already enriched - skipping ISBNdb', {
+          total_generated: curatedBooks.length,
+          exact_matches: dedupResult.stats.duplicate_exact,
+          related_matches: dedupResult.stats.duplicate_related,
+          fuzzy_matches: dedupResult.stats.duplicate_fuzzy,
+          message: 'Deduplication successfully identified all ISBNs in database',
+        });
+      } else {
+        logger.info('[Backfill] Fetching ISBNdb data', {
+          total_isbns: isbnsToEnrich.length,
+          batches_needed: batches,
+          quota_to_use: quotaToUse,
+        });
+      }
+
+      for (let i = 0; i < quotaToUse; i++) {
       const batchStart = i * batchSize;
       const batchEnd = Math.min(batchStart + batchSize, isbnsToEnrich.length);
       const batchIsbns = isbnsToEnrich.slice(batchStart, batchEnd);
@@ -456,19 +487,25 @@ app.openapi(backfillRoute, async (c) => {
           });
         }
       }
+      }
     }
 
-    // Step 3: Record month completion
-    const progressResult = await harvestState.recordMonthComplete(year, month, {
-      total_isbns: curatedBooks.length,
-      unique_isbns: dedupResult.toEnrich.length,
-      duplicate_isbns: curatedBooks.length - dedupResult.toEnrich.length,
-      covers_harvested: coversQueued,
-      quota_used: quotaUsed,
-    });
+    // Step 3: Record month completion (skip if dry-run)
+    let progressResult = { year_is_complete: false };
+    let yearProgress = null;
 
-    // Get updated year progress to retrieve actual months_completed
-    const yearProgress = await harvestState.getYearProgress(year);
+    if (!dryRun) {
+      progressResult = await harvestState.recordMonthComplete(year, month, {
+        total_isbns: curatedBooks.length,
+        unique_isbns: dedupResult.toEnrich.length,
+        duplicate_isbns: curatedBooks.length - dedupResult.toEnrich.length,
+        covers_harvested: coversQueued,
+        quota_used: quotaUsed,
+      });
+
+      // Get updated year progress to retrieve actual months_completed
+      yearProgress = await harvestState.getYearProgress(year);
+    }
 
     // Get updated quota status
     const updatedQuota = await quotaManager.getQuotaStatus();
@@ -491,6 +528,8 @@ app.openapi(backfillRoute, async (c) => {
       success: true,
       year,
       month,
+      dry_run: dryRun,
+      experiment_id: experimentId,
       stats: {
         total_isbns: curatedBooks.length,
         unique_isbns: dedupResult.toEnrich.length,
@@ -504,6 +543,12 @@ app.openapi(backfillRoute, async (c) => {
         gemini_calls: geminiQuotaUsed,
         isbndb_calls: quotaUsed,
         total_api_calls: geminiQuotaUsed + quotaUsed,
+        // Include Gemini generation stats for analysis
+        high_confidence: geminiStats.high_confidence,
+        low_confidence: geminiStats.low_confidence,
+        unknown_confidence: geminiStats.unknown_confidence,
+        valid_isbns: geminiStats.valid_isbns,
+        invalid_isbns: geminiStats.invalid_isbns,
       },
       progress: {
         months_completed: yearProgress?.months_completed || [],

@@ -502,32 +502,34 @@ async function callGeminiApi(
 /**
  * Generate curated book list for a specific year/month using Gemini API
  * with native structured output and ISBN validation
- * 
+ *
  * @param year - Year to generate list for
  * @param month - Month to generate list for (1-12)
  * @param env - Environment with API key
  * @param logger - Logger instance
+ * @param promptOverride - Optional custom prompt for A/B testing
  * @returns Object containing candidates and generation stats
  */
 export async function generateCuratedBookList(
   year: number,
   month: number,
   env: Env,
-  logger: Logger
+  logger: Logger,
+  promptOverride?: string
 ): Promise<{ candidates: ISBNCandidate[]; stats: GenerationStats }> {
   const startTime = Date.now();
-  
+
   // Get API key - GEMINI_API_KEY is bound to Google_books_hardoooe which has Generative Language API access
   const apiKey = await env.GEMINI_API_KEY.get();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not configured');
   }
-  
+
   // Select Flash model for monthly operations (fast, cost-effective)
   const model = selectModelForMonthly();
 
-  // Build prompt
-  const prompt = buildMonthlyPrompt(year, month);
+  // Build prompt (use override if provided, otherwise use default)
+  const prompt = promptOverride || buildMonthlyPrompt(year, month);
 
   logger.info('[GeminiBackfill] Starting generation', { year, month, model });
   
