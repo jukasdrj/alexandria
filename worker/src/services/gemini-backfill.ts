@@ -223,8 +223,8 @@ function buildMonthlyPrompt(year: number, month: number): string {
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
   const monthName = monthNames[month - 1];
-  
-  return `You are a specialized bibliographic archivist. Generate a comprehensive list of exactly 100 books that were published or reached significant cultural prominence in ${monthName} ${year}.
+
+  return `Generate a comprehensive list of exactly 100 books that were published or reached significant cultural prominence in ${monthName} ${year}.
 
 Organize your internal retrieval by these categories to ensure variety:
 - NYT Bestsellers (Fiction & Non-fiction)
@@ -234,13 +234,36 @@ Organize your internal retrieval by these categories to ensure variety:
 - Notable non-fiction (memoirs, history, science, self-help)
 - International translations that reached English-speaking markets
 
-For each book:
-1. Provide the ISBN-13 (strongly preferred) or ISBN-10
-2. If you are CERTAIN of the ISBN from your training data, set confidence_isbn to "high"
-3. If you are estimating based on typical edition patterns, set to "low"
-4. If no ISBN is available or you're unsure, provide an empty string and set to "unknown"
+FEW-SHOT EXAMPLES:
 
-IMPORTANT: Only include ISBNs you have high confidence in. It's better to mark confidence as "low" or "unknown" than to guess incorrectly.
+Example 1 (High confidence ISBN):
+{
+  "title": "The Great Gatsby",
+  "author": "F. Scott Fitzgerald",
+  "isbn": "9780743273565",
+  "confidence_isbn": "high"
+}
+
+Example 2 (No ISBN available):
+{
+  "title": "Beloved",
+  "author": "Toni Morrison",
+  "isbn": "",
+  "confidence_isbn": "unknown"
+}
+
+Example 3 (ISBN-10 format):
+{
+  "title": "1984",
+  "author": "George Orwell",
+  "isbn": "0451524934",
+  "confidence_isbn": "high"
+}
+
+For each book:
+1. Provide the ISBN-13 (preferred) or ISBN-10 if you are CERTAIN of it
+2. Set confidence_isbn: "high" if certain, "low" if estimated, "unknown" if unsure
+3. Use empty string "" for isbn if unavailable (NOT null)
 
 Return ONLY a valid JSON array. No markdown, no explanations, no code blocks.`;
 }
@@ -411,7 +434,7 @@ async function callGeminiApi(
       parts: [{ text: prompt }]
     }],
     generationConfig: {
-      temperature: 0.3, // Lower temperature for factual accuracy
+      temperature: 0.1, // Maximum determinism for structured data extraction (following bendv3 pattern)
       topP: 0.95, // Nucleus sampling for quality
       maxOutputTokens: 16384, // Allow for large lists
       responseMimeType: 'application/json',
