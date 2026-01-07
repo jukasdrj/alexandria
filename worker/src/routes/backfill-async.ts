@@ -27,6 +27,16 @@ const BackfillRequestSchema = z.object({
     .describe('Specific month to backfill (1-12). If omitted, processes next incomplete month.'),
   batch_size: z.number().int().min(10).max(50).optional()
     .describe('Number of books to generate (default: 20, A/B test with 50)'),
+  dry_run: z.boolean().optional()
+    .describe('If true, runs validation without database updates. Used for A/B testing.'),
+  experiment_id: z.string().optional()
+    .describe('Experiment identifier for tracking (e.g., "exp-001-baseline"). Logged in results.'),
+  prompt_override: z.string().optional()
+    .describe('Prompt variant to use (e.g., "enriched-context", "conservative"). Defaults to baseline.'),
+  model_override: z.string().optional()
+    .describe('Model to use (e.g., "gemini-3-flash-preview", "gemini-3-pro-preview"). Defaults to gemini-2.5-flash.'),
+  max_quota: z.number().int().min(1).max(1000).optional()
+    .describe('Maximum quota budget for this experiment (1-1000). Prevents cost overruns.'),
 });
 
 const BackfillResponseSchema = z.object({
@@ -37,6 +47,8 @@ const BackfillResponseSchema = z.object({
   status: z.string(),
   message: z.string(),
   status_url: z.string(),
+  experiment_id: z.string().optional(),
+  dry_run: z.boolean().optional(),
 });
 
 const BackfillStatusSchema = z.object({
@@ -50,7 +62,24 @@ const BackfillStatusSchema = z.object({
     isbns_resolved: z.number().optional(),
     isbn_resolution_rate: z.number().optional(),
     isbns_sent_to_enrichment: z.number().optional(),
+    valid_isbns: z.number().optional(),
+    invalid_isbns: z.number().optional(),
+    exact_dedup_matches: z.number().optional(),
+    related_dedup_matches: z.number().optional(),
+    fuzzy_dedup_matches: z.number().optional(),
+    new_isbns: z.number().optional(),
+    new_isbn_percentage: z.number().optional(),
+    isbndb_hits: z.number().optional(),
+    isbndb_hit_rate: z.number().optional(),
+    gemini_calls: z.number().optional(),
+    isbndb_calls: z.number().optional(),
+    total_api_calls: z.number().optional(),
+    quota_used: z.number().optional(),
   }).optional(),
+  experiment_id: z.string().optional(),
+  dry_run: z.boolean().optional(),
+  prompt_variant: z.string().optional(),
+  model_used: z.string().optional(),
   error: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -112,6 +141,11 @@ app.openapi(backfillRoute, async (c) => {
   const requestedYear = body.year;
   const requestedMonth = body.month;
   const batchSize = body.batch_size ?? 20;
+  const dryRun = body.dry_run ?? false;
+  const experimentId = body.experiment_id;
+  const promptOverride = body.prompt_override;
+  const modelOverride = body.model_override;
+  const maxQuota = body.max_quota;
 
   // Initialize services
   const harvestState = new HarvestState(c.env.QUOTA_KV, logger);
@@ -168,11 +202,20 @@ app.openapi(backfillRoute, async (c) => {
     year,
     month,
     batch_size: batchSize,
+    dry_run: dryRun,
+    experiment_id: experimentId,
+    prompt_override: promptOverride,
+    model_override: modelOverride,
+    max_quota: maxQuota,
   };
 
   await c.env.BACKFILL_QUEUE.send(message);
 
-  logger.info('[BackfillAsync] Job queued successfully', { job_id });
+  logger.info('[BackfillAsync] Job queued successfully', {
+    job_id,
+    dry_run: dryRun,
+    experiment_id: experimentId,
+  });
 
   // Return 202 Accepted with job_id and status URL
   return c.json({
@@ -181,8 +224,12 @@ app.openapi(backfillRoute, async (c) => {
     year,
     month,
     status: 'queued',
-    message: 'Backfill job queued successfully. Poll status URL for progress.',
+    message: dryRun
+      ? 'Dry-run experiment queued. No database updates will be made.'
+      : 'Backfill job queued successfully. Poll status URL for progress.',
     status_url: `/api/harvest/backfill/status/${job_id}`,
+    experiment_id: experimentId,
+    dry_run: dryRun,
   }, 202);
 });
 

@@ -6,8 +6,24 @@ Active tasks and future work. Production system (Phase 1-5) is complete.
 
 ## 🎯 Active Work
 
-### Phase 4: Author Metadata Expansion
+### Phase 5: Backfill System Validation (#150)
 **Priority:** HIGH
+
+**Current Status:**
+- Gemini API integration: Complete
+- Gemini API key: Configured ✅
+- Worker OOM issues: Fixed (#149) ✅
+- Dry-run validation: Ready to start
+
+**Next Steps:**
+- [ ] Execute Phase 1: Baseline validation (6 prompt variants)
+- [ ] Execute Phase 2: Model comparison (3 models)
+- [ ] Execute Phase 3: Historical range testing
+- [ ] Analyze results and select production configuration
+- [ ] Document winner and enable production backfill
+
+### Phase 4: Author Metadata Expansion
+**Priority:** MEDIUM
 
 **Current Status:**
 - Top-1000 tier harvest: 81.8% complete (818/1000 authors processed)
@@ -53,4 +69,4 @@ npm run tail                      # Monitor logs
 
 ---
 
-**Last Updated:** January 5, 2026
+**Last Updated:** January 7, 2026

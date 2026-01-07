@@ -5,10 +5,10 @@
 ## 🎯 Active Issues
 
 ### P1 - HIGH Priority (Blocker)
-1. **Gemini API Key Required** - Backfill blocked until Gemini API key is configured
-   - Current Google Books API key does NOT have Generative Language API access
-   - Need to create key in Google AI Studio: https://aistudio.google.com/
-   - Add to Cloudflare Secrets Store and update wrangler.jsonc
+1. **#150** - Dry-Run Validation Plan: Backfill System Testing
+   - Need to execute validation experiments before production backfill
+   - 3-phase testing: Baseline validation, Model comparison, Historical range
+   - See issue for full experiment matrix
 
 ### P2 - MEDIUM Priority
 2. **#118** - Auto-healing/recovery system for bulk author harvesting
@@ -18,6 +18,30 @@
 4. **#116** - Search analytics tracking with Analytics Engine
 5. **#113** - Wikipedia + LLM fallback for authors without Wikidata
 6. **#100** - GitHub Actions for automated harvesting
+
+---
+
+## ✅ Recently Completed (January 7, 2026)
+
+### #149: Worker Memory OOM Fix (COMPLETED - Jan 7)
+**Fixed critical Worker memory exhaustion during cover queue processing:**
+- **Problem:** Workers hitting 512MB limit with large images (642KB JPEGs @ 1744x2661)
+- **Root Cause:** Parallel processing of 10 images = 300-350MB peak memory
+- **Fix:** Reduced cover queue settings in wrangler.jsonc:
+  - max_batch_size: 10 → 5 (50% memory reduction)
+  - max_concurrency: 10 → 3 (70% memory reduction)
+  - max_batch_timeout: 30s → 60s (more CPU headroom)
+- **Impact:** Peak memory now ~90-105MB (well within limits)
+- **Trade-off:** ~25% throughput reduction (acceptable)
+- **Commit:** b038bbb
+- **Tests:** 605/605 passing
+
+### Gemini API Key Configuration (COMPLETED - Jan 7)
+**Configured Gemini API access for backfill system:**
+- API key created in Google AI Studio
+- Added to Cloudflare Secrets Store
+- Worker binding configured in wrangler.jsonc
+- Unblocked backfill validation experiments (#150)
 
 ---
 

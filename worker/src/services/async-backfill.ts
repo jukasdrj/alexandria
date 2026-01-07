@@ -46,7 +46,24 @@ export interface BackfillJobStatus {
     already_enriched?: number;
     editions_enriched?: number;
     covers_queued?: number;
+    valid_isbns?: number;
+    invalid_isbns?: number;
+    exact_dedup_matches?: number;
+    related_dedup_matches?: number;
+    fuzzy_dedup_matches?: number;
+    new_isbns?: number;
+    new_isbn_percentage?: number;
+    isbndb_hits?: number;
+    isbndb_hit_rate?: number;
+    gemini_calls?: number;
+    isbndb_calls?: number;
+    total_api_calls?: number;
+    quota_used?: number;
   };
+  experiment_id?: string;
+  dry_run?: boolean;
+  prompt_variant?: string;
+  model_used?: string;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -59,6 +76,11 @@ export interface BackfillQueueMessage {
   year: number;
   month: number;
   batch_size: number;
+  dry_run?: boolean;
+  experiment_id?: string;
+  prompt_override?: string;
+  model_override?: string;
+  max_quota?: number;
 }
 
 // =================================================================================
@@ -173,16 +195,28 @@ export async function processBackfillJob(
   env: Env,
   logger: Logger
 ): Promise<void> {
-  const { job_id, year, month, batch_size } = message;
+  const { job_id, year, month, batch_size, dry_run, experiment_id, prompt_override, model_override } = message;
   const startTime = Date.now();
 
   try {
-    logger.info('[AsyncBackfill] Processing job', { job_id, year, month });
+    logger.info('[AsyncBackfill] Processing job', {
+      job_id,
+      year,
+      month,
+      dry_run,
+      experiment_id,
+    });
 
-    // Update status: processing
+    // Update status: processing (include experiment metadata)
     await updateJobStatus(env.QUOTA_KV, job_id, {
       status: 'processing',
-      progress: `Generating book list for ${year}-${month.toString().padStart(2, '0')}...`,
+      progress: dry_run
+        ? `[DRY-RUN] Generating book list for ${year}-${month.toString().padStart(2, '0')}...`
+        : `Generating book list for ${year}-${month.toString().padStart(2, '0')}...`,
+      experiment_id,
+      dry_run,
+      prompt_variant: prompt_override || 'baseline',
+      model_used: model_override || 'default',
     });
 
     // Step 1: Run hybrid workflow (Gemini + ISBNdb resolution)
@@ -191,7 +225,9 @@ export async function processBackfillJob(
       month,
       env,
       logger,
-      batch_size
+      batch_size,
+      prompt_override,
+      model_override
     );
 
     logger.info('[AsyncBackfill] Hybrid workflow complete', {
@@ -211,22 +247,65 @@ export async function processBackfillJob(
       },
     });
 
-    // Step 2: Send ISBNs to ENRICHMENT_QUEUE (reuse existing infrastructure!)
-    // This is the same pattern as bendv3 CSV imports
-    const isbnsToEnrich = hybridResult.candidates.map(c => c.isbn);
+    // Step 2: Extract ISBNs from candidates
+    const isbnsToEnrich = hybridResult.candidates.map(c => c.isbn).filter(isbn => isbn);
 
     if (isbnsToEnrich.length === 0) {
       logger.warn('[AsyncBackfill] No ISBNs to enrich', { job_id, year, month });
       await updateJobStatus(env.QUOTA_KV, job_id, {
         status: 'complete',
-        progress: 'No ISBNs resolved - job complete',
+        progress: dry_run
+          ? '[DRY-RUN] No ISBNs resolved - experiment complete'
+          : 'No ISBNs resolved - job complete',
         completed_at: new Date().toISOString(),
         duration_ms: Date.now() - startTime,
+        stats: {
+          gemini_books_generated: hybridResult.stats.total_books,
+          isbns_resolved: 0,
+          gemini_calls: hybridResult.stats.api_calls.gemini,
+          isbndb_calls: hybridResult.stats.api_calls.isbndb,
+          total_api_calls: hybridResult.stats.api_calls.total,
+        },
       });
       return;
     }
 
-    // Send to enrichment queue in batches (max 100 per message)
+    // DRY-RUN MODE: Skip enrichment queue, just return metrics
+    if (dry_run) {
+      const duration = Date.now() - startTime;
+
+      logger.info('[AsyncBackfill:DryRun] Skipping enrichment queue', {
+        job_id,
+        experiment_id,
+        isbns_resolved: isbnsToEnrich.length,
+      });
+
+      await updateJobStatus(env.QUOTA_KV, job_id, {
+        status: 'complete',
+        progress: `[DRY-RUN] Experiment complete. ${isbnsToEnrich.length} ISBNs resolved (enrichment skipped).`,
+        completed_at: new Date().toISOString(),
+        duration_ms: duration,
+        stats: {
+          gemini_books_generated: hybridResult.stats.total_books,
+          isbns_resolved: isbnsToEnrich.length,
+          isbn_resolution_rate: hybridResult.stats.isbn_resolution.resolution_rate,
+          // Dedup stats would go here (TODO: add deduplication step)
+          gemini_calls: hybridResult.stats.api_calls.gemini,
+          isbndb_calls: hybridResult.stats.api_calls.isbndb,
+          total_api_calls: hybridResult.stats.api_calls.total,
+        },
+      });
+
+      logger.info('[AsyncBackfill:DryRun] Experiment complete', {
+        job_id,
+        experiment_id,
+        duration_ms: duration,
+      });
+
+      return; // Exit early - no enrichment in dry-run
+    }
+
+    // PRODUCTION MODE: Send to enrichment queue in batches (max 100 per message)
     const enrichmentBatchSize = 100;
     let totalSent = 0;
 
@@ -281,6 +360,9 @@ export async function processBackfillJob(
         isbns_resolved: hybridResult.candidates.length,
         isbn_resolution_rate: hybridResult.stats.isbn_resolution.resolution_rate,
         isbns_sent_to_enrichment: totalSent,
+        gemini_calls: hybridResult.stats.api_calls.gemini,
+        isbndb_calls: hybridResult.stats.api_calls.isbndb,
+        total_api_calls: hybridResult.stats.api_calls.total,
       },
     });
 

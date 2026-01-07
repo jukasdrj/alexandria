@@ -581,7 +581,8 @@ export async function generateCuratedBookList(
   env: Env,
   logger: Logger,
   promptOverride?: string,
-  batchSize: number = 20
+  batchSize: number = 20,
+  modelOverride?: string
 ): Promise<{ candidates: ISBNCandidate[]; stats: GenerationStats }> {
   const startTime = Date.now();
 
@@ -591,8 +592,8 @@ export async function generateCuratedBookList(
     throw new Error('GEMINI_API_KEY not configured');
   }
 
-  // Select Flash model for monthly operations (fast, cost-effective)
-  const model = selectModelForMonthly();
+  // Select model (use override if provided, otherwise use default for monthly ops)
+  const model = modelOverride || selectModelForMonthly();
 
   // Build prompt (use override if provided, otherwise use default)
   const prompt = promptOverride || buildMonthlyPrompt(year, month, batchSize);

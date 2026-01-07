@@ -80,11 +80,18 @@ export async function generateHybridBackfillList(
   month: number,
   env: Env,
   logger: Logger,
-  batchSize: number = 20
+  batchSize: number = 20,
+  promptOverride?: string,
+  modelOverride?: string
 ): Promise<HybridBackfillResult> {
   const startTime = Date.now();
 
-  logger.info('[HybridBackfill] Starting hybrid workflow', { year, month });
+  logger.info('[HybridBackfill] Starting hybrid workflow', {
+    year,
+    month,
+    prompt_override: promptOverride ? 'custom' : 'default',
+    model_override: modelOverride || 'default',
+  });
 
   // Step 1: Generate metadata from Gemini (no ISBNs)
   const { candidates: metadataCandidates, stats: geminiStats } = await generateCuratedBookList(
@@ -92,8 +99,9 @@ export async function generateHybridBackfillList(
     month,
     env,
     logger,
-    undefined, // promptOverride
-    batchSize
+    promptOverride,
+    batchSize,
+    modelOverride
   );
 
   if (metadataCandidates.length === 0) {
