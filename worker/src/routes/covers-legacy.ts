@@ -288,7 +288,7 @@ app.openapi(coverStatusRoute, async (c) => {
 });
 
 // GET /covers/:isbn/:size
-app.openapi(coverServeRoute, async (c) => {
+export async function handleLegacyServeCover(c: any) {
   const { isbn, size } = c.req.valid('param');
   const logger = c.get('logger');
   const normalizedISBN = isbn.replace(/[-\s]/g, '');
@@ -357,15 +357,17 @@ app.openapi(coverServeRoute, async (c) => {
       let pageCount = 0;
 
       while (!found && pageCount < maxPages) {
+        // Optimized: request customMetadata in the list call to avoid N+1 HEAD requests
         const list = await c.env.COVER_IMAGES.list({
           prefix: 'covers/',
           cursor,
           limit: 1000,
+          include: ['customMetadata'],
         });
 
         for (const obj of list.objects) {
-          const head = await c.env.COVER_IMAGES.head(obj.key);
-          if (head?.customMetadata?.isbn === normalizedISBN) {
+          // Check metadata directly from list result
+          if (obj.customMetadata?.isbn === normalizedISBN) {
             logger.info('Cover served - work-based', { isbn: normalizedISBN, key: obj.key });
             object = await c.env.COVER_IMAGES.get(obj.key);
             r2Key = obj.key;
@@ -401,7 +403,10 @@ app.openapi(coverServeRoute, async (c) => {
     });
     return c.redirect(getPlaceholderCover(), 302);
   }
-});
+}
+
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+app.openapi(coverServeRoute, handleLegacyServeCover);
 
 // POST /covers/:isbn/process
 app.openapi(coverProcessRoute, async (c) => {
