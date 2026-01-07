@@ -285,7 +285,7 @@ export class QuotaManager {
    * Check if specific harvesting operation should proceed
    * Includes operational logic for different harvesting types
    */
-  async shouldAllowOperation(operation: 'cron' | 'bulk_author' | 'batch_direct' | 'new_releases', estimatedCalls: number = 1): Promise<QuotaCheckResult> {
+  async shouldAllowOperation(operation: 'cron' | 'bulk_author' | 'batch_direct' | 'new_releases' | 'backfill', estimatedCalls: number = 1): Promise<QuotaCheckResult> {
     const result = await this.checkQuota(estimatedCalls, false);
 
     if (!result.allowed) {
