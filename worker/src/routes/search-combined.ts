@@ -152,6 +152,7 @@ function sanitizeSqlPattern(input: string): string {
 
 /**
  * Search by title using GIN trigram indexes (fuzzy search)
+ * Uses dynamic threshold tuning for better precision/recall balance
  */
 async function searchByTitle(
 	sql: any,
@@ -159,13 +160,23 @@ async function searchByTitle(
 	limit: number,
 	offset: number
 ): Promise<{ data: any[]; total: number }> {
-	const titlePattern = `%${sanitizeSqlPattern(title)}%`;
+	// Dynamic threshold based on query length
+	// Shorter queries = higher threshold (more precise)
+	// Longer queries = lower threshold (more recall)
+	const threshold = title.length <= 5 ? 0.6 : title.length <= 10 ? 0.5 : 0.4;
+
+	// Set work_mem for this query (faster sorting of fuzzy results)
+	await sql`SET LOCAL work_mem = '256MB'`;
+
+	// Set similarity threshold for trigram matching
+	await sql`SET LOCAL pg_trgm.similarity_threshold = ${threshold}`;
+
 	const [countResult, dataResult] = await Promise.all([
 		sql`
 			SELECT COUNT(DISTINCT e.isbn)::int AS total
 			FROM enriched_works w
 			JOIN enriched_editions e ON e.work_key = w.work_key
-			WHERE w.title ILIKE ${titlePattern}
+			WHERE w.title % ${title}
 		`,
 		sql`
 			SELECT
@@ -180,6 +191,7 @@ async function searchByTitle(
 				CONCAT('https://openlibrary.org/works/', e.work_key) AS openlibrary_work_url,
 				e.cover_url_large AS cover_url,
 				e.cover_source,
+				similarity(w.title, ${title}) AS title_score,
 				COALESCE(
 					json_agg(
 						DISTINCT jsonb_build_object(
@@ -201,9 +213,9 @@ async function searchByTitle(
 			JOIN enriched_editions e ON e.work_key = w.work_key
 			LEFT JOIN author_works aw ON w.work_key = aw.work_key
 			LEFT JOIN enriched_authors a ON aw.author_key = a.author_key
-			WHERE w.title ILIKE ${titlePattern}
+			WHERE w.title % ${title}
 			GROUP BY e.isbn, e.title, e.publication_date, e.publisher, e.page_count, e.format, e.cover_url_large, e.cover_source, e.openlibrary_edition_id, e.work_key, w.title
-			ORDER BY e.publication_date DESC NULLS LAST
+			ORDER BY title_score DESC, e.publication_date DESC NULLS LAST
 			LIMIT ${limit} OFFSET ${offset}
 		`,
 	]);
