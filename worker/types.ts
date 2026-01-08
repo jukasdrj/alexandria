@@ -137,6 +137,18 @@ export const QueueEnrichmentSchema = z.object({
   priority: z.number().min(1).max(10).default(5),
 });
 
+// External ID Resolution Schemas (Issue #155)
+export const ExternalIdQuerySchema = z.object({
+  entity_type: z.enum(['edition', 'work', 'author']),
+  key: z.string(),
+});
+
+export const ResolveExternalIdSchema = z.object({
+  provider: z.string(),
+  id: z.string(),
+  type: z.enum(['edition', 'work', 'author']).default('edition').optional(),
+});
+
 // =================================================================================
 // Inferred TypeScript Types from Zod Schemas
 // =================================================================================
@@ -149,6 +161,8 @@ export type EnrichEdition = z.infer<typeof EnrichEditionSchema>;
 export type EnrichWork = z.infer<typeof EnrichWorkSchema>;
 export type EnrichAuthor = z.infer<typeof EnrichAuthorSchema>;
 export type QueueEnrichment = z.infer<typeof QueueEnrichmentSchema>;
+export type ExternalIdQuery = z.infer<typeof ExternalIdQuerySchema>;
+export type ResolveExternalId = z.infer<typeof ResolveExternalIdSchema>;
 
 // =================================================================================
 // Response Types
@@ -359,6 +373,50 @@ export interface AuthorDetails {
   wikidata_enriched_at: string | null;  // ISO timestamp
 }
 
+/**
+ * External ID mapping from crosswalk table
+ * @since 2.3.0 - External ID Resolution (Issue #155)
+ */
+export interface ExternalId {
+  provider: string;                  // e.g., "amazon", "goodreads", "google-books"
+  provider_id: string;               // External ID from provider
+  confidence: number;                // Confidence score (0-100)
+  created_at?: string;               // ISO timestamp
+}
+
+/**
+ * External ID lookup response
+ * @since 2.3.0 - External ID Resolution (Issue #155)
+ */
+export interface ExternalIdResult {
+  success: boolean;
+  data: ExternalId[];
+  meta: {
+    source: 'crosswalk' | 'array_backfill';
+    backfilled: boolean;
+    latency_ms?: number;
+  };
+}
+
+/**
+ * Resolved entity from external ID
+ * @since 2.3.0 - External ID Resolution (Issue #155)
+ */
+export interface ResolvedEntity {
+  key: string;                       // Our internal key (ISBN, work_key, author_key)
+  entity_type: 'edition' | 'work' | 'author';
+  confidence: number;                // Confidence score of mapping
+}
+
+/**
+ * Resolve external ID response
+ * @since 2.3.0 - External ID Resolution (Issue #155)
+ */
+export interface ResolveExternalIdResult {
+  success: boolean;
+  data: ResolvedEntity;
+}
+
 // =================================================================================
 // API Client Types (for consumers like bendv3)
 // =================================================================================
@@ -392,6 +450,8 @@ export const ENDPOINTS = {
   COVER_ISBN_PROCESS: '/covers/:isbn/process',
   COVER_ISBN_SERVE: '/covers/:isbn/:size',
   COVER_BATCH: '/covers/batch',
+  EXTERNAL_IDS: '/api/external-ids/:entity_type/:key',  // External ID lookup (Issue #155)
+  RESOLVE_EXTERNAL_ID: '/api/resolve/:provider/:id',    // Reverse lookup (Issue #155)
 } as const;
 
 /**
@@ -475,6 +535,18 @@ export const API_ROUTES = {
     path: ENDPOINTS.COVER_BATCH,
     requestSchema: CoverBatchSchema,
   } as APIRoute<CoverBatch, BatchCoverResult>,
+
+  externalIds: {
+    method: 'GET',
+    path: ENDPOINTS.EXTERNAL_IDS,
+    requestSchema: ExternalIdQuerySchema,
+  } as APIRoute<ExternalIdQuery, ExternalIdResult>,
+
+  resolveExternalId: {
+    method: 'GET',
+    path: ENDPOINTS.RESOLVE_EXTERNAL_ID,
+    requestSchema: ResolveExternalIdSchema,
+  } as APIRoute<ResolveExternalId, ResolveExternalIdResult>,
 } as const;
 
 // =================================================================================
