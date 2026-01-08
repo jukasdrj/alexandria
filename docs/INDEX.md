@@ -68,6 +68,9 @@
 
 ## 📚 Harvesting & Enrichment
 
+### System Documentation
+- **[QUEUE-ENRICHMENT-SYSTEM.md](./QUEUE-ENRICHMENT-SYSTEM.md)** - **⭐ Complete guide to queues, enrichment workflows, triggers, and monitoring** (NEW!)
+
 ### Active Systems
 - **[harvesting/AUTHOR-DIVERSITY-ENRICHMENT-PLAN.md](./harvesting/AUTHOR-DIVERSITY-ENRICHMENT-PLAN.md)** - Wikidata enrichment strategy
 - **[harvesting/BULK-HARVEST-FIX.md](./harvesting/BULK-HARVEST-FIX.md)** - Bulk author harvest fixes
