@@ -159,6 +159,79 @@ export interface EnrichWikidataResult {
 }
 
 // =================================================================================
+// JIT Enrichment Helpers
+// =================================================================================
+
+/**
+ * Check if author needs enrichment and is eligible for JIT enrichment
+ *
+ * Returns true if:
+ * 1. Author has Wikidata ID (required for enrichment)
+ * 2. Never been enriched OR last enrichment >90 days ago
+ * 3. Not recently attempted (within 24 hours) - prevents retry storms
+ * 4. Haven't hit retry limit (max 5 attempts)
+ *
+ * @param author - Author record from database
+ * @returns boolean indicating if enrichment should be triggered
+ */
+export function needsEnrichment(author: any): boolean {
+  // Must have Wikidata ID to enrich
+  if (!author.wikidata_id) {
+    return false;
+  }
+
+  // Check if never enriched
+  if (!author.wikidata_enriched_at) {
+    // Avoid retry storms - don't retry if attempted in last 24 hours
+    if (author.last_enrichment_attempt_at) {
+      const hoursSinceAttempt = (Date.now() - new Date(author.last_enrichment_attempt_at).getTime()) / (1000 * 60 * 60);
+      if (hoursSinceAttempt < 24) {
+        return false;
+      }
+    }
+
+    // Check retry limit (max 5 attempts for bad data)
+    if (author.enrichment_attempt_count >= 5) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // Check if enrichment is stale (>90 days)
+  const daysSinceEnrichment = (Date.now() - new Date(author.wikidata_enriched_at).getTime()) / (1000 * 60 * 60 * 24);
+  return daysSinceEnrichment > 90;
+}
+
+/**
+ * Update author view tracking and compute heat score
+ *
+ * Heat score = (view_count * 10) + (book_count * 0.5) + recency_boost
+ * Recency boost: +50 if viewed in last 7 days, +20 if in last 30 days
+ *
+ * @param sql - Database connection
+ * @param author_key - Author key to update
+ */
+export async function trackAuthorView(sql: Sql, author_key: string): Promise<void> {
+  await sql`
+    UPDATE enriched_authors
+    SET
+      last_viewed_at = NOW(),
+      view_count = COALESCE(view_count, 0) + 1,
+      heat_score = (
+        (COALESCE(view_count, 0) + 1) * 10 +
+        COALESCE(book_count, 0) * 0.5 +
+        CASE
+          WHEN NOW() - INTERVAL '7 days' < COALESCE(last_viewed_at, '1970-01-01') THEN 50
+          WHEN NOW() - INTERVAL '30 days' < COALESCE(last_viewed_at, '1970-01-01') THEN 20
+          ELSE 0
+        END
+      )
+    WHERE author_key = ${author_key}
+  `;
+}
+
+// =================================================================================
 // Service Functions
 // =================================================================================
 
@@ -290,7 +363,12 @@ export async function getAuthorDetails(
       goodreads_author_ids,
       author_photo_url,
       book_count,
-      wikidata_enriched_at
+      wikidata_enriched_at,
+      last_viewed_at,
+      view_count,
+      heat_score,
+      last_enrichment_attempt_at,
+      enrichment_attempt_count
     FROM enriched_authors
     WHERE author_key = ${authorKey}
     LIMIT 1

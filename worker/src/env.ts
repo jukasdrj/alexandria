@@ -33,6 +33,7 @@ export interface Env {
   ENRICHMENT_QUEUE: Queue;
   COVER_QUEUE: Queue;
   BACKFILL_QUEUE: Queue;
+  AUTHOR_QUEUE: Queue;
 
   // Environment variables (from wrangler.jsonc vars)
   DB_MAX_CONNECTIONS: string;

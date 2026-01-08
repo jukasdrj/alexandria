@@ -536,3 +536,295 @@ export async function processEnrichmentQueue(
 
   return results;
 }
+
+// =================================================================================
+// Author Queue Handler
+// =================================================================================
+
+export interface AuthorQueueMessage {
+  type: 'JIT_ENRICH';
+  priority: 'low' | 'medium' | 'high';
+  author_key: string;
+  wikidata_id: string;
+  triggered_by: 'view' | 'search' | 'manual';
+}
+
+export interface AuthorQueueResults {
+  processed: number;
+  enriched: number;
+  failed: number;
+  quota_blocked: number;
+  errors: Array<{ author_key: string; error: string }>;
+}
+
+/**
+ * Process author enrichment queue
+ *
+ * Handles Just-in-Time (JIT) author enrichment triggered by views/searches.
+ * Enforces strict quota limits to protect book enrichment pipeline.
+ *
+ * Circuit breakers:
+ * - 85% daily quota: halt ALL author enrichment
+ * - 70% daily quota: halt background author enrichment (allow JIT only if urgent)
+ *
+ * @param batch - Message batch from Cloudflare Queue
+ * @param env - Worker environment bindings
+ * @returns Processing results with statistics
+ */
+export async function processAuthorQueue(
+  batch: MessageBatch<AuthorQueueMessage>,
+  env: Env
+): Promise<AuthorQueueResults> {
+  const logger = Logger.forQueue(env, 'alexandria-author-queue', batch.messages.length);
+
+  logger.info('[AuthorQueue] Processing started', {
+    queueName: batch.queue,
+    messageCount: batch.messages.length,
+  });
+
+  // Create postgres connection
+  const sql = postgres(env.HYPERDRIVE.connectionString, {
+    max: 1,
+    fetch_types: false,
+    prepare: false,
+  });
+
+  const results: AuthorQueueResults = {
+    processed: 0,
+    enriched: 0,
+    failed: 0,
+    quota_blocked: 0,
+    errors: [],
+  };
+
+  try {
+    // Initialize quota manager
+    const quotaManager = new QuotaManager(env.QUOTA_KV);
+    const quotaStatus = await quotaManager.getQuotaStatus();
+
+    // Circuit breaker: 85% quota - halt ALL author enrichment
+    if (quotaStatus.usage_percentage >= 0.85) {
+      logger.warn('[AuthorQueue] Circuit breaker at 85% quota - rejecting all author enrichment', {
+        usage: quotaStatus.used,
+        limit: quotaStatus.daily_limit,
+        percentage: quotaStatus.usage_percentage
+      });
+
+      // Nack all messages to retry later (when quota resets)
+      for (const message of batch.messages) {
+        message.retry();
+        results.quota_blocked++;
+      }
+
+      return results;
+    }
+
+    // Circuit breaker: 70% quota - allow only high-priority JIT requests
+    const isQuotaTight = quotaStatus.usage_percentage >= 0.70;
+    if (isQuotaTight) {
+      logger.warn('[AuthorQueue] Circuit breaker at 70% quota - prioritizing only high-priority requests', {
+        usage: quotaStatus.used,
+        limit: quotaStatus.daily_limit,
+        percentage: quotaStatus.usage_percentage
+      });
+    }
+
+    // Collect unique authors to enrich (deduplicate within batch)
+    const authorsToEnrich = new Map<string, {
+      author_key: string;
+      wikidata_id: string;
+      priority: 'low' | 'medium' | 'high';
+      message: QueueMessage<AuthorQueueMessage>;
+    }>();
+
+    for (const message of batch.messages) {
+      const { author_key, wikidata_id, priority } = message.body;
+
+      // Skip low/medium priority if quota is tight (>70%)
+      if (isQuotaTight && priority !== 'high') {
+        logger.debug('[AuthorQueue] Skipping low-priority request due to quota pressure', {
+          author_key,
+          priority,
+          quota_percentage: quotaStatus.usage_percentage
+        });
+        message.retry(); // Retry later when quota resets
+        results.quota_blocked++;
+        continue;
+      }
+
+      // Deduplicate: if author already in batch, upgrade priority
+      if (authorsToEnrich.has(author_key)) {
+        const existing = authorsToEnrich.get(author_key)!;
+        const priorityOrder = { low: 0, medium: 1, high: 2 };
+        if (priorityOrder[priority] > priorityOrder[existing.priority]) {
+          existing.priority = priority;
+        }
+      } else {
+        authorsToEnrich.set(author_key, {
+          author_key,
+          wikidata_id,
+          priority,
+          message
+        });
+      }
+    }
+
+    if (authorsToEnrich.size === 0) {
+      logger.info('[AuthorQueue] No authors to process after quota filtering');
+      return results;
+    }
+
+    // Extract Q-IDs for batch Wikidata fetch
+    const qids = Array.from(authorsToEnrich.values()).map(a => a.wikidata_id);
+
+    logger.info('[AuthorQueue] Fetching from Wikidata', {
+      author_count: qids.length,
+      quota_percentage: quotaStatus.usage_percentage
+    });
+
+    // Import Wikidata client (avoid circular dependency)
+    const { fetchWikidataMultipleBatches } = await import('../../services/wikidata-client.js');
+    const wikidataResults = await fetchWikidataMultipleBatches(qids);
+
+    logger.info('[AuthorQueue] Wikidata fetch complete', {
+      fetched: wikidataResults.size,
+      requested: qids.length
+    });
+
+    // Process each author
+    for (const [author_key, { wikidata_id, message }] of authorsToEnrich) {
+      try {
+        const data = wikidataResults.get(wikidata_id);
+
+        // Mark attempt regardless of success
+        await sql`
+          UPDATE enriched_authors
+          SET
+            last_enrichment_attempt_at = NOW(),
+            enrichment_attempt_count = COALESCE(enrichment_attempt_count, 0) + 1
+          WHERE author_key = ${author_key}
+        `;
+
+        if (data) {
+          // Build update fields
+          const fieldsUpdated: string[] = [];
+          if (data.gender) fieldsUpdated.push('gender');
+          if (data.gender_qid) fieldsUpdated.push('gender_qid');
+          if (data.citizenship) fieldsUpdated.push('nationality');
+          if (data.citizenship_qid) fieldsUpdated.push('citizenship_qid');
+          if (data.birth_year) fieldsUpdated.push('birth_year');
+          if (data.death_year) fieldsUpdated.push('death_year');
+          if (data.birth_place) fieldsUpdated.push('birth_place');
+          if (data.birth_place_qid) fieldsUpdated.push('birth_place_qid');
+          if (data.birth_country) fieldsUpdated.push('birth_country');
+          if (data.birth_country_qid) fieldsUpdated.push('birth_country_qid');
+          if (data.death_place) fieldsUpdated.push('death_place');
+          if (data.death_place_qid) fieldsUpdated.push('death_place_qid');
+          if (data.image_url) fieldsUpdated.push('author_photo_url');
+
+          // Update author with enriched data
+          await sql`
+            UPDATE enriched_authors
+            SET
+              gender = COALESCE(${data.gender ?? null}, gender),
+              gender_qid = COALESCE(${data.gender_qid ?? null}, gender_qid),
+              nationality = COALESCE(${data.citizenship ?? null}, nationality),
+              citizenship_qid = COALESCE(${data.citizenship_qid ?? null}, citizenship_qid),
+              birth_year = COALESCE(${data.birth_year ?? null}, birth_year),
+              death_year = COALESCE(${data.death_year ?? null}, death_year),
+              birth_place = COALESCE(${data.birth_place ?? null}, birth_place),
+              birth_place_qid = COALESCE(${data.birth_place_qid ?? null}, birth_place_qid),
+              birth_country = COALESCE(${data.birth_country ?? null}, birth_country),
+              birth_country_qid = COALESCE(${data.birth_country_qid ?? null}, birth_country_qid),
+              death_place = COALESCE(${data.death_place ?? null}, death_place),
+              death_place_qid = COALESCE(${data.death_place_qid ?? null}, death_place_qid),
+              author_photo_url = COALESCE(${data.image_url ?? null}, author_photo_url),
+              wikidata_enriched_at = NOW(),
+              enrichment_source = 'wikidata_jit',
+              updated_at = NOW()
+            WHERE author_key = ${author_key}
+          `;
+
+          results.enriched++;
+          logger.info('[AuthorQueue] Author enriched', {
+            author_key,
+            wikidata_id,
+            fields_updated: fieldsUpdated.length
+          });
+        } else {
+          // No data from Wikidata - mark as attempted (empty)
+          await sql`
+            UPDATE enriched_authors
+            SET
+              wikidata_enriched_at = NOW(),
+              enrichment_source = 'wikidata_jit_empty',
+              updated_at = NOW()
+            WHERE author_key = ${author_key}
+          `;
+
+          logger.debug('[AuthorQueue] No Wikidata data found', {
+            author_key,
+            wikidata_id
+          });
+        }
+
+        message.ack();
+        results.processed++;
+
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error('[AuthorQueue] Author enrichment failed', {
+          author_key,
+          wikidata_id,
+          error: errorMsg
+        });
+
+        results.failed++;
+        results.errors.push({ author_key, error: errorMsg });
+        message.retry(); // Retry on genuine errors
+      }
+    }
+
+    logger.info('[AuthorQueue] Processing complete', {
+      processed: results.processed,
+      enriched: results.enriched,
+      failed: results.failed,
+      quota_blocked: results.quota_blocked
+    });
+
+    // Track analytics for author enrichment
+    if (env.ENABLE_ANALYTICS === 'true' && env.ANALYTICS) {
+      try {
+        env.ANALYTICS.writeDataPoint({
+          blobs: [
+            'author_enrichment',
+            'jit',
+            quotaStatus.usage_percentage >= 0.70 ? 'quota_tight' : 'normal'
+          ],
+          doubles: [
+            results.processed,
+            results.enriched,
+            results.failed,
+            results.quota_blocked,
+            quotaStatus.usage_percentage
+          ],
+          indexes: [`batch_size:${batch.messages.length}`]
+        });
+      } catch (analyticsError) {
+        logger.warn('[AuthorQueue] Failed to write analytics', {
+          error: analyticsError instanceof Error ? analyticsError.message : String(analyticsError)
+        });
+      }
+    }
+
+  } catch (error) {
+    logger.error('[AuthorQueue] Queue processing error', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  } finally {
+    await sql.end();
+  }
+
+  return results;
+}

@@ -23,6 +23,8 @@ import {
   enrichAuthorBibliography,
   enrichWikidataAuthors,
   getEnrichmentStatus,
+  trackAuthorView,
+  needsEnrichment,
 } from '../services/author-service.js';
 import { resolveIdentifier } from '../../services/identifier-resolver.js';
 
@@ -506,6 +508,7 @@ app.openapi(authorDetailsRoute, async (c) => {
 
   try {
     const sql = c.get('sql');
+    const logger = c.get('logger');
     const params = c.req.valid('param');
 
     const result = await getAuthorDetails({ sql, env: c.env }, params);
@@ -517,8 +520,41 @@ app.openapi(authorDetailsRoute, async (c) => {
       }, 404);
     }
 
+    const author = result.data;
+
+    // Track view asynchronously (don't wait)
+    trackAuthorView(sql, author.author_key).catch((err) => {
+      logger?.warn('[AuthorDetails] Failed to track view', {
+        author_key: author.author_key,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
+
+    // Check if enrichment needed (JIT trigger)
+    if (needsEnrichment(author)) {
+      logger?.info('[AuthorDetails] Triggering JIT enrichment', {
+        author_key: author.author_key,
+        wikidata_id: author.wikidata_id,
+        last_enriched: author.wikidata_enriched_at
+      });
+
+      // Queue enrichment request (don't wait - fire and forget)
+      c.env.AUTHOR_QUEUE.send({
+        type: 'JIT_ENRICH',
+        priority: 'medium',
+        author_key: author.author_key,
+        wikidata_id: author.wikidata_id,
+        triggered_by: 'view'
+      }).catch((err) => {
+        logger?.error('[AuthorDetails] Failed to queue enrichment', {
+          author_key: author.author_key,
+          error: err instanceof Error ? err.message : String(err)
+        });
+      });
+    }
+
     return c.json({
-      ...result.data,
+      ...author,
       query_duration_ms: Date.now() - startTime
     });
   } catch (error) {

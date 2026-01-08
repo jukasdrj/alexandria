@@ -29,7 +29,7 @@ import { handleScheduledWikidataEnrichment } from './routes/authors.js';
 import backfillAsyncRoutes from './routes/backfill-async.js';
 
 // Queue handlers (migrated to TypeScript)
-import { processCoverQueue, processEnrichmentQueue } from './services/queue-handlers.js';
+import { processCoverQueue, processEnrichmentQueue, processAuthorQueue } from './services/queue-handlers.js';
 import { processBackfillJob } from './services/async-backfill.js';
 
 // =================================================================================
@@ -250,6 +250,8 @@ export default {
         return await processCoverQueue(batch as MessageBatch<CoverQueueMessage>, env);
       case 'alexandria-enrichment-queue':
         return await processEnrichmentQueue(batch as MessageBatch<EnrichmentQueueMessage>, env);
+      case 'alexandria-author-queue':
+        return await processAuthorQueue(batch as any, env);
       case 'alexandria-backfill-queue':
         // Process each message (batch_size is 1 for backfill queue)
         for (const message of batch.messages) {
