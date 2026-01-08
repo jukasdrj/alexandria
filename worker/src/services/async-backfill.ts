@@ -21,6 +21,7 @@ import type { Env } from '../env.js';
 import type { Logger } from '../../lib/logger.js';
 import { generateHybridBackfillList } from './hybrid-backfill.js';
 import { persistGeminiResults } from './gemini-persist.js';
+import { splitResolvedCandidates } from './types/backfill.js';
 import postgres from 'postgres';
 
 // =================================================================================
@@ -293,8 +294,27 @@ export async function processBackfillJob(
       await sql.end();
     }
 
-    // Step 3: Extract ISBNs from candidates
-    const isbnsToEnrich = hybridResult.candidates.map(c => c.isbn).filter(isbn => isbn);
+    // Step 3: Split candidates into enrichment-ready (with ISBN) and synthetic-only (without ISBN)
+    const { forEnrichment, forSynthetic, validationErrors } = splitResolvedCandidates(
+      hybridResult.candidates
+    );
+
+    if (validationErrors.length > 0) {
+      logger.warn('[AsyncBackfill] Some candidates failed validation', {
+        job_id,
+        failed_count: validationErrors.length,
+        errors: validationErrors.slice(0, 5), // Log first 5
+      });
+    }
+
+    logger.info('[AsyncBackfill] Candidate split complete', {
+      job_id,
+      for_enrichment: forEnrichment.length,
+      for_synthetic_only: forSynthetic.length,
+      validation_errors: validationErrors.length,
+    });
+
+    const isbnsToEnrich = forEnrichment.map(c => c.isbn);
 
     if (isbnsToEnrich.length === 0) {
       logger.warn('[AsyncBackfill] No ISBNs to enrich', { job_id, year, month });

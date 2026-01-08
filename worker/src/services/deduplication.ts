@@ -12,6 +12,7 @@
 
 import type { Sql } from 'postgres';
 import type { Logger } from '../../lib/logger.js';
+import type { EnrichmentCandidate } from './types/backfill.js';
 
 // =================================================================================
 // Types
@@ -66,10 +67,14 @@ export interface DeduplicationResult {
  */
 export async function deduplicateISBNs(
   sql: Sql,
-  candidates: ISBNCandidate[],
+  candidates: EnrichmentCandidate[] | ISBNCandidate[],
   logger: Logger
 ): Promise<DeduplicationResult> {
   const startTime = Date.now();
+
+  // Filter out candidates without ISBNs (for ISBNCandidate[] with optional ISBN)
+  // EnrichmentCandidate[] already has required ISBN
+  const validCandidates = candidates.filter((c): c is ISBNCandidate & { isbn: string } => !!c.isbn);
 
   const result: DeduplicationResult = {
     toEnrich: [],
@@ -77,7 +82,7 @@ export async function deduplicateISBNs(
     relatedMatches: [],
     fuzzyMatches: [],
     stats: {
-      total: candidates.length,
+      total: validCandidates.length,
       unique: 0,
       duplicate_exact: 0,
       duplicate_related: 0,
@@ -85,16 +90,16 @@ export async function deduplicateISBNs(
     },
   };
 
-  if (candidates.length === 0) {
+  if (validCandidates.length === 0) {
     return result;
   }
 
-  logger.info('[Dedup] Starting deduplication', { total: candidates.length });
+  logger.info('[Dedup] Starting deduplication', { total: validCandidates.length });
 
   // Stage 1: Exact ISBN match
   const { remaining: afterExact, found: exactFound } = await deduplicateExactMatch(
     sql,
-    candidates,
+    validCandidates,
     logger
   );
   result.exactMatches = exactFound;
@@ -161,9 +166,9 @@ export async function deduplicateISBNs(
 
 async function deduplicateExactMatch(
   sql: Sql,
-  candidates: ISBNCandidate[],
+  candidates: Array<ISBNCandidate & { isbn: string }>,
   logger: Logger
-): Promise<{ remaining: ISBNCandidate[]; found: string[] }> {
+): Promise<{ remaining: Array<ISBNCandidate & { isbn: string }>; found: string[] }> {
   const isbns = candidates.map((c) => c.isbn);
 
   try {
@@ -192,9 +197,9 @@ async function deduplicateExactMatch(
 
 async function deduplicateRelatedISBNs(
   sql: Sql,
-  candidates: ISBNCandidate[],
+  candidates: Array<ISBNCandidate & { isbn: string }>,
   logger: Logger
-): Promise<{ remaining: ISBNCandidate[]; found: Array<{ isbn: string; matched_via: string }> }> {
+): Promise<{ remaining: Array<ISBNCandidate & { isbn: string }>; found: Array<{ isbn: string; matched_via: string }> }> {
   const isbns = candidates.map((c) => c.isbn);
   const found: Array<{ isbn: string; matched_via: string }> = [];
 
@@ -240,10 +245,10 @@ const FUZZY_SIMILARITY_THRESHOLD = 0.6; // 60% similarity for title+author combo
 
 async function deduplicateFuzzyMatch(
   sql: Sql,
-  candidates: ISBNCandidate[],
+  candidates: Array<ISBNCandidate & { isbn: string }>,
   logger: Logger
 ): Promise<{
-  remaining: ISBNCandidate[];
+  remaining: Array<ISBNCandidate & { isbn: string }>;
   found: Array<{ isbn: string; matched_isbn: string; similarity: number }>;
 }> {
   const found: Array<{ isbn: string; matched_isbn: string; similarity: number }> = [];

@@ -196,7 +196,7 @@ async function storeExternalBookData(sql: Sql, bookData: ExternalBookData, logge
             name: bookData.authors[i],
             primary_provider: bookData.provider,
             openlibrary_author_id: authorKeys[i],
-          });
+          }, logger);
         }
         console.log(`[Smart Enrich] ✓ Enriched ${bookData.authors.length} author(s)`);
       }

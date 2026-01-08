@@ -20,7 +20,7 @@ import type { Env } from '../env.js';
 import type { Logger } from '../../lib/logger.js';
 import { generateCuratedBookList, type GenerationStats } from './gemini-backfill.js';
 import { batchResolveISBNs, type ISBNResolutionResult } from './isbn-resolution.js';
-import type { ISBNCandidate } from './deduplication.js';
+import type { ResolvedCandidate } from './types/backfill.js';
 
 // =================================================================================
 // Types
@@ -47,7 +47,7 @@ export interface HybridBackfillStats extends GenerationStats {
 }
 
 export interface HybridBackfillResult {
-  candidates: ISBNCandidate[];
+  candidates: ResolvedCandidate[];
   stats: HybridBackfillStats;
   resolutions: ISBNResolutionResult[];
 }
@@ -141,8 +141,8 @@ export async function generateHybridBackfillList(
   }
 
   const booksMetadata = metadataCandidates.map(candidate => ({
-    title: candidate.title,
-    author: candidate.authors[0] || '',
+    title: candidate.title!, // Required from Gemini (validated during generation)
+    author: (candidate.authors?.[0] || candidate.author)!, // Required from Gemini
   }));
 
   logger.info('[HybridBackfill] Starting ISBN resolution', {
@@ -154,31 +154,36 @@ export async function generateHybridBackfillList(
   // Step 3: Merge Gemini metadata with resolved ISBNs
   // IMPORTANT: Include candidates WITHOUT ISBNs for staged enrichment
   // When ISBNdb quota exhausted, we still want to save Gemini metadata
-  const enrichedCandidates: ISBNCandidate[] = [];
+  const enrichedCandidates: ResolvedCandidate[] = [];
 
   for (let i = 0; i < metadataCandidates.length; i++) {
     const metadata = metadataCandidates[i];
     const resolution = resolutions[i];
 
     // Always add candidate - even without ISBN (for staged enrichment)
-    enrichedCandidates.push({
-      isbn: resolution.isbn || undefined, // undefined if ISBNdb failed (quota exhausted)
-      title: metadata.title,
+    const resolved: ResolvedCandidate = {
+      // GeminiBookMetadata fields
+      title: metadata.title!, // Required from Gemini (validated during generation)
+      author: metadata.author!, // Required from Gemini
       authors: metadata.authors,
-      author: metadata.authors[0], // Add single author field for persistence
       publisher: metadata.publisher,
       format: metadata.format,
       year: metadata.year,
       significance: metadata.significance,
-      source: resolution.isbn
-        ? `${metadata.source}-isbndb-${resolution.confidence}`
-        : `${metadata.source}-no-isbn`,
-    });
+      // Resolution fields
+      isbn: resolution.isbn || undefined, // undefined if ISBNdb failed (quota exhausted)
+      resolution_confidence: resolution.confidence === 'not_found' ? 'not_found' :
+        resolution.confidence === 'high' ? 'high' :
+        resolution.confidence === 'medium' ? 'medium' : 'low',
+      resolution_source: resolution.isbn ? 'isbndb' : undefined,
+    };
+
+    enrichedCandidates.push(resolved);
 
     if (!resolution.isbn) {
       logger.debug('[HybridBackfill] ISBN not resolved - saving Gemini metadata only', {
         title: metadata.title,
-        author: metadata.authors[0],
+        author: metadata.authors?.[0] || metadata.author,
         confidence: resolution.confidence,
       });
     }

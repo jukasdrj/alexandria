@@ -16,7 +16,7 @@
 
 import type postgres from 'postgres';
 import type { Logger } from '../../lib/logger.js';
-import type { ISBNCandidate } from './deduplication.js';
+import type { ResolvedCandidate } from './types/backfill.js';
 
 // =================================================================================
 // Types
@@ -46,14 +46,14 @@ export interface GeminiPersistStats {
  * - Allows searching for books immediately (title/author search)
  * - Can enhance later with ISBNdb when quota available
  *
- * @param candidates - ISBNCandidate array from hybrid backfill (Gemini + ISBNdb resolution)
+ * @param candidates - ResolvedCandidate array from hybrid backfill (Gemini + ISBNdb resolution)
  * @param sql - PostgreSQL connection
  * @param logger - Logger instance
  * @param source - Source identifier (e.g., 'backfill-2024-01')
  * @returns Statistics about what was saved
  */
 export async function persistGeminiResults(
-  candidates: ISBNCandidate[],
+  candidates: ResolvedCandidate[],
   sql: postgres.Sql,
   logger: Logger,
   source: string
@@ -75,6 +75,21 @@ export async function persistGeminiResults(
   // Process each candidate
   for (const candidate of candidates) {
     try {
+      // Validate candidate has required fields
+      if (!candidate.title || !candidate.author) {
+        logger.warn('[GeminiPersist] Skipping candidate without title/author', {
+          isbn: candidate.isbn,
+          has_title: !!candidate.title,
+          has_author: !!candidate.author,
+        });
+        stats.failed++;
+        stats.errors.push({
+          isbn: candidate.isbn || 'unknown',
+          error: 'Missing title or author',
+        });
+        continue;
+      }
+
       // Create synthetic work_key from title (normalized)
       const workKey = generateSyntheticWorkKey(candidate.title, candidate.author);
 
