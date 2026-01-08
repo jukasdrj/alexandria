@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import type { AppBindings } from '../env.js';
+import { Logger } from '../../lib/logger.js';
 import {
   TopAuthorsQuerySchema,
   AuthorKeyParamSchema,
@@ -578,7 +579,9 @@ app.openapi(authorDetailsRoute, async (c) => {
  */
 export async function handleScheduledWikidataEnrichment(env: any): Promise<void> {
   const startTime = Date.now();
-  console.log('[WikidataEnrich:Scheduled] Starting scheduled Wikidata enrichment');
+  const logger = Logger.forScheduled(env);
+
+  logger.info('Wikidata enrichment: Starting scheduled enrichment');
 
   // Create database connection
   const sql = (await import('postgres')).default(env.HYPERDRIVE.connectionString, {
@@ -608,29 +611,32 @@ export async function handleScheduledWikidataEnrichment(env: any): Promise<void>
     const authors = authorsResult as unknown as { author_key: string; name: string }[];
 
     if (authors.length === 0) {
-      console.log('[WikidataEnrich:Scheduled] No authors found needing Wikidata enrichment');
+      logger.info('Wikidata enrichment: No authors found needing enrichment');
       return;
     }
 
-    console.log('[WikidataEnrich:Scheduled] Found authors to enrich', { count: authors.length });
+    logger.info('Wikidata enrichment: Found authors to enrich', { count: authors.length });
 
     // Call enrichment service
     const result = await enrichWikidataAuthors(
-      { sql, env, logger: console },
+      { sql, env, logger },
       {
         limit: authors.length,
         skip_existing: true
       }
     );
 
-    console.log('[WikidataEnrich:Scheduled] Enrichment complete', {
+    logger.info('Wikidata enrichment: Enrichment complete', {
       enriched: result.data?.enriched || 0,
       failed: result.data?.failed || 0,
       duration_ms: Date.now() - startTime,
     });
 
   } catch (error) {
-    console.error('[WikidataEnrich:Scheduled] Error during scheduled enrichment:', error);
+    logger.error('Wikidata enrichment: Error during scheduled enrichment', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     throw error;
   } finally {
     await sql.end();

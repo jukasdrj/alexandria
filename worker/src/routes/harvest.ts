@@ -15,7 +15,7 @@ import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 import { QuotaManager } from '../services/quota-manager.js';
 import { parseHarvestConfig, buildISBNPrefixFilter } from '../lib/harvest-config.js';
 import { batchUpdateCoverUrls } from '../services/batch-operations.js';
-import type { Logger } from '../../lib/logger.js';
+import { Logger } from '../../lib/logger.js';
 import { HarvestState } from '../services/harvest-state.js';
 import { deduplicateISBNs } from '../services/deduplication.js';
 import { enrichEdition } from '../services/enrichment-service.js';
@@ -344,25 +344,27 @@ app.openapi(backfillStatusRoute, async (c) => {
  */
 export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
   const startTime = Date.now();
-  console.log('[CoverHarvest:Scheduled] Starting scheduled harvest');
+  const logger = Logger.forScheduled(env);
+
+  logger.info('Cover harvest: Starting scheduled harvest');
 
   // Parse harvest configuration
   const harvestConfig = parseHarvestConfig(env);
 
   // Initialize QuotaManager
-  const quotaManager = new QuotaManager(env.QUOTA_KV);
+  const quotaManager = new QuotaManager(env.QUOTA_KV, logger);
 
   // Check quota before starting
   const quotaCheck = await quotaManager.shouldAllowOperation('cron', 1);
   if (!quotaCheck.allowed) {
-    console.warn('[CoverHarvest:Scheduled] Quota check failed, skipping', {
+    logger.warn('Cover harvest: Quota check failed, skipping', {
       reason: quotaCheck.reason,
       status: quotaCheck.status,
     });
     return;
   }
 
-  console.log('[CoverHarvest:Scheduled] Quota check passed', {
+  logger.info('Cover harvest: Quota check passed', {
     used_today: quotaCheck.status.used_today,
     remaining: quotaCheck.status.buffer_remaining,
     limit: quotaCheck.status.limit,
@@ -402,11 +404,11 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
     const isbns = (editionsResult as unknown as { isbn: string }[]).map(row => row.isbn);
 
     if (isbns.length === 0) {
-      console.log('[CoverHarvest:Scheduled] No editions found needing covers');
+      logger.info('Cover harvest: No editions found needing covers');
       return;
     }
 
-    console.log('[CoverHarvest:Scheduled] Found editions to process', { count: isbns.length });
+    logger.info('Cover harvest: Found editions to process', { count: isbns.length });
 
     // Fetch from ISBNdb (single API call for up to 1000 ISBNs)
     const batchData = await fetchISBNdbBatch(isbns, env);
@@ -438,14 +440,7 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
     }
 
     // Batch update all editions
-    const simpleLogger: Logger = {
-      info: (msg: string, meta?: unknown) => console.log(`[INFO] ${msg}`, meta),
-      error: (msg: string, meta?: unknown) => console.error(`[ERROR] ${msg}`, meta),
-      warn: (msg: string, meta?: unknown) => console.warn(`[WARN] ${msg}`, meta),
-      debug: (msg: string, meta?: unknown) => console.debug(`[DEBUG] ${msg}`, meta),
-    };
-
-    const batchResult = await batchUpdateCoverUrls(sql, updates, simpleLogger);
+    const batchResult = await batchUpdateCoverUrls(sql, updates, logger);
 
     // Queue cover downloads
     for (const update of updates) {
@@ -458,9 +453,10 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
         });
         coversQueued++;
       } catch (error) {
-        console.error('[CoverHarvest:Scheduled] Queue failed', {
+        logger.error('Cover harvest: Queue failed', {
           isbn: update.isbn,
           error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
         });
       }
     }
@@ -468,7 +464,7 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
     // Get updated quota status for logging
     const updatedQuota = await quotaManager.getQuotaStatus();
 
-    console.log('[CoverHarvest:Scheduled] Complete', {
+    logger.info('Cover harvest: Complete', {
       isbns_queried: isbns.length,
       found_in_isbndb: batchData.size,
       editions_updated: batchResult.rows_affected,
@@ -482,8 +478,9 @@ export async function handleScheduledCoverHarvest(env: Env): Promise<void> {
     });
 
   } catch (error) {
-    console.error('[CoverHarvest:Scheduled] Failed', {
+    logger.error('Cover harvest: Failed', {
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
     });
   } finally {
     await sql.end();
