@@ -11,6 +11,8 @@
  * Uses Cloudflare KV for atomic operations and distributed coordination.
  */
 
+import type { Logger } from '../../lib/logger.js';
+
 export interface QuotaStatus {
   used_today: number;
   remaining: number;
@@ -29,13 +31,15 @@ export interface QuotaCheckResult {
 
 export class QuotaManager {
   private kv: KVNamespace;
+  private logger: Logger;
   private readonly DAILY_LIMIT = 15000; // ISBNdb Premium quota
   private readonly SAFETY_BUFFER = 2000; // Keep 2K calls in reserve (use 13K max)
   private readonly QUOTA_KEY = 'isbndb_daily_calls';
   private readonly RESET_KEY = 'isbndb_quota_last_reset';
 
-  constructor(kv: KVNamespace) {
+  constructor(kv: KVNamespace, logger: Logger) {
     this.kv = kv;
+    this.logger = logger;
   }
 
   /**
@@ -87,7 +91,11 @@ export class QuotaManager {
         status: finalStatus
       };
     } catch (error) {
-      console.error('QuotaManager.checkQuota error:', error);
+      this.logger.error('QuotaManager.checkQuota error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        requestCount
+      });
       // On KV failure, fail closed (deny quota) to be conservative
       return {
         allowed: false,
@@ -123,7 +131,11 @@ export class QuotaManager {
 
       return true;
     } catch (error) {
-      console.error('QuotaManager.reserveQuota error:', error);
+      this.logger.error('QuotaManager.reserveQuota error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        requestCount
+      });
       // On KV failure, fail closed (deny quota)
       return false;
     }
@@ -141,7 +153,10 @@ export class QuotaManager {
       const currentUsage = await this.kv.get<number>(this.QUOTA_KEY, 'json') || 0;
       return currentUsage;
     } catch (error) {
-      console.error('QuotaManager.getTotalUsage error:', error);
+      this.logger.error('QuotaManager.getTotalUsage error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       // On KV failure, return 0 to be conservative (will show full quota available)
       return 0;
     }
@@ -176,7 +191,10 @@ export class QuotaManager {
         can_make_calls: bufferRemaining > 0
       };
     } catch (error) {
-      console.error('QuotaManager.getQuotaStatus error:', error);
+      this.logger.error('QuotaManager.getQuotaStatus error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       // Return fallback status on KV failure
       return this.getFallbackStatus();
     }
@@ -194,7 +212,11 @@ export class QuotaManager {
       const newUsage = currentUsage + callCount;
       await this.kv.put(this.QUOTA_KEY, JSON.stringify(newUsage));
     } catch (error) {
-      console.error('QuotaManager.recordApiCall error:', error);
+      this.logger.error('QuotaManager.recordApiCall error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        callCount
+      });
       // Log but don't throw - we don't want tracking failures to break API calls
     }
   }
@@ -221,7 +243,10 @@ export class QuotaManager {
         await this.kv.put(this.RESET_KEY, today);
       }
     } catch (error) {
-      console.error('QuotaManager.ensureDailyReset error:', error);
+      this.logger.error('QuotaManager.ensureDailyReset error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       // Continue without resetting - will retry on next call
     }
   }
@@ -230,7 +255,10 @@ export class QuotaManager {
     try {
       return await this.kv.get(this.RESET_KEY) || this.getTodayDateString();
     } catch (error) {
-      console.error('QuotaManager.getLastResetDate error:', error);
+      this.logger.error('QuotaManager.getLastResetDate error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       // Return today's date as fallback
       return this.getTodayDateString();
     }
@@ -325,8 +353,8 @@ export class QuotaManager {
  * Factory function to create QuotaManager instance
  * Use this in your Worker handlers to get a properly configured instance
  */
-export function createQuotaManager(kv: KVNamespace): QuotaManager {
-  return new QuotaManager(kv);
+export function createQuotaManager(kv: KVNamespace, logger: Logger): QuotaManager {
+  return new QuotaManager(kv, logger);
 }
 
 /**
@@ -337,7 +365,8 @@ export async function withQuotaGuard<T>(
   quotaManager: QuotaManager,
   operation: string,
   estimatedCalls: number,
-  apiCall: () => Promise<T>
+  apiCall: () => Promise<T>,
+  logger: Logger
 ): Promise<T> {
   // Check and reserve quota
   const quotaResult = await quotaManager.checkQuota(estimatedCalls, true);
@@ -350,13 +379,22 @@ export async function withQuotaGuard<T>(
     // Execute the API call
     const result = await apiCall();
 
-    console.log(`✅ ${operation} completed successfully. Quota used: ${estimatedCalls}. Remaining: ${quotaResult.status.buffer_remaining}`);
+    logger.info('ISBNdb API call completed successfully', {
+      operation,
+      quota_used: estimatedCalls,
+      quota_remaining: quotaResult.status.buffer_remaining
+    });
 
     return result;
   } catch (error) {
     // On failure, we could implement quota rollback here
     // For now, we keep the reservation to be conservative
-    console.error(`❌ ${operation} failed:`, error);
+    logger.error('ISBNdb API call failed', {
+      operation,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      quota_used: estimatedCalls
+    });
     throw error;
   }
 }
