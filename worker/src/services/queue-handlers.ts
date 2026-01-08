@@ -163,7 +163,11 @@ export async function processCoverQueue(
               ],
             });
           } catch (analyticsError) {
-            console.error('[CoverQueue] Analytics write failed:', analyticsError);
+            logger.error('Cover queue: Analytics write failed', {
+              error: analyticsError instanceof Error ? analyticsError.message : String(analyticsError),
+              stack: analyticsError instanceof Error ? analyticsError.stack : undefined,
+              isbn: normalizedISBN
+            });
           }
         }
 
