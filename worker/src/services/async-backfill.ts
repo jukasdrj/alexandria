@@ -250,13 +250,22 @@ export async function processBackfillJob(
       prepare: false,
     });
 
+    let persistStats = {
+      works_created: 0,
+      editions_created: 0,
+      works_updated: 0,
+      editions_updated: 0,
+      failed: 0,
+      errors: [] as Array<{ isbn: string; error: string }>,
+    };
+
     try {
       logger.info('[AsyncBackfill] Persisting Gemini results to database', {
         job_id,
         candidate_count: hybridResult.candidates.length,
       });
 
-      const persistStats = await persistGeminiResults(
+      persistStats = await persistGeminiResults(
         hybridResult.candidates,
         sql,
         logger,
@@ -322,12 +331,14 @@ export async function processBackfillJob(
         status: 'complete',
         progress: dry_run
           ? '[DRY-RUN] No ISBNs resolved - experiment complete'
-          : 'No ISBNs resolved - job complete',
+          : `No ISBNs resolved - ${persistStats.works_created} synthetic works created`,
         completed_at: new Date().toISOString(),
         duration_ms: Date.now() - startTime,
         stats: {
           gemini_books_generated: hybridResult.stats.total_books,
           isbns_resolved: 0,
+          gemini_works_created: persistStats.works_created,
+          gemini_editions_created: persistStats.editions_created,
           gemini_calls: hybridResult.stats.api_calls.gemini,
           isbndb_calls: hybridResult.stats.api_calls.isbndb,
           total_api_calls: hybridResult.stats.api_calls.total,

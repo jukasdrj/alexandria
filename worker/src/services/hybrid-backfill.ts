@@ -164,7 +164,7 @@ export async function generateHybridBackfillList(
     const resolved: ResolvedCandidate = {
       // GeminiBookMetadata fields
       title: metadata.title!, // Required from Gemini (validated during generation)
-      author: metadata.author!, // Required from Gemini
+      author: (metadata.authors?.[0] || metadata.author)!, // From Gemini (authors array or author field)
       authors: metadata.authors,
       publisher: metadata.publisher,
       format: metadata.format,
