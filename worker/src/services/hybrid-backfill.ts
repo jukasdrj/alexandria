@@ -152,21 +152,31 @@ export async function generateHybridBackfillList(
   const resolutions = await batchResolveISBNs(booksMetadata, apiKey, logger);
 
   // Step 3: Merge Gemini metadata with resolved ISBNs
+  // IMPORTANT: Include candidates WITHOUT ISBNs for staged enrichment
+  // When ISBNdb quota exhausted, we still want to save Gemini metadata
   const enrichedCandidates: ISBNCandidate[] = [];
 
   for (let i = 0; i < metadataCandidates.length; i++) {
     const metadata = metadataCandidates[i];
     const resolution = resolutions[i];
 
-    if (resolution.isbn) {
-      enrichedCandidates.push({
-        isbn: resolution.isbn,
-        title: metadata.title,
-        authors: metadata.authors,
-        source: `${metadata.source}-isbndb-${resolution.confidence}`,
-      });
-    } else {
-      logger.debug('[HybridBackfill] ISBN not resolved', {
+    // Always add candidate - even without ISBN (for staged enrichment)
+    enrichedCandidates.push({
+      isbn: resolution.isbn || undefined, // undefined if ISBNdb failed (quota exhausted)
+      title: metadata.title,
+      authors: metadata.authors,
+      author: metadata.authors[0], // Add single author field for persistence
+      publisher: metadata.publisher,
+      format: metadata.format,
+      year: metadata.year,
+      significance: metadata.significance,
+      source: resolution.isbn
+        ? `${metadata.source}-isbndb-${resolution.confidence}`
+        : `${metadata.source}-no-isbn`,
+    });
+
+    if (!resolution.isbn) {
+      logger.debug('[HybridBackfill] ISBN not resolved - saving Gemini metadata only', {
         title: metadata.title,
         author: metadata.authors[0],
         confidence: resolution.confidence,

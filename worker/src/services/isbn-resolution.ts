@@ -190,16 +190,28 @@ export async function resolveISBNViaTitle(
         };
       }
 
-      // Critical: Don't swallow auth/quota errors
-      if (response.status === 401 || response.status === 403) {
-        const errorMsg = `ISBNdb authentication failed (${response.status}). Check ISBNDB_API_KEY configuration.`;
-        logger.error('[ISBNResolution] Auth error', { title, author, status: response.status });
-        throw new Error(errorMsg);
+      // Quota exhaustion (429/403): Return not_found instead of throwing
+      // This allows staged enrichment to save Gemini metadata even when ISBNdb quota exhausted
+      if (response.status === 429 || response.status === 403) {
+        const isQuota = response.status === 403;
+        logger.warn(`[ISBNResolution] ISBNdb ${isQuota ? 'quota exhausted' : 'rate limited'} - proceeding without ISBN`, {
+          title,
+          author,
+          status: response.status,
+        });
+        return {
+          isbn: null,
+          confidence: 'not_found',
+          match_quality: 0.0,
+          matched_title: null,
+          source: 'isbndb',
+        };
       }
 
-      if (response.status === 429) {
-        const errorMsg = `ISBNdb rate limit exceeded (${response.status}). Quota may be exhausted.`;
-        logger.error('[ISBNResolution] Rate limit error', { title, author });
+      // Auth errors (401): Still throw - this is a configuration problem
+      if (response.status === 401) {
+        const errorMsg = `ISBNdb authentication failed (401). Check ISBNDB_API_KEY configuration.`;
+        logger.error('[ISBNResolution] Auth error', { title, author, status: response.status });
         throw new Error(errorMsg);
       }
 

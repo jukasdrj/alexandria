@@ -20,6 +20,8 @@
 import type { Env } from '../env.js';
 import type { Logger } from '../../lib/logger.js';
 import { generateHybridBackfillList } from './hybrid-backfill.js';
+import { persistGeminiResults } from './gemini-persist.js';
+import postgres from 'postgres';
 
 // =================================================================================
 // Types
@@ -42,6 +44,8 @@ export interface BackfillJobStatus {
     gemini_books_generated?: number;
     isbns_resolved?: number;
     isbn_resolution_rate?: number;
+    gemini_works_created?: number; // NEW: Synthetic works created from Gemini
+    gemini_editions_created?: number; // NEW: Minimal editions saved immediately
     isbns_sent_to_enrichment?: number;
     already_enriched?: number;
     editions_enriched?: number;
@@ -237,17 +241,59 @@ export async function processBackfillJob(
       resolution_rate: hybridResult.stats.isbn_resolution.resolution_rate,
     });
 
-    // Update status with Gemini stats
-    await updateJobStatus(env.QUOTA_KV, job_id, {
-      progress: `Resolved ${hybridResult.candidates.length} ISBNs, sending to enrichment queue...`,
-      stats: {
-        gemini_books_generated: hybridResult.stats.total_books,
-        isbns_resolved: hybridResult.candidates.length,
-        isbn_resolution_rate: hybridResult.stats.isbn_resolution.resolution_rate,
-      },
+    // Step 2: SAVE GEMINI RESULTS IMMEDIATELY (preserves expensive AI work)
+    // This happens BEFORE enrichment queue, so Gemini data is never lost
+    const sql = postgres(env.HYPERDRIVE.connectionString, {
+      max: 1,
+      fetch_types: false,
+      prepare: false,
     });
 
-    // Step 2: Extract ISBNs from candidates
+    try {
+      logger.info('[AsyncBackfill] Persisting Gemini results to database', {
+        job_id,
+        candidate_count: hybridResult.candidates.length,
+      });
+
+      const persistStats = await persistGeminiResults(
+        hybridResult.candidates,
+        sql,
+        logger,
+        `backfill-${year}-${month.toString().padStart(2, '0')}`
+      );
+
+      logger.info('[AsyncBackfill] Gemini results persisted', {
+        job_id,
+        works_created: persistStats.works_created,
+        editions_created: persistStats.editions_created,
+        failed: persistStats.failed,
+      });
+
+      // Update status with persistence stats
+      await updateJobStatus(env.QUOTA_KV, job_id, {
+        progress: `Saved ${persistStats.editions_created} Gemini editions, preparing ISBNdb enrichment...`,
+        stats: {
+          gemini_books_generated: hybridResult.stats.total_books,
+          isbns_resolved: hybridResult.candidates.length,
+          isbn_resolution_rate: hybridResult.stats.isbn_resolution.resolution_rate,
+          gemini_works_created: persistStats.works_created,
+          gemini_editions_created: persistStats.editions_created,
+        },
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('[AsyncBackfill] Failed to persist Gemini results', {
+        job_id,
+        error: errorMsg,
+      });
+
+      // Continue anyway - try to enrich even if persistence failed
+      // This maintains backward compatibility
+    } finally {
+      await sql.end();
+    }
+
+    // Step 3: Extract ISBNs from candidates
     const isbnsToEnrich = hybridResult.candidates.map(c => c.isbn).filter(isbn => isbn);
 
     if (isbnsToEnrich.length === 0) {

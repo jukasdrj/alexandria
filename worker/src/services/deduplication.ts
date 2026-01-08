@@ -18,9 +18,14 @@ import type { Logger } from '../../lib/logger.js';
 // =================================================================================
 
 export interface ISBNCandidate {
-  isbn: string;
+  isbn?: string; // Optional: may be undefined when ISBNdb quota exhausted
   title?: string;
   authors?: string[];
+  author?: string; // Single author for Gemini persistence
+  publisher?: string; // From Gemini
+  format?: string; // From Gemini
+  year?: number; // From Gemini
+  significance?: string; // From Gemini
   source?: string; // e.g., 'nyt-fiction', 'gemini-2015'
 }
 
