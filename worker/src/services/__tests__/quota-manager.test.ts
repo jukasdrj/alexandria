@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { QuotaManager, createQuotaManager, withQuotaGuard } from '../quota-manager.js';
+import type { Logger } from '../../../lib/logger.js';
 
 // Mock KV namespace
 class MockKVNamespace {
@@ -42,13 +43,23 @@ class MockKVNamespace {
   }
 }
 
+// Mock Logger
+const mockLogger: Logger = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  perf: vi.fn(),
+  query: vi.fn(),
+} as unknown as Logger;
+
 describe('QuotaManager', () => {
   let mockKV: MockKVNamespace;
   let quotaManager: QuotaManager;
 
   beforeEach(() => {
     mockKV = new MockKVNamespace();
-    quotaManager = new QuotaManager(mockKV as unknown as KVNamespace);
+    quotaManager = new QuotaManager(mockKV as unknown as KVNamespace, mockLogger);
 
     // Reset failure state
     mockKV.setShouldFail(false);
@@ -369,7 +380,8 @@ describe('QuotaManager', () => {
         quotaManager,
         'test-operation',
         10,
-        mockApiCall
+        mockApiCall,
+        mockLogger
       );
 
       expect(result).toEqual({ data: 'success' });
@@ -385,7 +397,7 @@ describe('QuotaManager', () => {
       const mockApiCall = vi.fn();
 
       await expect(
-        withQuotaGuard(quotaManager, 'test-operation', 10, mockApiCall)
+        withQuotaGuard(quotaManager, 'test-operation', 10, mockApiCall, mockLogger)
       ).rejects.toThrow('Quota exhausted');
 
       expect(mockApiCall).not.toHaveBeenCalled();
@@ -395,7 +407,7 @@ describe('QuotaManager', () => {
       const mockApiCall = vi.fn().mockRejectedValue(new Error('API error'));
 
       await expect(
-        withQuotaGuard(quotaManager, 'test-operation', 10, mockApiCall)
+        withQuotaGuard(quotaManager, 'test-operation', 10, mockApiCall, mockLogger)
       ).rejects.toThrow('API error');
 
       // Quota should still be reserved even on failure
