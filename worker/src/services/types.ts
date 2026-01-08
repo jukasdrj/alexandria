@@ -290,3 +290,28 @@ export interface MessageBatch<T = unknown> {
   retryAll(): void;
   ackAll(): void;
 }
+
+// =================================================================================
+// External ID Crosswalk Types
+// =================================================================================
+
+/**
+ * Array-based external IDs from enriched_editions table
+ * Used for lazy backfill to external_id_mappings table
+ */
+export interface ArrayExternalIds {
+  amazon_asins?: string[] | null;
+  google_books_volume_ids?: string[] | null;
+  goodreads_edition_ids?: string[] | null;
+  librarything_ids?: string[] | null;
+}
+
+/**
+ * External ID mapping from crosswalk table
+ */
+export interface ExternalIdMapping {
+  provider: string;
+  provider_id: string;
+  confidence: number;
+  created_at?: Date;
+}

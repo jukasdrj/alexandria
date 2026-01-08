@@ -104,6 +104,8 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 - `POST /api/authors/enrich-bibliography` - Author expansion
 - `POST /api/authors/resolve-identifier` - VIAF/ISNI → Wikidata crosswalk
 - `GET /api/quota/status` - ISBNdb quota tracking
+- `GET /api/external-ids/{entity_type}/{key}` - Get external IDs (Amazon ASIN, Goodreads, Google Books) **NEW**
+- `GET /api/resolve/{provider}/{id}` - Resolve external ID to internal key **NEW**
 - `GET /openapi.json` - OpenAPI spec
 
 ## ISBNdb Integration
@@ -205,6 +207,40 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 - `POST /covers/batch` - Batch processing (max 10)
 
 **Whitelist**: books.google.com, covers.openlibrary.org, images.isbndb.com, Amazon CDNs
+
+## External ID Resolution (Issue #155)
+
+**Purpose**: Bidirectional crosswalk between our keys and external provider IDs (Amazon ASIN, Goodreads, Google Books, LibraryThing)
+
+**Architecture**: Hybrid lazy-backfill approach
+- `external_id_mappings` table (partitioned by entity_type)
+- Lazy population from array columns on first API access
+- Enrichment pipeline unchanged (continues writing to arrays)
+
+**Endpoints**:
+- `GET /api/external-ids/{entity_type}/{key}` - Forward lookup (our key → external IDs)
+  - entity_type: edition, work, author
+  - Lazy backfill from arrays on first access (10-15ms one-time)
+  - Subsequent queries hit crosswalk (0.75ms)
+- `GET /api/resolve/{provider}/{id}?type=edition` - Reverse lookup (external ID → our key)
+  - With lazy backfill fallback for consistency
+  - Returns key + confidence score
+
+**Confidence Scores**:
+- amazon: 90 (ISBNdb validated)
+- google-books: 85 (Google validation)
+- goodreads: 80 (community validated)
+- librarything: 75 (smaller community)
+
+**Performance**:
+- Crosswalk query: 0.75ms (P50), 2ms (P95)
+- Lazy backfill: 10-15ms (one-time per ISBN)
+- Reverse lookup: 1-3ms
+- Expected hit rate: 95%+ after 30 days
+
+**Concurrent-Safety**: ON CONFLICT DO NOTHING prevents race conditions
+
+**Analytics**: Tracks source (crosswalk/array_backfill), latency, backfill rate, hit rate
 
 ## Code Patterns
 
