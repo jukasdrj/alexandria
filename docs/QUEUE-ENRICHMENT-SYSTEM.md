@@ -28,6 +28,7 @@ Alexandria uses **Cloudflare Queues** for asynchronous processing of:
 - **Cover image harvesting** (download, process, store in R2)
 - **Historical backfill** (Gemini + ISBNdb pipeline)
 - **Author biography enrichment** (Wikidata integration)
+- **Author Just-in-Time enrichment** (view-triggered ISBNdb bibliography expansion)
 
 ### Key Benefits
 - ✅ **Async processing** - No client timeouts
@@ -49,6 +50,7 @@ All queues are configured in `worker/wrangler.jsonc`:
 | **alexandria-enrichment-queue** | 100 | 1 | 60s | 3 | alexandria-enrichment-dlq |
 | **alexandria-cover-queue** | 5 | 3 | 60s | 3 | alexandria-cover-dlq |
 | **alexandria-backfill-queue** | 1 | 1 | 5s | 2 | alexandria-backfill-dlq |
+| **alexandria-author-queue** | 10 | 1 | 30s | 3 | alexandria-author-dlq |
 
 ### Queue Handlers
 
@@ -72,6 +74,12 @@ export async function processBackfillQueue(
   batch: MessageBatch<BackfillQueueMessage>,
   env: Env
 ): Promise<BackfillQueueResults>
+
+// Author JIT enrichment (new - Jan 2026)
+export async function processAuthorQueue(
+  batch: MessageBatch<AuthorQueueMessage>,
+  env: Env
+): Promise<AuthorQueueResults>
 ```
 
 ### Message Routing
@@ -88,6 +96,8 @@ export default {
         return processEnrichmentQueue(batch, env);
       case 'alexandria-backfill-queue':
         return processBackfillQueue(batch, env);
+      case 'alexandria-author-queue':
+        return processAuthorQueue(batch, env);
     }
   }
 }
@@ -199,12 +209,14 @@ See [Backfill System](#backfill-system) for details.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/authors/top?limit=<n>` | Top authors by work count |
-| GET | `/api/authors/:key` | Author details by key |
+| GET | `/api/authors/:key` | Author details by key (triggers JIT enrichment) |
 | POST | `/api/authors/bibliography` | Get author bibliography |
 | POST | `/api/authors/enrich-bibliography` | Expand author bibliography from ISBNdb |
 | POST | `/api/authors/enrich-wikidata` | Enrich authors with Wikidata |
 | POST | `/api/authors/resolve-identifier` | Resolve VIAF/ISNI to Wikidata |
 | GET | `/api/authors/enrich-status` | Author enrichment statistics |
+
+**Note**: The `GET /api/authors/:key` endpoint now includes view-triggered Just-in-Time enrichment. See [docs/features/AUTHOR-JIT-ENRICHMENT.md](./features/AUTHOR-JIT-ENRICHMENT.md) for full details.
 
 ### Cover Endpoints
 

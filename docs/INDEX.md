@@ -1,6 +1,6 @@
 # Alexandria Documentation Index
 
-**Last Updated:** January 5, 2026
+**Last Updated:** January 7, 2026
 
 > **Quick Start:** New to Alexandria? Start with [README.md](../README.md) → [CURRENT-STATUS.md](./CURRENT-STATUS.md) → [CLAUDE.md](../CLAUDE.md)
 
@@ -63,6 +63,15 @@
 ### Incident Response
 - **[operations/ISBNDB-403-BLOCKER-JAN2.md](./operations/ISBNDB-403-BLOCKER-JAN2.md)** - ISBNdb quota exhaustion (Jan 2, 2026)
 - **[operations/SSH_MIGRATION_2025-12-27.md](./operations/SSH_MIGRATION_2025-12-27.md)** - SSH key migration
+
+---
+
+## 🎯 Feature Documentation
+
+### Active Features
+- **[features/AUTHOR-JIT-ENRICHMENT.md](./features/AUTHOR-JIT-ENRICHMENT.md)** - **⭐ Just-in-Time author enrichment system** (view-triggered, quota-protected, Jan 2026)
+
+**Purpose:** In-depth documentation for major system features with architecture diagrams, usage examples, and operational guides.
 
 ---
 
@@ -169,6 +178,7 @@ npx wrangler queues list | grep alexandria
 
 ### By Topic
 - **API Integration** → `api/`
+- **Features** → `features/`
 - **Security** → `security/`
 - **Operations** → `operations/`
 - **Harvesting** → `harvesting/`

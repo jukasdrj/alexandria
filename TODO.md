@@ -42,11 +42,36 @@ Active tasks and future work. Production system (Phase 1-5) is complete.
 - Top-1000 tier harvest: 81.8% complete (818/1000 authors processed)
 - Wikidata enrichment: Automated via daily cron (2 AM UTC)
 - Author deduplication: Complete (normalized_name system)
+- **JIT Enrichment Phase 1: COMPLETE ✅** (Jan 7, 2026)
+
+**Author JIT Enrichment Roadmap:**
+- [x] Phase 1: View-triggered enrichment (COMPLETE - Jan 7)
+  - [x] Database migration (5 tracking columns)
+  - [x] needsEnrichment() logic with quota circuit breakers
+  - [x] Author queue handler (10 batch, 1 concurrency)
+  - [x] Heat score + priority system
+  - [x] Full documentation in docs/features/AUTHOR-JIT-ENRICHMENT.md
+- [ ] Phase 2: Selective background enrichment for high-value authors
+  - [ ] Identify top authors by heat score
+  - [ ] Scheduled enrichment for high-priority authors
+  - [ ] Quota-aware batch processing
+- [ ] Phase 3: Auto-bibliography trigger
+  - [ ] Trigger bibliography expansion when Wikidata ID obtained
+  - [ ] Priority queueing for newly identified authors
+- [ ] Phase 4: Search-triggered enrichment
+  - [ ] Trigger enrichment on author search queries
+  - [ ] Track search frequency for priority scoring
+- [ ] Phase 5: Coverage dashboard
+  - [ ] Analytics for enrichment coverage
+  - [ ] Heat score distribution visualization
+  - [ ] Queue health monitoring
 
 **Next Steps:**
 - [ ] Monitor bulk harvesting automation
 - [ ] Verify cron job reliability
 - [ ] Review harvest error patterns
+- [ ] Monitor JIT enrichment in production
+- [ ] Plan Phase 2 implementation
 
 ---
 

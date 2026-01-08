@@ -20,7 +20,12 @@ Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) th
 Internet → Worker (alexandria.ooheynerds.com)
 → Hyperdrive (pooling) → Service Token Auth → Tunnel → Unraid PostgreSQL (54.8M editions)
 
-Queues: Cover Queue (10 batch/5 concurrent) + Enrichment Queue (100 batch/1 concurrent)
+Queues:
+- Enrichment Queue (100 batch/1 concurrent)
+- Cover Queue (5 batch/3 concurrent)
+- Backfill Queue (1 batch/1 concurrent)
+- Author Queue (10 batch/1 concurrent) [NEW - Jan 2026]
+
 Storage: R2 isbn/{isbn}/{size}.webp
 ```
 
@@ -52,8 +57,8 @@ Storage: R2 isbn/{isbn}/{size}.webp
 - `HYPERDRIVE` - PostgreSQL connection (ID: 00ff424776f4415d95245c3c4c36e854)
 - `COVER_IMAGES` - R2 bucket (bookstrack-covers-processed)
 - `CACHE`, `QUOTA_KV` - KV namespaces
-- `ISBNDB_API_KEY`, `GOOGLE_BOOKS_API_KEY` - API keys
-- `ENRICHMENT_QUEUE`, `COVER_QUEUE` - Queues
+- `ISBNDB_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `GEMINI_API_KEY` - API keys
+- `ENRICHMENT_QUEUE`, `COVER_QUEUE`, `BACKFILL_QUEUE`, `AUTHOR_QUEUE` - Queues
 - `ANALYTICS`, `QUERY_ANALYTICS`, `COVER_ANALYTICS` - Analytics Engine
 
 ## Essential Commands
@@ -133,10 +138,18 @@ ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
 **Config**: `worker/wrangler.jsonc`
 
 **Handlers**: `worker/src/services/queue-handlers.ts`
-- `processCoverQueue()` - Downloads, validates, stores covers (max 10/batch)
+- `processCoverQueue()` - Downloads, validates, stores covers (max 5/batch)
 - `processEnrichmentQueue()` - Enriches metadata (max 100/batch)
+- `processBackfillQueue()` - Historical backfill orchestration (1 message/batch)
+- `processAuthorQueue()` - JIT author enrichment (max 10/batch) **[NEW - Jan 2026]**
 
 **Routing**: `worker/src/index.ts` - `queue()` handler
+
+**Bindings**:
+- `ENRICHMENT_QUEUE` - alexandria-enrichment-queue
+- `COVER_QUEUE` - alexandria-cover-queue
+- `BACKFILL_QUEUE` - alexandria-backfill-queue
+- `AUTHOR_QUEUE` - alexandria-author-queue **[NEW - Jan 2026]**
 
 **Limitation**: Cloudflare max 100 messages/batch. For bulk ops, use `/api/enrich/batch-direct` (1000 ISBNs in one call).
 

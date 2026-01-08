@@ -25,6 +25,47 @@
 
 ## ✅ Recently Completed (January 7, 2026)
 
+### Author Just-in-Time Enrichment (COMPLETED - Jan 7) 🎉
+**Implemented view-triggered automatic author enrichment system:**
+
+**Overview:**
+- View-triggered enrichment on `GET /api/authors/:key`
+- Quota-aware circuit breakers protect book enrichment pipeline
+- New queue: `alexandria-author-queue` (10 batch, 1 concurrency)
+- Priority system (high/medium/low) based on heat score
+- 90-day staleness threshold for re-enrichment
+
+**Database Migration:**
+- Migration: `migrations/003_add_author_jit_tracking.sql`
+- 5 new tracking columns:
+  - `last_viewed_at` - Track author view time
+  - `view_count` - Count views for popularity
+  - `heat_score` - Calculated priority score
+  - `enrichment_priority` - Assigned priority level
+  - `last_enrichment_queued_at` - Prevent duplicate queuing
+
+**Architecture:**
+- `needsEnrichment()` logic in `author-service.ts`
+- Circuit breakers at 85% (halt all) and 70% (halt low/medium)
+- Heat score formula: `(view_count * 10) + (book_count * 0.5) + recency_boost`
+- Queue handler in `queue-handlers.ts` with full ISBNdb flow
+
+**Files Modified:**
+- `worker/src/routes/authors.ts` - JIT trigger on GET endpoint
+- `worker/src/services/author-service.ts` - needsEnrichment() logic
+- `worker/src/services/queue-handlers.ts` - processAuthorQueue()
+- `worker/wrangler.jsonc` - AUTHOR_QUEUE binding
+- `worker/src/env.ts` - Type definitions
+- `worker/src/index.ts` - Queue routing
+
+**Documentation:**
+- Full feature docs: `docs/features/AUTHOR-JIT-ENRICHMENT.md`
+- Architecture diagrams, monitoring guide, troubleshooting
+- Phased roadmap (Phase 1 complete, Phase 2-5 planned)
+
+**Status:** DEPLOYED - awaiting production validation
+**Next Steps:** Phase 2 (selective background enrichment), Phase 3 (auto-bibliography), Phase 4 (search-triggered), Phase 5 (coverage dashboard)
+
 ### #150: Dry-Run Validation & Baseline Testing (COMPLETED - Jan 7-8) 🎉
 **Successfully validated Gemini backfill system with outstanding results:**
 

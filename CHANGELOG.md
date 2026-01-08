@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-01-07
+
+### Added
+- **Author Just-in-Time Enrichment**: View-triggered automatic author enrichment system
+  - View-triggered enrichment on `GET /api/authors/:key` endpoint
+  - Database migration adds 5 tracking columns: `last_viewed_at`, `view_count`, `heat_score`, `enrichment_priority`, `last_enrichment_queued_at`
+  - New queue: `alexandria-author-queue` (10 batch size, 1 concurrency, 30s timeout)
+  - Heat score calculation: `(view_count * 10) + (book_count * 0.5) + recency_boost`
+  - Priority system (high/medium/low) based on heat score thresholds (>100, 20-100, <20)
+  - 90-day staleness threshold for re-enrichment
+  - Quota-aware circuit breakers at 85% (halt all) and 70% (halt low/medium priority)
+  - `needsEnrichment()` logic in author-service with comprehensive checks
+  - Queue handler `processAuthorQueue()` with full ISBNdb bibliography flow
+  - Full documentation in `docs/features/AUTHOR-JIT-ENRICHMENT.md`
+  - Migration file: `migrations/003_add_author_jit_tracking.sql`
+
+### Changed
+- Updated author routes to trigger JIT enrichment on author views
+- Enhanced author service with enrichment decision logic
+- Added AUTHOR_QUEUE binding to Worker environment
+- Updated queue routing to handle author enrichment queue
+
+### Documentation
+- Created comprehensive feature documentation with architecture diagrams
+- Added phased roadmap (Phase 1 complete, Phase 2-5 planned)
+- Updated INDEX.md with new Features section
+- Updated CURRENT-STATUS.md with JIT completion details
+- Updated TODO.md with Author JIT Phase 2-5 roadmap
+
 ## [2.2.5] - 2026-01-06
 
 ### Changed
