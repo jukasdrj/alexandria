@@ -255,7 +255,7 @@ export async function enrichEdition(
         'primary_provider',
       ]),
       response_time_ms: Date.now() - startTime,
-    });
+    }, logger);
 
     // Fire Webhook to Bend if improved and configured
     if (wasInsert && env?.BEND_WEBHOOK_URL && env?.ALEXANDRIA_WEBHOOK_SECRET) {
@@ -303,7 +303,7 @@ export async function enrichEdition(
       success: false,
       error_message: error instanceof Error ? error.message : String(error),
       response_time_ms: Date.now() - startTime,
-    }).catch(() => {}); // Don't throw if logging fails
+    }, logger).catch(() => {}); // Don't throw if logging fails
 
     throw new Error(
       `Database operation failed: ${error instanceof Error ? error.message : String(error)}`
@@ -433,7 +433,7 @@ export async function enrichWork(
         'primary_provider',
       ]),
       response_time_ms: Date.now() - startTime,
-    });
+    }, logger);
 
     return {
       work_key: row.work_key,
@@ -456,7 +456,7 @@ export async function enrichWork(
       success: false,
       error_message: error instanceof Error ? error.message : String(error),
       response_time_ms: Date.now() - startTime,
-    }).catch(() => {});
+    }, logger).catch(() => {});
 
     throw new Error(
       `Database operation failed: ${error instanceof Error ? error.message : String(error)}`
@@ -469,7 +469,8 @@ export async function enrichWork(
  */
 export async function enrichAuthor(
   sql: Sql | TransactionSql,
-  author: EnrichAuthorRequest
+  author: EnrichAuthorRequest,
+  logger: Logger
 ): Promise<EnrichmentData & { author_key: string }> {
   const startTime = Date.now();
   try {
@@ -539,7 +540,7 @@ export async function enrichAuthor(
         'primary_provider',
       ]),
       response_time_ms: Date.now() - startTime,
-    });
+    }, logger);
 
     return {
       author_key: row.author_key,
@@ -547,7 +548,11 @@ export async function enrichAuthor(
       stored_at: new Date().toISOString(),
     };
   } catch (error) {
-    console.error('enrichAuthor database error:', error);
+    logger.error('enrichAuthor database error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      author_key: author.author_key
+    });
 
     // Log failed operation
     await logEnrichmentOperation(sql, {
@@ -558,7 +563,7 @@ export async function enrichAuthor(
       success: false,
       error_message: error instanceof Error ? error.message : String(error),
       response_time_ms: Date.now() - startTime,
-    }).catch(() => {});
+    }, logger).catch(() => {});
 
     throw new Error(
       `Database operation failed: ${error instanceof Error ? error.message : String(error)}`
@@ -571,7 +576,8 @@ export async function enrichAuthor(
  */
 export async function queueEnrichment(
   sql: Sql,
-  queueRequest: QueueEnrichmentRequest
+  queueRequest: QueueEnrichmentRequest,
+  logger: Logger
 ): Promise<QueueEnrichmentResponse> {
   try {
     const priority = normalizePriority(queueRequest.priority);
@@ -615,7 +621,12 @@ export async function queueEnrichment(
       estimated_processing_time: estimatedTime,
     };
   } catch (error) {
-    console.error('queueEnrichment database error:', error);
+    logger.error('queueEnrichment database error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      entity_type: queueRequest.entity_type,
+      entity_key: queueRequest.entity_key
+    });
     throw new Error(
       `Failed to queue enrichment: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -627,7 +638,8 @@ export async function queueEnrichment(
  */
 export async function getEnrichmentStatus(
   sql: Sql,
-  jobId: string
+  jobId: string,
+  logger: Logger
 ): Promise<EnrichmentJobStatus> {
   try {
     const result = await sql`
@@ -652,7 +664,11 @@ export async function getEnrichmentStatus(
 
     return result[0] as EnrichmentJobStatus;
   } catch (error) {
-    console.error('getEnrichmentStatus database error:', error);
+    logger.error('getEnrichmentStatus database error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      jobId
+    });
     throw new Error(
       `Failed to get job status: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -664,7 +680,8 @@ export async function getEnrichmentStatus(
  */
 async function logEnrichmentOperation(
   sql: Sql | TransactionSql,
-  logEntry: EnrichmentLogEntry
+  logEntry: EnrichmentLogEntry,
+  logger: Logger
 ): Promise<void> {
   try {
     await sql`
@@ -692,6 +709,11 @@ async function logEnrichmentOperation(
     `;
   } catch (error) {
     // Log but don't throw - logging shouldn't break enrichment
-    console.error('Failed to write enrichment_log:', error instanceof Error ? error.message : String(error));
+    logger.error('Failed to write enrichment_log', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      entity_type: logEntry.entity_type,
+      entity_key: logEntry.entity_key
+    });
   }
 }
