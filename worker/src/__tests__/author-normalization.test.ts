@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest';
 function normalizeAuthorName(name: string): string {
   if (!name) return '';
 
-  let result = name
+  const result = name
     .toLowerCase()
     .trim()
     // Extract primary author from co-author strings
