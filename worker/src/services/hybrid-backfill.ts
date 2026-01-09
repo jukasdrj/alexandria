@@ -82,7 +82,8 @@ export async function generateHybridBackfillList(
   logger: Logger,
   batchSize: number = 20,
   promptOverride?: string,
-  modelOverride?: string
+  modelOverride?: string,
+  quotaManager?: { recordApiCall: (count: number) => Promise<void> }
 ): Promise<HybridBackfillResult> {
   const startTime = Date.now();
 
@@ -149,7 +150,7 @@ export async function generateHybridBackfillList(
     books_to_resolve: booksMetadata.length,
   });
 
-  const resolutions = await batchResolveISBNs(booksMetadata, apiKey, logger);
+  const resolutions = await batchResolveISBNs(booksMetadata, apiKey, logger, quotaManager);
 
   // Step 3: Merge Gemini metadata with resolved ISBNs
   // IMPORTANT: Include candidates WITHOUT ISBNs for staged enrichment

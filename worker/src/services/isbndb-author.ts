@@ -68,6 +68,28 @@ export async function fetchAuthorBibliography(
   env: Env,
   maxPages: number = 1
 ): Promise<ISBNdbAuthorResult> {
+  // QUOTA ENFORCEMENT (Issue #158 Fix)
+  // Check and reserve quota for all pages upfront
+  const { QuotaManager } = await import('./quota-manager.js');
+  const { Logger } = await import('../../lib/logger.js');
+
+  const logger = new Logger(env, { service: 'isbndb-author' });
+  const quotaManager = new QuotaManager(env.QUOTA_KV, logger);
+
+  // Check quota for maximum possible calls (maxPages)
+  const quota = await quotaManager.checkQuota(maxPages, true);
+  if (!quota.allowed) {
+    console.warn(`[ISBNdbAuthor] ISBNdb quota exhausted (${quota.status.used_today}/${quota.status.limit}). Skipping ${authorName}`);
+    return {
+      author: authorName,
+      books_found: 0,
+      pages_fetched: 0,
+      api_calls: 0,
+      books: [],
+      error: 'quota_exhausted',
+    };
+  }
+
   const apiKey = await env.ISBNDB_API_KEY.get();
   if (!apiKey) {
     return {

@@ -236,6 +236,20 @@ interface OpenLibraryResponse {
 
 async function fetchFromISBNdb(isbn: string, env: Env): Promise<ExternalBookData | null> {
   try {
+    // QUOTA ENFORCEMENT (Issue #158 Fix)
+    // Check and reserve quota BEFORE making API call
+    const { QuotaManager } = await import('../src/services/quota-manager.js');
+    const { Logger } = await import('../lib/logger.js');
+
+    const logger = new Logger(env, { service: 'external-apis' });
+    const quotaManager = new QuotaManager(env.QUOTA_KV, logger);
+
+    const quota = await quotaManager.checkQuota(1, true);
+    if (!quota.allowed) {
+      console.warn(`[ExternalAPIs] ISBNdb quota exhausted (${quota.status.used_today}/${quota.status.limit}). Skipping ${isbn}`);
+      return null; // Graceful degradation: resolveExternalISBN will try other sources
+    }
+
     const apiKey = await env.ISBNDB_API_KEY.get();
     if (!apiKey) {
       console.warn('ISBNdb API key not configured');

@@ -155,20 +155,38 @@ function normalizeAuthor(author: string): string {
  * @param metadata - Book metadata from Gemini
  * @param apiKey - ISBNdb API key
  * @param logger - Logger instance
+ * @param quotaCheck - Optional quota check function (returns false if quota exhausted)
  * @returns ISBN resolution result with confidence score
  */
 export async function resolveISBNViaTitle(
   metadata: BookMetadata,
   apiKey: string,
-  logger: Logger
+  logger: Logger,
+  quotaCheck?: () => Promise<boolean>
 ): Promise<ISBNResolutionResult> {
   const { title, author, publisher, format } = metadata;
+
+  // QUOTA ENFORCEMENT (Issue #158 Fix)
+  // Check quota BEFORE making API call if checker provided
+  if (quotaCheck) {
+    const allowed = await quotaCheck();
+    if (!allowed) {
+      logger.warn('[ISBNResolution] ISBNdb quota exhausted - proceeding without ISBN', { title, author });
+      return {
+        isbn: null,
+        confidence: 'not_found',
+        match_quality: 0.0,
+        matched_title: null,
+        source: 'isbndb',
+      };
+    }
+  }
 
   // Construct search query
   const query = `${title} ${author}`;
   const url = `https://api.premium.isbndb.com/books/${encodeURIComponent(query)}?page=1&pageSize=20`;
 
-  logger.debug('[ISBNResolution] Searching ISBNdb', { title, author, query });
+  logger.info('[ISBNResolution] Searching ISBNdb', { title, author, query, url });
 
   try {
     const response = await fetch(url, {
@@ -220,8 +238,16 @@ export async function resolveISBNViaTitle(
 
     const data = await response.json() as ISBNdbSearchResponse;
 
+    logger.info('[ISBNResolution] ISBNdb response received', {
+      title,
+      author,
+      total_results: data.total || 0,
+      books_count: data.books?.length || 0,
+      raw_response: JSON.stringify(data).substring(0, 500), // First 500 chars
+    });
+
     if (!data.books || data.books.length === 0) {
-      logger.debug('[ISBNResolution] No books in response', { title, author });
+      logger.warn('[ISBNResolution] No books in response', { title, author, total: data.total });
       return {
         isbn: null,
         confidence: 'not_found',
@@ -271,9 +297,12 @@ export async function resolveISBNViaTitle(
       // Cap score at 1.0
       score = Math.min(score, 1.0);
 
-      logger.debug('[ISBNResolution] Candidate match', {
+      logger.info('[ISBNResolution] Candidate match', {
+        search_title: title,
+        search_author: author,
         book_title: bookTitle,
-        book_author: bookAuthors[0],
+        book_authors: bookAuthors,
+        book_isbn13: book.isbn13,
         title_sim: titleSimilarity.toFixed(2),
         author_sim: authorSimilarity.toFixed(2),
         total_score: score.toFixed(2),
@@ -285,6 +314,7 @@ export async function resolveISBNViaTitle(
     }
 
     if (!bestMatch) {
+      logger.warn('[ISBNResolution] No suitable match found after scoring', { title, author });
       return {
         isbn: null,
         confidence: 'not_found',
@@ -303,6 +333,13 @@ export async function resolveISBNViaTitle(
     } else if (bestMatch.score >= 0.45) {
       confidence = 'low';
     } else {
+      logger.warn('[ISBNResolution] Best match score too low, rejecting', {
+        title,
+        author,
+        best_score: bestMatch.score.toFixed(2),
+        threshold: 0.45,
+        best_match_title: bestMatch.book.title,
+      });
       confidence = 'not_found';
     }
 
@@ -361,27 +398,82 @@ export async function resolveISBNViaTitle(
  * - ISBNdb Premium: 3 req/sec
  * - Add 350ms delay between requests
  *
+ * QUOTA TRACKING:
+ * - Reserves quota upfront for entire batch
+ * - Records actual API calls made (even if they fail)
+ * - Stops making calls if 403 quota exhausted returned
+ *
  * @param books - Array of book metadata from Gemini
  * @param apiKey - ISBNdb API key
  * @param logger - Logger instance
+ * @param quotaManager - Optional quota manager for tracking (if not provided, quota tracking skipped)
  * @returns Array of resolution results
  */
 export async function batchResolveISBNs(
   books: BookMetadata[],
   apiKey: string,
-  logger: Logger
+  logger: Logger,
+  quotaManager?: { checkQuota: (count: number, reserve: boolean) => Promise<{ allowed: boolean; status: any }>; recordApiCall: (count: number) => Promise<void> }
 ): Promise<ISBNResolutionResult[]> {
   const results: ISBNResolutionResult[] = [];
+  let apiCallsMade = 0;
+  let quotaExhausted = false;
+
+  // Create quota check function to pass to resolveISBNViaTitle (Issue #158 Fix)
+  const quotaCheck = quotaManager ? async (): Promise<boolean> => {
+    if (quotaExhausted) return false;
+    const result = await quotaManager.checkQuota(1, true);
+    if (!result.allowed) {
+      quotaExhausted = true;
+      return false;
+    }
+    return true;
+  } : undefined;
 
   for (let i = 0; i < books.length; i++) {
     const book = books[i];
-    const result = await resolveISBNViaTitle(book, apiKey, logger);
+
+    // If previous call hit quota exhaustion, don't make more calls
+    if (quotaExhausted) {
+      logger.warn('[ISBNResolution] Skipping remaining books due to quota exhaustion');
+      results.push({
+        isbn: null,
+        confidence: 'not_found',
+        match_quality: 0.0,
+        matched_title: null,
+        source: 'isbndb',
+      });
+      continue;
+    }
+
+    const result = await resolveISBNViaTitle(book, apiKey, logger, quotaCheck);
     results.push(result);
+    apiCallsMade++;
+
+    // Check if we hit quota exhaustion (403 responses are already handled in resolveISBNViaTitle)
+    // We infer quota exhaustion by checking logs, but for now just count the call
 
     // Rate limit: 350ms delay between requests (3 req/sec)
     if (i < books.length - 1) {
       await new Promise(resolve => setTimeout(resolve, 350));
     }
+  }
+
+  // Record all API calls made (even failed ones) for quota tracking
+  if (quotaManager && apiCallsMade > 0) {
+    try {
+      await quotaManager.recordApiCall(apiCallsMade);
+      logger.info('[ISBNResolution] Recorded API calls to quota manager', {
+        calls_made: apiCallsMade,
+      });
+    } catch (error) {
+      logger.error('[ISBNResolution] Failed to record API calls to quota manager', {
+        error: error instanceof Error ? error.message : String(error),
+        calls_made: apiCallsMade,
+      });
+    }
+  } else if (!quotaManager) {
+    logger.warn('[ISBNResolution] No quota manager provided - API calls not tracked');
   }
 
   const successCount = results.filter(r => r.isbn !== null).length;

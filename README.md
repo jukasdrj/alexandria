@@ -106,7 +106,32 @@ npm run deploy
 
 # Monitor logs
 npm run tail
+
+# Query Gemini synthetic books (backfill results)
+./scripts/query-gemini-books.sh
 ```
+
+### Querying Data
+
+**Gemini Backfill Books**: The backfill system generates synthetic book records from AI even when ISBNdb quota is exhausted:
+
+```bash
+# See all Gemini-generated books
+./scripts/query-gemini-books.sh
+
+# Or query directly via psql
+ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary -c \"
+SELECT
+  (metadata#>>'{}')::jsonb->>'gemini_source' as source,
+  title,
+  (metadata#>>'{}')::jsonb->>'gemini_author' as author
+FROM enriched_works
+WHERE synthetic = true AND primary_provider = 'gemini-backfill'
+ORDER BY source, title;
+\""
+```
+
+**Note**: Metadata is stored as stringified JSON inside JSONB. Use `(metadata#>>'{}')::jsonb` to parse.
 
 ### Infrastructure Checks
 

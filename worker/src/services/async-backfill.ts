@@ -225,6 +225,20 @@ export async function processBackfillJob(
     });
 
     // Step 1: Run hybrid workflow (Gemini + ISBNdb resolution)
+    // Pass quota manager for API call tracking
+    const quotaManager = env.QUOTA_KV ? { recordApiCall: async (count: number) => {
+      try {
+        const currentUsage = await env.QUOTA_KV.get<number>('isbndb_daily_calls', 'json') || 0;
+        const newUsage = currentUsage + count;
+        await env.QUOTA_KV.put('isbndb_daily_calls', JSON.stringify(newUsage));
+      } catch (error) {
+        logger.error('[QuotaTracking] Failed to record API calls', {
+          error: error instanceof Error ? error.message : String(error),
+          count,
+        });
+      }
+    }} : undefined;
+
     const hybridResult = await generateHybridBackfillList(
       year,
       month,
@@ -232,7 +246,8 @@ export async function processBackfillJob(
       logger,
       batch_size,
       prompt_override,
-      model_override
+      model_override,
+      quotaManager
     );
 
     logger.info('[AsyncBackfill] Hybrid workflow complete', {

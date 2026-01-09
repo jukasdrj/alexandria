@@ -110,15 +110,33 @@ async function enforceISBNdbRateLimit(env?: Env): Promise<void> {
 
 /**
  * Fetch cover URL from ISBNdb API
+ *
+ * IMPORTANT: This function now enforces quota limits to prevent exhausting
+ * the daily ISBNdb quota (15,000 calls/day). Returns null if quota exhausted.
+ *
  * @param isbn - ISBN to lookup
  * @param env - Worker environment with ISBNDB_API_KEY
- * @returns Cover result or null if not found
+ * @returns Cover result or null if not found or quota exhausted
  */
 export async function fetchISBNdbCover(isbn: string, env: Env): Promise<CoverResult | null> {
   const normalizedISBN = normalizeISBN(isbn);
   if (!normalizedISBN) return null;
 
   try {
+    // QUOTA ENFORCEMENT (Issue #158 Fix)
+    // Check and reserve quota BEFORE making API call
+    const { QuotaManager } = await import('../src/services/quota-manager.js');
+    const { Logger } = await import('../lib/logger.js');
+
+    const logger = new Logger(env, { service: 'cover-fetcher' });
+    const quotaManager = new QuotaManager(env.QUOTA_KV, logger);
+
+    const quota = await quotaManager.checkQuota(1, true);
+    if (!quota.allowed) {
+      console.warn(`[CoverFetcher] ISBNdb quota exhausted (${quota.status.used_today}/${quota.status.limit}). Skipping ${normalizedISBN}`);
+      return null; // Graceful degradation: fetchBestCover will try free sources
+    }
+
     // Get API key from Secrets Store (async)
     const apiKey = await env.ISBNDB_API_KEY.get();
     if (!apiKey) {
@@ -380,24 +398,24 @@ export async function fetchBestCover(isbn: string, env: Env): Promise<CoverResul
     };
   }
 
-  // Try ISBNdb first (highest quality)
-  let cover = await fetchISBNdbCover(normalizedISBN, env);
-  if (cover?.url) {
-    console.log(`Cover found via ISBNdb for ${normalizedISBN}`);
-    return cover;
-  }
-
-  // Fallback to Google Books
-  cover = await fetchGoogleBooksCover(normalizedISBN, env);
+  // Try Google Books first (free, good quality)
+  let cover = await fetchGoogleBooksCover(normalizedISBN, env);
   if (cover?.url) {
     console.log(`Cover found via Google Books for ${normalizedISBN}`);
     return cover;
   }
 
-  // Fallback to OpenLibrary
+  // Fallback to OpenLibrary (free, reliable)
   cover = await fetchOpenLibraryCover(normalizedISBN);
   if (cover?.url) {
     console.log(`Cover found via OpenLibrary for ${normalizedISBN}`);
+    return cover;
+  }
+
+  // Last resort: ISBNdb (paid, quota-protected)
+  cover = await fetchISBNdbCover(normalizedISBN, env);
+  if (cover?.url) {
+    console.log(`Cover found via ISBNdb for ${normalizedISBN}`);
     return cover;
   }
 

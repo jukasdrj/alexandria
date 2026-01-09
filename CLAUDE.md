@@ -78,7 +78,33 @@ npm run test     # Vitest tests
 
 # Database
 ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
+
+# Backfill & Data Queries
+./scripts/query-gemini-books.sh  # List all Gemini synthetic books (by source, title, author)
 ```
+
+## Querying Gemini Synthetic Books
+
+**Location**: Gemini-generated books are stored in `enriched_works` table with:
+- `synthetic = true`
+- `primary_provider = 'gemini-backfill'`
+- Metadata stored as **stringified JSON inside JSONB column** (requires double parsing)
+
+**Query Pattern**:
+```sql
+SELECT
+  (metadata#>>'{}')::jsonb->>'gemini_source' as source,
+  title,
+  (metadata#>>'{}')::jsonb->>'gemini_author' as author
+FROM enriched_works
+WHERE synthetic = true
+  AND primary_provider = 'gemini-backfill'
+ORDER BY source, title;
+```
+
+**CRITICAL**: Metadata is stored as a JSON string wrapped in JSONB, NOT as a direct JSONB object. Must use `(metadata#>>'{}')::jsonb` to extract the string, then parse it as JSON to access fields.
+
+**Helper Script**: `./scripts/query-gemini-books.sh` - Returns formatted table of all synthetic books
 
 ## Development Workflow
 
