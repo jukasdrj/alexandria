@@ -5,7 +5,8 @@
  * 1. Google Books (good quality, free with API key)
  * 2. OpenLibrary (free, reliable)
  * 3. Archive.org (free, excellent for pre-2000 books)
- * 4. ISBNdb (highest quality, paid API - last resort)
+ * 4. Wikidata (free, structured data from Wikimedia Commons)
+ * 5. ISBNdb (highest quality, paid API - last resort)
  *
  * @module services/cover-fetcher
  */
@@ -13,6 +14,7 @@
 import { fetchWithRetry } from '../lib/fetch-utils.js';
 import { normalizeISBN } from '../lib/isbn-utils.js';
 import { fetchArchiveOrgCover } from './archive-org.js';
+import { fetchWikidataCover } from './wikidata.js';
 import type { Env } from '../src/env.js';
 
 // Default placeholder cover (used if PLACEHOLDER_COVER_URL not configured)
@@ -36,7 +38,7 @@ const RATE_LIMIT_KV_KEY = 'cover_fetcher:isbndb_last_request';
  */
 export interface CoverResult {
   url: string;
-  source: 'isbndb' | 'google-books' | 'openlibrary' | 'archive-org' | 'placeholder';
+  source: 'isbndb' | 'google-books' | 'openlibrary' | 'archive-org' | 'wikidata' | 'placeholder';
   quality: 'original' | 'high' | 'medium' | 'low' | 'missing';
   error?: string;
 }
@@ -418,6 +420,13 @@ export async function fetchBestCover(isbn: string, env: Env): Promise<CoverResul
   cover = await fetchArchiveOrgCover(normalizedISBN, env);
   if (cover?.url) {
     console.log(`Cover found via Archive.org for ${normalizedISBN}`);
+    return cover;
+  }
+
+  // Try Wikidata (free, structured data from Wikimedia Commons)
+  cover = await fetchWikidataCover(normalizedISBN, env);
+  if (cover?.url) {
+    console.log(`Cover found via Wikidata for ${normalizedISBN}`);
     return cover;
   }
 
