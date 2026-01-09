@@ -28,6 +28,7 @@ import { handleScheduledCoverHarvest } from './routes/harvest.js';
 import { handleScheduledWikidataEnrichment } from './routes/authors.js';
 import backfillAsyncRoutes from './routes/backfill-async.js';
 import externalIdRoutes from './routes/external-ids.js';
+import recommendationsRoutes from './routes/recommendations.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue, processAuthorQueue } from './services/queue-handlers.js';
@@ -101,6 +102,9 @@ app.use('/api/books/enrich-new-releases', rateLimiter(RateLimitPresets.heavy));
 app.use('/api/external-ids/*', rateLimiter(RateLimitPresets.standard));
 app.use('/api/resolve/*', rateLimiter(RateLimitPresets.standard));
 
+// Recommendations endpoints (read-heavy, similar to search)
+app.use('/api/recommendations/*', rateLimiter(RateLimitPresets.search));
+
 // Standard rate limit for other API endpoints
 app.use('/api/*', rateLimiter(RateLimitPresets.standard));
 
@@ -142,6 +146,7 @@ const subRouters = [
   harvestRoutes,
   backfillAsyncRoutes,
   externalIdRoutes,
+  recommendationsRoutes,
   testRoutes,
   migrateRoutes,
 ];
