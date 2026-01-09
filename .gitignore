@@ -38,7 +38,8 @@ Thumbs.db
 logs/
 logs/seed-queues-*.json
 
-# Planning files (optional - uncomment to keep plans local)
-# .planning/task_plan.md
-# .planning/findings.md
-# .planning/progress.md
+# Planning files (planning-with-files skill)
+task_plan.md
+findings.md
+progress.md
+.planning/

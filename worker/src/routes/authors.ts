@@ -521,13 +521,24 @@ app.openapi(authorDetailsRoute, async (c) => {
 
     const author = result.data;
 
-    // Track view asynchronously (don't wait)
-    trackAuthorView(sql, author.author_key).catch((err) => {
-      logger?.warn('[AuthorDetails] Failed to track view', {
-        author_key: author.author_key,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    });
+    // Track view asynchronously using waitUntil to keep connection alive
+    // Fix for Issue #153: Prevents race condition where SQL connection closes before tracking completes
+    c.executionCtx.waitUntil(
+      trackAuthorView(sql, author.author_key).catch((err) => {
+        logger?.error('[AuthorDetails] CRITICAL: View tracking failed', {
+          author_key: author.author_key,
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined
+        });
+
+        // Write to analytics for alerting
+        c.env.ANALYTICS?.writeDataPoint({
+          indexes: ['view_tracking_error'],
+          blobs: [author.author_key, err instanceof Error ? err.message : String(err)],
+          doubles: [1]
+        });
+      })
+    );
 
     // Check if enrichment needed (JIT trigger)
     if (needsEnrichment(author)) {
@@ -537,19 +548,22 @@ app.openapi(authorDetailsRoute, async (c) => {
         last_enriched: author.wikidata_enriched_at
       });
 
-      // Queue enrichment request (don't wait - fire and forget)
-      c.env.AUTHOR_QUEUE.send({
-        type: 'JIT_ENRICH',
-        priority: 'medium',
-        author_key: author.author_key,
-        wikidata_id: author.wikidata_id,
-        triggered_by: 'view'
-      }).catch((err) => {
-        logger?.error('[AuthorDetails] Failed to queue enrichment', {
+      // Queue enrichment request using waitUntil to ensure message is sent
+      // Fix for Issue #153: Prevents race condition where queue send fails due to early connection close
+      c.executionCtx.waitUntil(
+        c.env.AUTHOR_QUEUE.send({
+          type: 'JIT_ENRICH',
+          priority: 'medium',
           author_key: author.author_key,
-          error: err instanceof Error ? err.message : String(err)
-        });
-      });
+          wikidata_id: author.wikidata_id,
+          triggered_by: 'view'
+        }).catch((err) => {
+          logger?.error('[AuthorDetails] Failed to queue enrichment', {
+            author_key: author.author_key,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        })
+      );
     }
 
     return c.json({

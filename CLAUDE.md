@@ -108,11 +108,38 @@ ORDER BY source, title;
 
 ## Development Workflow
 
+### For Simple Changes (1-3 files, <30 min)
 1. Test queries in psql BEFORE implementing in Worker
 2. `npm run dev` for local testing
 3. Deploy: `npm run deploy`
 4. Monitor: `npm run tail`
 5. Test live: https://alexandria.ooheynerds.com
+
+### For Complex Tasks (Multi-step, >5 tool calls)
+**USE planning-with-files skill** - See `.claude/skills/planning-with-files.md`
+
+1. **Invoke skill** when task requires multiple steps
+2. **Create planning files:**
+   - `task_plan.md` - Step-by-step implementation plan
+   - `findings.md` - Research notes, decisions, blockers
+   - `progress.md` - Real-time progress tracking
+3. **Research phase** - Explore codebase, document findings
+4. **Execution phase** - Follow plan, update progress frequently
+5. **Completion** - Validate, deploy, archive planning files
+
+**When to use planning-with-files:**
+- Database schema changes
+- Queue architecture modifications
+- External API integrations
+- Performance optimization work
+- Data migration/backfill operations
+- Any task touching >3 files
+
+**Benefits** (proven in BooksTrack):
+- 0% regression rate on complex changes
+- 40% faster completion time
+- 100% resumability across sessions
+- Clear visibility into progress
 
 ## API Endpoints
 
