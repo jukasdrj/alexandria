@@ -188,6 +188,51 @@ ORDER BY source, title;
 
 **Docs**: See quota section in CLAUDE.md for detailed implementation
 
+## Open API Integrations (Issue #159)
+
+**Phase 1-5 COMPLETE** (Jan 2026): Archive.org, Wikipedia, and Wikidata integrations for free metadata and covers.
+
+**Services**:
+- `worker/services/archive-org.ts` - Pre-2000 book covers, metadata
+- `worker/services/wikipedia.ts` - Author biographies with Wikidata ID lookup
+- `worker/services/wikidata.ts` - SPARQL queries for books, authors, bibliographies
+
+**Cover Priority Chain** (`worker/services/cover-fetcher.ts`):
+1. Google Books (free, good quality)
+2. OpenLibrary (free, reliable)
+3. **Archive.org** (free, excellent for pre-2000 books)
+4. **Wikidata** (free, Wikimedia Commons images)
+5. ISBNdb (paid, highest quality, quota-protected)
+
+**Rate Limiting**: KV-backed, distributed-safe
+- Archive.org: 1 req/sec (1000ms delay)
+- Wikipedia: 1 req/sec (1000ms delay)
+- Wikidata: 2 req/sec (500ms delay)
+
+**Caching**: Long TTL for stability
+- Archive.org: 7 days (covers may update)
+- Wikipedia: 30 days (biographies rarely change)
+- Wikidata: 30 days (metadata stable)
+
+**User-Agent**: Includes project name, contact email, purpose, donation link
+```
+Alexandria/2.3.0 (nerd@ooheynerds.com; Book metadata enrichment; Donate: https://donate.wikimedia.org)
+```
+
+**Documentation**:
+- **API Guide**: `docs/api/OPEN-API-INTEGRATIONS.md` (comprehensive guide with examples)
+- **Rate Limits**: `docs/operations/RATE-LIMITS.md` (central reference for all APIs)
+- **Donations**: `docs/operations/DONATION-TRACKING.md` (usage tracking, donation model)
+
+**Key Functions**:
+- `fetchArchiveOrgCover(isbn, env, logger)` - Cover URL from Archive.org
+- `fetchAuthorBiography(sql, authorKey, env, logger)` - Wikipedia bio with Wikidata lookup
+- `fetchBookByISBN(isbn, env, logger)` - Wikidata book metadata via SPARQL
+- `fetchAuthorBibliography(authorQid, env, logger)` - Complete author works from Wikidata
+- `fetchAuthorMetadata(authorQid, env, logger)` - Comprehensive author profile from Wikidata
+
+**Analytics**: All Open API calls tracked via `trackOpenApiUsage()` for donation calculations
+
 ## Queue Architecture
 
 **Config**: `worker/wrangler.jsonc`

@@ -71,9 +71,11 @@ Cloudflare Queues
 
 **Data Sources:**
 - **OpenLibrary** - Base dataset (54.8M editions, 49.3M ISBNs, 40.1M works, 14.7M authors)
-- **ISBNdb Premium** - Enrichment (3 req/sec, 1000 ISBN batches, 15K daily quota)
-- **Google Books** - Fallback metadata
-- **Wikidata** - Author diversity data (gender, nationality, birth place)
+- **ISBNdb Premium** - Paid enrichment (3 req/sec, 1000 ISBN batches, 15K daily quota)
+- **Google Books** - Free metadata fallback
+- **Archive.org** - Free pre-2000 book covers (NEW - Jan 2026)
+- **Wikipedia** - Free author biographies with Wikidata ID lookup (NEW - Jan 2026)
+- **Wikidata** - Free structured book/author metadata via SPARQL (NEW - Jan 2026)
 
 ---
 
