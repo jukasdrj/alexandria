@@ -262,7 +262,6 @@ async function deduplicateFuzzyMatch(
 
       for (const candidate of batch) {
         const title = candidate.title!.toLowerCase();
-        const author = (candidate.authors![0] || '').toLowerCase();
 
         // Use PostgreSQL trigram similarity (requires pg_trgm extension)
         // Note: Author similarity not implemented due to complex join structure

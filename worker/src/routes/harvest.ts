@@ -17,11 +17,7 @@ import { parseHarvestConfig, buildISBNPrefixFilter } from '../lib/harvest-config
 import { batchUpdateCoverUrls } from '../services/batch-operations.js';
 import { Logger } from '../../lib/logger.js';
 import { HarvestState } from '../services/harvest-state.js';
-import { deduplicateISBNs } from '../services/deduplication.js';
-import { enrichEdition } from '../services/enrichment-service.js';
-import type { EnrichEditionRequest } from '../services/types.js';
 import {
-  generateCuratedBookList,
   testGeminiConnection,
 } from '../services/gemini-backfill.js';
 import { generateHybridBackfillList } from '../services/hybrid-backfill.js';

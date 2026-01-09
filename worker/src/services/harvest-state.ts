@@ -13,8 +13,10 @@
  * Used by: harvest.ts (POST /api/harvest/backfill endpoint)
  */
 
-import type { KVNamespace } from '@cloudflare/workers-types';
 import type { Logger } from '../../lib/logger.js';
+
+// Note: KVNamespace is a global type from Cloudflare Workers runtime
+// No explicit import needed - TypeScript automatically recognizes it from wrangler.toml types
 
 // =================================================================================
 // Types

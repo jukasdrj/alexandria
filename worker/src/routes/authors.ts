@@ -456,8 +456,6 @@ app.openapi(enrichStatusRoute, async (c) => {
 // POST /api/authors/resolve-identifier
 // @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(resolveIdentifierRoute, async (c) => {
-  const startTime = Date.now();
-
   try {
     const logger = c.get('logger');
     const cache = c.env.CACHE; // KV namespace for caching

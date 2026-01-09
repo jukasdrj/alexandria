@@ -143,14 +143,6 @@ async function searchByAuthor(
 }
 
 /**
- * Sanitize user input for SQL ILIKE patterns
- * Escapes special pattern characters: %, _, \
- */
-function sanitizeSqlPattern(input: string): string {
-	return input.replace(/[%_\\]/g, '\\$&');
-}
-
-/**
  * Search by title using GIN trigram indexes (fuzzy search)
  * Uses dynamic threshold tuning for better precision/recall balance
  */
