@@ -149,6 +149,51 @@ export const ResolveExternalIdSchema = z.object({
   type: z.enum(['edition', 'work', 'author']).default('edition').optional(),
 });
 
+// Recommendation Schemas (Issue #164)
+export const SubjectsQuerySchema = z.object({
+  ids: z.string()
+    .min(1, 'At least one ID required')
+    .transform((val) => val.split(',').map(id => id.trim()).filter(Boolean))
+    .describe('Comma-separated ISBNs or work_keys'),
+  limit: z.string()
+    .optional()
+    .default('1')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().min(1).max(10))
+    .describe('Max results per ID'),
+  nocache: z.string()
+    .optional()
+    .transform((val) => val === 'true')
+    .describe('Bypass cache'),
+});
+
+export const SimilarBooksQuerySchema = z.object({
+  subjects: z.string()
+    .min(1, 'At least one subject required')
+    .transform((val) => val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean))
+    .describe('Comma-separated subject tags'),
+  exclude: z.string()
+    .optional()
+    .transform((val) => val ? val.split(',').map(id => id.trim()).filter(Boolean) : [])
+    .describe('Work keys to exclude'),
+  limit: z.string()
+    .optional()
+    .default('100')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().min(1).max(500))
+    .describe('Max results'),
+  min_overlap: z.string()
+    .optional()
+    .default('1')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().min(1))
+    .describe('Minimum subject overlap required'),
+  nocache: z.string()
+    .optional()
+    .transform((val) => val === 'true')
+    .describe('Bypass cache'),
+});
+
 // =================================================================================
 // Inferred TypeScript Types from Zod Schemas
 // =================================================================================
@@ -163,6 +208,8 @@ export type EnrichAuthor = z.infer<typeof EnrichAuthorSchema>;
 export type QueueEnrichment = z.infer<typeof QueueEnrichmentSchema>;
 export type ExternalIdQuery = z.infer<typeof ExternalIdQuerySchema>;
 export type ResolveExternalId = z.infer<typeof ResolveExternalIdSchema>;
+export type SubjectsQuery = z.infer<typeof SubjectsQuerySchema>;
+export type SimilarBooksQuery = z.infer<typeof SimilarBooksQuerySchema>;
 
 // =================================================================================
 // Response Types
@@ -417,6 +464,67 @@ export interface ResolveExternalIdResult {
   data: ResolvedEntity;
 }
 
+/**
+ * Single book subjects result
+ * @since 2.4.0 - Recommendation System (Issue #164)
+ */
+export interface BookSubjects {
+  id: string;                        // Original ID from request
+  type: 'isbn' | 'work';            // Detected identifier type
+  work_key: string | null;          // OpenLibrary work key
+  title: string | null;             // Book title
+  subjects: string[];               // Array of normalized subject tags
+  match_source: 'enriched_works' | 'works_fallback' | 'not_found';
+}
+
+/**
+ * Subjects endpoint response data
+ * @since 2.4.0 - Recommendation System (Issue #164)
+ */
+export interface SubjectsData {
+  results: BookSubjects[];
+  total: number;                    // Number of IDs with subject data
+  missing: string[];                // IDs without subject data
+  query: {
+    ids_count: number;
+    limit: number;
+  };
+}
+
+/**
+ * Similar book result (full metadata)
+ * @since 2.4.0 - Recommendation System (Issue #164)
+ */
+export interface SimilarBook {
+  work_key: string;
+  title: string;
+  isbn: string | null;
+  subjects: string[];               // Array of normalized subject tags
+  subject_match_count: number;      // Number of matching subjects
+  authors: AuthorReference[];
+  publish_date: string | null;
+  publishers: string | null;
+  pages: number | null;
+  cover_url: string | null;
+  cover_source: 'r2' | 'external' | 'external-fallback' | 'enriched-cached' | null;
+  openlibrary_work: string;
+  openlibrary_edition: string | null;
+}
+
+/**
+ * Similar books endpoint response data
+ * @since 2.4.0 - Recommendation System (Issue #164)
+ */
+export interface SimilarBooksData {
+  results: SimilarBook[];
+  total: number;                    // Total matching works
+  query: {
+    subjects: string[];             // Normalized subjects from request
+    excluded_count: number;         // Number of excluded works
+    min_overlap: number;
+  };
+}
+
 // =================================================================================
 // API Client Types (for consumers like bendv3)
 // =================================================================================
@@ -452,6 +560,8 @@ export const ENDPOINTS = {
   COVER_BATCH: '/covers/batch',
   EXTERNAL_IDS: '/api/external-ids/:entity_type/:key',  // External ID lookup (Issue #155)
   RESOLVE_EXTERNAL_ID: '/api/resolve/:provider/:id',    // Reverse lookup (Issue #155)
+  RECOMMENDATIONS_SUBJECTS: '/api/recommendations/subjects',  // Recommendation subjects (Issue #164)
+  RECOMMENDATIONS_SIMILAR: '/api/recommendations/similar',    // Similar books (Issue #164)
 } as const;
 
 /**
@@ -547,6 +657,18 @@ export const API_ROUTES = {
     path: ENDPOINTS.RESOLVE_EXTERNAL_ID,
     requestSchema: ResolveExternalIdSchema,
   } as APIRoute<ResolveExternalId, ResolveExternalIdResult>,
+
+  recommendationSubjects: {
+    method: 'GET',
+    path: ENDPOINTS.RECOMMENDATIONS_SUBJECTS,
+    requestSchema: SubjectsQuerySchema,
+  } as APIRoute<SubjectsQuery, SubjectsData>,
+
+  recommendationSimilar: {
+    method: 'GET',
+    path: ENDPOINTS.RECOMMENDATIONS_SIMILAR,
+    requestSchema: SimilarBooksQuerySchema,
+  } as APIRoute<SimilarBooksQuery, SimilarBooksData>,
 } as const;
 
 // =================================================================================
