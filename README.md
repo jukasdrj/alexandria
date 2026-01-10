@@ -65,7 +65,7 @@ PostgreSQL 18 (54.8M editions, SSL enabled)
 R2 Bucket (bookstrack-covers-processed)
     ↓
 Cloudflare Queues
-  - alexandria-enrichment-queue (100/batch, 1 concurrency)
+  - alexandria-enrichment-queue (10/batch, 1 concurrency)
   - alexandria-cover-queue (5/batch, 3 concurrency)
   - alexandria-backfill-queue (1/batch, 1 concurrency)
   - alexandria-author-queue (10/batch, 1 concurrency) [NEW]
@@ -189,6 +189,10 @@ ORDER BY source, title;
 ### External ID Resolution
 - **`GET /api/external-ids/{entity_type}/{key}`** - Get external IDs (ASIN, Goodreads, etc.) from internal key
 - **`GET /api/resolve/{provider}/{id}`** - Resolve external ID to internal key
+
+### Recommendations
+- **`GET /api/recommendations/subjects`** - Get subjects/categories for a book
+- **`GET /api/recommendations/similar`** - Find similar books by subject
 
 ### Books & New Releases
 - **`POST /api/books/search`** - Search ISBNdb by date/title/author
@@ -428,5 +432,5 @@ MIT
 ---
 
 **Last Updated:** January 9, 2026
-**Version:** 2.2.2
+**Version:** 2.4.0
 **Database:** 54.8M editions | 49.3M ISBNs | 40.1M works | 14.7M authors
