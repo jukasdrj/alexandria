@@ -1,70 +1,58 @@
-# Alexandria Documentation Health Report
+# Documentation Health Report
 
-**Date:** January 4, 2026
-**Auditor:** Jules (Technical Architect Agent)
+**Date:** January 9, 2026
+**Auditor:** Agent Jules
 
----
+This report details the findings of an automated audit of the Alexandria project documentation, identifying inconsistencies between the documentation and the current codebase.
 
 ## 🚨 Critical Mismatches
 
-The following items represent discrepancies where documentation contradicts the actual codebase. These should be addressed immediately to prevent developer confusion.
+These are areas where the documentation contradicted the deployed code or significant features were missing.
 
-### 1. Missing Endpoints
-The following endpoints are documented in `docs/api/API-SEARCH-ENDPOINTS.md` but **do not exist** in the `worker/src` codebase:
+1.  **Queue Configuration (README.md):**
+    *   **Drift:** `README.md` listed only `alexandria-enrichment-queue` and `alexandria-cover-queue` in the Architecture diagram.
+    *   **Reality:** `worker/wrangler.jsonc` and `CLAUDE.md` confirm 4 queues: `enrichment`, `cover`, `backfill`, `author`.
+    *   **Status:** **FIXED**. `README.md` has been auto-updated.
 
-*   **`POST /api/isbns/check`** (Bulk ISBN Existence Check)
-    *   *Status:* Mentioned as "Completed" in `TODO.md` (Phase 2.10), but code is missing from `worker/src/routes/`.
-*   **`POST /api/queue/drain/enrichment`** (Manual Enrichment Queue Drain)
-    *   *Status:* Completely missing from codebase.
-*   **`POST /api/queue/drain/covers`** (Manual Cover Queue Drain)
-    *   *Status:* Completely missing from codebase.
-*   **`GET /api/covers/inspect`** (Cover Object Inspection)
-    *   *Status:* Completely missing from codebase.
+2.  **API Endpoints (README.md):**
+    *   **Drift:** `README.md` was missing the "External ID Resolution" endpoints (`GET /api/external-ids`, `GET /api/resolve`).
+    *   **Reality:** These endpoints are live in `worker/src/routes/external-ids.ts` and documented in `CLAUDE.md`.
+    *   **Status:** **FIXED**. `README.md` has been auto-updated.
 
-### 2. Phantom Features (Smart Resolution)
-The documentation `docs/api/API-SEARCH-ENDPOINTS.md` claims "Smart Resolution" is configurable via environment variables, but these variables **do not exist** in `env.ts` or `wrangler.jsonc`:
+## 🛠️ Auto-Updates Made
 
-*   `SMART_RESOLUTION_ENABLED`
-*   `SMART_RESOLUTION_PROVIDERS`
+The following files were automatically updated to correct drifts:
 
-*Note:* The "Smart Resolution" logic *does* exist in tests (`worker/src/__tests__/services/smart-resolution.test.ts`), but the configuration layer documented is missing from the production environment.
+*   **`README.md`:**
+    *   Updated "Last Updated" date to Jan 9, 2026.
+    *   Added `alexandria-backfill-queue` and `alexandria-author-queue` to Architecture section.
+    *   Added "External ID Resolution" section to API Endpoints.
+    *   Added `POST /api/harvest/backfill` to API Endpoints.
+    *   Updated `POST /api/authors/resolve-identifier` description to clarify it is for VIAF/ISNI.
 
----
+## ⚠️ Stale Warnings & Context Needed
 
-## ⚠️ Stale Warnings
+These files appear outdated or potentially confusing and may require human review.
 
-The following files or sections appear to be outdated based on recent code changes:
+1.  **`docs/api/API-IDENTIFIER-RESOLUTION.md` vs Generic External IDs**
+    *   **Issue:** This file specifically documents `POST /api/authors/resolve-identifier` (VIAF/ISNI → Wikidata). However, the project also has "External ID Resolution" (Issue #155) for resolving ASIN/Goodreads/etc. (`GET /api/external-ids`, `GET /api/resolve`).
+    *   **Confusion:** The filename `API-IDENTIFIER-RESOLUTION.md` implies it covers all identifier resolution, but it only covers the author-specific one.
+    *   **Recommendation:** Rename `docs/api/API-IDENTIFIER-RESOLUTION.md` to `docs/api/API-AUTHOR-IDENTIFIER-RESOLUTION.md` and create a new `docs/api/API-EXTERNAL-ID-RESOLUTION.md` for the generic system.
 
-*   **`docs/api/API-SEARCH-ENDPOINTS.md`**:
-    *   Last Updated date says "2026-01-04", but it includes the missing endpoints listed above. It appears the documentation was updated anticipatorily for features that were either reverted or not yet merged.
-*   **`TODO.md`**:
-    *   Lists `POST /api/isbns/check` as "Fixed duplicate... endpoint (Phase 2.10)". The endpoint might have been accidentally removed during a refactor.
-
----
+2.  **`README.md` Version**
+    *   **Issue:** `README.md` lists version `2.2.2`. `package.json` lists `2.2.0`.
+    *   **Recommendation:** Verify the correct semantic version.
 
 ## ✅ Verified Accurate
 
-The following key components have been verified to match the codebase:
+The following key files were checked and found to be consistent with the codebase:
 
-*   **Core Search & Enrichment:**
-    *   `GET /api/search/combined` (Exists and matches logic)
-    *   `POST /api/enrich/batch-direct` (Exists)
-    *   `POST /api/authors/enrich-bibliography` (Exists)
-*   **Cover Processing:**
-    *   `POST /api/covers/process` (Exists)
-    *   `POST /api/covers/queue` (Exists)
-    *   `GET /api/covers/:work_key/:size` (Verified in `worker/src/routes/covers.ts`)
-*   **New Features (Jan 4):**
-    *   `POST /api/authors/resolve-identifier` (Exists, matches PRD)
-    *   `POST /api/authors/enrich-wikidata` (Exists)
-*   **Environment Variables:**
-    *   `ISBNDB_API_KEY` (Confirmed in use)
-    *   `GOOGLE_BOOKS_API_KEY` (Confirmed in use)
+*   **`CLAUDE.md`:** Accurately reflects the 4-queue architecture, bindings, and recent features like External ID Resolution. It serves as the authoritative source.
+*   **`worker/wrangler.jsonc`:** Matches `CLAUDE.md` configuration.
+*   **`docs/INDEX.md`:** Accurately links to existing docs, though it may need updates if new API docs are created.
 
----
+## Next Steps
 
-## 🛠️ Recommendations
-
-1.  **Investigate `/api/isbns/check`**: Since `TODO.md` says it was fixed/completed, locate the commit where it might have been lost.
-2.  **Remove Phantom Endpoints**: If the admin/queue drain endpoints were experimental, remove them from `API-SEARCH-ENDPOINTS.md`.
-3.  **Update Configuration Docs**: Remove references to `SMART_RESOLUTION_*` env vars if they are not actually implemented in `env.ts`.
+1.  **Review `docs/api/` naming:** Consider renaming `API-IDENTIFIER-RESOLUTION.md` to avoid confusion.
+2.  **Create missing API doc:** Create documentation for the Generic External ID Resolution endpoints (`GET /api/external-ids`, `GET /api/resolve`).
+3.  **Sync Version:** Update `package.json` to `2.2.2` if that is the correct intended version.
