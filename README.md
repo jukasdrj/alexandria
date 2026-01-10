@@ -65,8 +65,10 @@ PostgreSQL 18 (54.8M editions, SSL enabled)
 R2 Bucket (bookstrack-covers-processed)
     ↓
 Cloudflare Queues
-  - alexandria-cover-queue (10/batch, 10 concurrency)
   - alexandria-enrichment-queue (100/batch, 1 concurrency)
+  - alexandria-cover-queue (5/batch, 3 concurrency)
+  - alexandria-backfill-queue (1/batch, 1 concurrency)
+  - alexandria-author-queue (10/batch, 1 concurrency) [NEW]
 ```
 
 **Data Sources:**
@@ -182,10 +184,16 @@ ORDER BY source, title;
 - **`POST /api/authors/bibliography`** - Get ISBNdb bibliography
 - **`POST /api/authors/enrich-bibliography`** - Fetch + enrich in one call
 - **`POST /api/authors/enrich-wikidata`** - Enrich with Wikidata
+- **`POST /api/authors/resolve-identifier`** - Resolve VIAF/ISNI to Wikidata
+
+### External ID Resolution
+- **`GET /api/external-ids/{entity_type}/{key}`** - Get external IDs (ASIN, Goodreads, etc.) from internal key
+- **`GET /api/resolve/{provider}/{id}`** - Resolve external ID to internal key
 
 ### Books & New Releases
 - **`POST /api/books/search`** - Search ISBNdb by date/title/author
 - **`POST /api/books/enrich-new-releases`** - Enrich by date range
+- **`POST /api/harvest/backfill`** - Trigger historical backfill pipeline
 
 ### Quota Management
 - **`GET /api/quota/status`** - ISBNdb quota usage and remaining
@@ -296,7 +304,7 @@ alexandria/
 - **Tunnel:** `alexandria-db.ooheynerds.com` (ID: 848928ab-4ab9-4733-93b0-3e7967c60acb)
 - **Hyperdrive:** ID: 00ff424776f4415d95245c3c4c36e854
 - **R2 Bucket:** `bookstrack-covers-processed`
-- **Queues:** `alexandria-cover-queue`, `alexandria-enrichment-queue`
+- **Queues:** `alexandria-enrichment-queue`, `alexandria-cover-queue`, `alexandria-backfill-queue`, `alexandria-author-queue`
 
 ### Home Server (Unraid)
 - **Host:** `Tower.local` (192.168.1.240)
@@ -339,19 +347,35 @@ alexandria/
 # Development
 cd worker/ && npm run dev        # Local dev
 npm run deploy                    # Deploy to Cloudflare
-npm run tail                      # Live logs
+npm run tail                      # Live Worker logs
+npm run test     # Run vitest tests
+```
 
-# Infrastructure
-./scripts/tunnel-status.sh        # Check tunnel (4 connections)
-./scripts/db-check.sh             # Database health
-ssh root@Tower.local              # SSH to Unraid
+### Infrastructure Checks
+```bash
+./scripts/tunnel-status.sh  # Check tunnel (expect 4 connections)
+./scripts/db-check.sh        # Verify database + sample query
+./scripts/deploy-worker.sh   # Deploy with validation
+```
 
-# Database
+### Database Access
+```bash
 ssh root@Tower.local "docker exec postgres psql -U openlibrary -d openlibrary"
+```
 
-# Monitoring
+### Monitoring
+```bash
+# Real-time logs
+npm run tail
+
+# ISBNdb quota
 curl https://alexandria.ooheynerds.com/api/quota/status | jq
+
+# Database stats
 curl https://alexandria.ooheynerds.com/api/stats | jq
+
+# Queue status
+npx wrangler queues list | grep alexandria
 ```
 
 ---
@@ -403,6 +427,6 @@ MIT
 
 ---
 
-**Last Updated:** January 5, 2026
+**Last Updated:** January 9, 2026
 **Version:** 2.2.2
 **Database:** 54.8M editions | 49.3M ISBNs | 40.1M works | 14.7M authors
