@@ -256,6 +256,9 @@ export default {
   async queue(batch: MessageBatch, env: Env, _ctx: ExecutionContext) {
     const logger = Logger.forQueue(env, batch.queue, batch.messages.length);
 
+    // TEMPORARY: Explicit logging for debugging
+    console.log(`[QUEUE HANDLER] Received batch for queue: ${batch.queue}, messages: ${batch.messages.length}`);
+
     switch (batch.queue) {
       case 'alexandria-cover-queue':
         return await processCoverQueue(batch as MessageBatch<CoverQueueMessage>, env);

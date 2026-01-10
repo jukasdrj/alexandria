@@ -1,16 +1,20 @@
 ---
 description: Monitor and analyze backfill progress with detailed status
+user-invocable: true
+model: haiku
+context: main
 allowed-tools:
-  - Bash
+  - Bash(curl https://alexandria.ooheynerds.com/*)
+  - Bash(./scripts/query-gemini-books.sh)
+  - Bash(npx wrangler queues *)
   - Read
-agent: general-purpose
 ---
 
 Check backfill status, Gemini synthetic books, and enrichment progress.
 
 ## Usage
 
-This skill helps you monitor the Alexandria backfill pipeline.
+This skill monitors the Alexandria backfill pipeline with real-time status.
 
 ## Steps
 

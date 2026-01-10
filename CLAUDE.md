@@ -8,6 +8,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Scope:** Book metadata integrity, ingestion, enrichment, and serving
 **Upstream:** Provides data to bendv3 (API gateway)
 
+## Skills & Agents Architecture
+
+Alexandria leverages Claude Code v2.1+ skills and custom agents for specialized workflows.
+
+**Custom Agents** (`.claude/agents/`):
+- **postgres-optimizer** - Database schema, query optimization, index strategies
+  - Auto-loads: planning-with-files, optimize-query, db-query
+  - Use for: Schema migrations, performance tuning, complex queries
+- **cloudflare-workers-optimizer** - Workers performance, wrangler config, queue optimization
+  - Auto-loads: planning-with-files, optimize-query
+  - Use for: Queue tuning, deployment issues, cost optimization
+
+**Domain Skills** (`.claude/skills/`):
+- **planning-with-files** - Multi-step task planning with structured files (task_plan.md, findings.md, progress.md)
+- **schema-migration** - Safe database changes with postgres-optimizer agent (forked context)
+- **api-integration** - Add external API providers with rate limiting and circuit breakers (forked context)
+- **queue-optimization** - Optimize Cloudflare Queue performance with cloudflare-workers-optimizer agent
+
+**Invocation:**
+```bash
+# Direct skill invocation
+/schema-migration
+/api-integration
+/queue-optimization
+
+# Or let Claude choose automatically based on task
+"Add a new column to enriched_editions"  → schema-migration
+"Integrate LibraryThing API"              → api-integration
+"The enrichment queue is backing up"      → queue-optimization
+```
+
+**Skill Composition:**
+Skills auto-load sub-skills and agents. Example: `/schema-migration` loads:
+- postgres-optimizer agent (expert guidance)
+- planning-with-files skill (structured execution)
+- db-check.sh hook (pre-validation)
+
+**Benefits:**
+- Automatic expert agent activation
+- Pre/post execution validation hooks
+- Forked sub-agent contexts for isolation
+- Structured planning for complex tasks
+
 ## Project Overview
 
 Alexandria exposes a self-hosted OpenLibrary PostgreSQL database (54M+ books) through Cloudflare Workers + Tunnel. Database runs on Unraid at home, accessible globally via Cloudflare's edge.
@@ -116,30 +159,40 @@ ORDER BY source, title;
 5. Test live: https://alexandria.ooheynerds.com
 
 ### For Complex Tasks (Multi-step, >5 tool calls)
-**USE planning-with-files skill** - See `.claude/skills/planning-with-files.md`
+**USE specialized skills** - See `.claude/skills/` directory
 
-1. **Invoke skill** when task requires multiple steps
-2. **Create planning files:**
-   - `task_plan.md` - Step-by-step implementation plan
-   - `findings.md` - Research notes, decisions, blockers
-   - `progress.md` - Real-time progress tracking
-3. **Research phase** - Explore codebase, document findings
-4. **Execution phase** - Follow plan, update progress frequently
-5. **Completion** - Validate, deploy, archive planning files
+Alexandria provides domain-specific skills that auto-load planning-with-files and relevant agents:
 
-**When to use planning-with-files:**
-- Database schema changes
-- Queue architecture modifications
-- External API integrations
-- Performance optimization work
-- Data migration/backfill operations
-- Any task touching >3 files
+**Available Skills:**
+- **`/planning-with-files`** - General multi-step task planning (manual invocation)
+- **`/schema-migration`** - Database schema changes (postgres-optimizer agent, forked context)
+- **`/api-integration`** - Add new external API providers (forked context)
+- **`/queue-optimization`** - Optimize Cloudflare Queue performance (cloudflare-workers-optimizer agent)
+
+**Skill Features (Claude Code v2.1.0+):**
+- Auto-load relevant agents and sub-skills
+- Run in forked sub-agent contexts for isolation
+- Pre/post execution hooks for validation
+- Structured planning with task files
+
+**When to use skills:**
+- **schema-migration**: Adding columns, creating indexes, data migrations
+- **api-integration**: Integrating ISBNdb, Google Books, LibraryThing, etc.
+- **queue-optimization**: Tuning batch sizes, concurrency, handler performance
+- **planning-with-files**: Any multi-step task requiring >5 tool calls
+
+**Skills automatically:**
+1. Load appropriate expert agents (postgres-optimizer, cloudflare-workers-optimizer)
+2. Create planning files (task_plan.md, findings.md, progress.md)
+3. Execute validation hooks (db-check.sh, queue-status)
+4. Run in isolated forked contexts (when configured)
 
 **Benefits** (proven in BooksTrack):
 - 0% regression rate on complex changes
 - 40% faster completion time
 - 100% resumability across sessions
 - Clear visibility into progress
+- Expert guidance from specialized agents
 
 ## API Endpoints
 

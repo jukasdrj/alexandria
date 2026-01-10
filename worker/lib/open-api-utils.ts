@@ -27,11 +27,13 @@ import type { Logger } from './logger.js';
  * - Archive.org: 1 req/sec (no hard limit, but respectful)
  * - Wikipedia: 1 req/sec (bot policy: max 200 req/sec, we use 1/sec)
  * - Wikidata: 2 req/sec (SPARQL endpoint: max 60 req/min)
+ * - Google Books: 1 req/sec (free tier: 1000 requests/day)
  */
 export const RATE_LIMITS = {
   'archive.org': 1000,       // 1 second
   'wikipedia': 1000,         // 1 second
   'wikidata': 500,           // 500ms (2 req/sec)
+  'google-books': 1000,      // 1 second
 } as const;
 
 /**
@@ -41,15 +43,18 @@ export const CACHE_TTLS = {
   'archive.org': 604800,     // 7 days (covers may update)
   'wikipedia': 2592000,      // 30 days (biographies rarely change)
   'wikidata': 2592000,       // 30 days (metadata stable)
+  'google-books': 2592000,   // 30 days (book metadata stable)
 } as const;
 
 /**
  * Donation URLs for User-Agent strings
+ * Note: Google Books doesn't have a public donation page
  */
 export const DONATION_URLS = {
   'archive.org': 'https://archive.org/donate',
   'wikipedia': 'https://donate.wikimedia.org',
   'wikidata': 'https://donate.wikimedia.org',
+  'google-books': undefined,  // No public donation page
 } as const;
 
 /**
@@ -146,11 +151,11 @@ export async function enforceRateLimit(
  * - Identifies our application and version
  * - Provides contact email for API operators
  * - Describes our purpose
- * - Includes donation link to support the service
+ * - Includes donation link to support the service (if available)
  *
- * Format: "Alexandria/{version} ({contact}; {purpose}; Donate: {donation_url})"
+ * Format: "Alexandria/{version} ({contact}; {purpose}[; Donate: {donation_url}])"
  *
- * @param provider - Provider name (archive.org, wikipedia, wikidata)
+ * @param provider - Provider name (archive.org, wikipedia, wikidata, google-books)
  * @param purpose - Brief description of how we use the API
  * @returns Formatted User-Agent string
  *
@@ -158,11 +163,20 @@ export async function enforceRateLimit(
  * ```typescript
  * buildUserAgent('wikipedia', 'Author biographies')
  * // Returns: "Alexandria/2.3.0 (nerd@ooheynerds.com; Author biographies; Donate: https://donate.wikimedia.org)"
+ *
+ * buildUserAgent('google-books', 'Book metadata')
+ * // Returns: "Alexandria/2.3.0 (nerd@ooheynerds.com; Book metadata)"
  * ```
  */
 export function buildUserAgent(provider: Provider, purpose: string): string {
   const donationUrl = DONATION_URLS[provider];
-  return `Alexandria/${ALEXANDRIA_VERSION} (${CONTACT_EMAIL}; ${purpose}; Donate: ${donationUrl})`;
+  const baseAgent = `Alexandria/${ALEXANDRIA_VERSION} (${CONTACT_EMAIL}; ${purpose}`;
+
+  if (donationUrl) {
+    return `${baseAgent}; Donate: ${donationUrl})`;
+  }
+
+  return `${baseAgent})`;
 }
 
 // =================================================================================

@@ -78,6 +78,9 @@ export interface Env {
   // Parallel enrichment configuration (Issue #133)
   ENABLE_PARALLEL_ENRICHMENT: string;
   PARALLEL_CONCURRENCY_LIMIT: string;
+
+  // Google Books subject enrichment (Issue #163 Phase 2)
+  ENABLE_GOOGLE_BOOKS_ENRICHMENT: string;
 }
 
 // Logger type is imported from lib/logger.js for consistency

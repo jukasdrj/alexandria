@@ -1,6 +1,12 @@
 ---
 description: Test a database query via SSH
 argument-hint: SQL query to execute (e.g., "SELECT * FROM editions LIMIT 5")
+user-invocable: true
+model: haiku
+context: main
+allowed-tools:
+  - Bash(ssh root@Tower.local *)
+  - AskUserQuestion
 ---
 
 Test a PostgreSQL query on the Alexandria database.

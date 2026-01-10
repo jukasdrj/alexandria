@@ -194,6 +194,7 @@ interface GoogleBooksResponse {
       pageCount?: number;
       language?: string;
       description?: string;
+      categories?: string[];  // Added for subject enrichment (Phase 2)
       imageLinks?: {
         smallThumbnail?: string;
         thumbnail?: string;

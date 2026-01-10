@@ -1,6 +1,13 @@
 ---
 description: Comprehensive status check for queues, enrichment, backfill, and covers
+user-invocable: true
 model: haiku
+context: main
+allowed-tools:
+  - Bash(ssh root@Tower.local *)
+  - Bash(curl *)
+  - Bash(cd worker && npx wrangler *)
+  - Bash(echo *)
 ---
 
 Check comprehensive status of Alexandria's queue and enrichment systems including enriched tables, queue health, backfill progress, cover harvest, and author enrichment.

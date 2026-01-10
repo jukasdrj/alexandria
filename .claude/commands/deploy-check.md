@@ -1,11 +1,25 @@
 ---
 description: Deploy Worker with full pre/post validation
+user-invocable: true
 model: sonnet
+context: main
+allowed-tools:
+  - Bash(./scripts/*)
+  - Bash(cd worker && *)
+  - Bash(npx wrangler *)
+  - Bash(curl https://alexandria.ooheynerds.com*)
+  - AskUserQuestion
+hooks:
+  PreToolUse:
+    - matcher: "npx wrangler deploy"
+      hooks:
+        - type: prompt
+          prompt: "Validate that tunnel and database checks passed before deploying"
 ---
 
 Deploy the Cloudflare Worker with comprehensive checks.
 
-think harder about potential deployment risks and validation steps
+Think harder about potential deployment risks and validation steps.
 
 ## Pre-deployment
 

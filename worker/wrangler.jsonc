@@ -60,7 +60,9 @@
     "HARVEST_QUEUE_DEFAULT": "false",
 
     "ENABLE_PARALLEL_ENRICHMENT": "false",
-    "PARALLEL_CONCURRENCY_LIMIT": "8"
+    "PARALLEL_CONCURRENCY_LIMIT": "8",
+
+    "ENABLE_GOOGLE_BOOKS_ENRICHMENT": "true"
   },
 
   "hyperdrive": [
@@ -151,8 +153,8 @@
     "consumers": [
       {
         "queue": "alexandria-enrichment-queue",
-        "max_batch_size": 100,
-        "max_batch_timeout": 60,
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
         "max_retries": 3,
         "dead_letter_queue": "alexandria-enrichment-dlq",
         "max_concurrency": 1

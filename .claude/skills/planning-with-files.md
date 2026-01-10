@@ -1,8 +1,29 @@
+---
+name: planning-with-files
+description: Structured file-based planning for complex multi-step tasks requiring >5 tool calls
+user-invocable: true
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - Task
+hooks:
+  Start:
+    - type: command
+      command: echo "📋 Planning mode activated - creating task files..."
+  Stop:
+    - type: command
+      command: echo "📋 Planning complete - files ready for execution"
+---
+
 # Planning With Files Skill
 
 **Purpose:** Structured file-based planning for complex Alexandria tasks
 **Status:** Production-ready (proven in BooksTrack)
-**Updated:** January 9, 2026
+**Updated:** January 10, 2026
 
 ## When to Use
 

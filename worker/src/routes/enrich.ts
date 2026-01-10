@@ -37,6 +37,8 @@ import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 import { createQuotaManager } from '../services/quota-manager.js';
 import { extractGoogleBooksCategories } from '../../services/google-books.js';
 import { updateWorkSubjects } from '../services/subject-enrichment.js';
+import { fetchBookByISBN } from '../../services/wikidata.js';
+import type { WikidataBookMetadata } from '../../types/open-apis.js';
 
 // Create enrichment router
 export const enrichRoutes = new OpenAPIHono<AppBindings>();
@@ -527,6 +529,37 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
       duration_ms: batchDuration,
     });
 
+    // Parallel Wikidata genre enrichment (non-blocking)
+    const wikidataStartTime = Date.now();
+    const wikidataData = new Map<string, WikidataBookMetadata>();
+
+    // Fetch Wikidata metadata for all ISBNs in parallel
+    const wikidataPromises = normalizedISBNs.map(isbn =>
+      fetchBookByISBN(isbn, c.env, logger)
+        .then(metadata => ({ isbn, metadata }))
+        .catch(error => {
+          logger.warn('Wikidata fetch failed for ISBN', {
+            isbn,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return { isbn, metadata: null };
+        })
+    );
+
+    const wikidataResults = await Promise.allSettled(wikidataPromises);
+    for (const result of wikidataResults) {
+      if (result.status === 'fulfilled' && result.value.metadata) {
+        wikidataData.set(result.value.isbn, result.value.metadata);
+      }
+    }
+
+    const wikidataDuration = Date.now() - wikidataStartTime;
+    logger.info('Wikidata batch fetch complete', {
+      found: wikidataData.size,
+      requested: normalizedISBNs.length,
+      durationMs: wikidataDuration,
+    });
+
     // Get database connection
     const sql = c.get('sql');
 
@@ -621,6 +654,43 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
             logger.warn('Google Books subject enrichment failed (non-blocking)', {
               isbn,
               error: googleError instanceof Error ? googleError.message : String(googleError),
+            });
+          }
+        }
+
+        // Phase 3: Enrich genres with Wikidata (opportunistic, non-blocking)
+        const wikidataMetadata = wikidataData.get(isbn);
+        if (wikidataMetadata?.genre_names || wikidataMetadata?.subject_names) {
+          try {
+            const wikidataGenres = [
+              ...(wikidataMetadata.genre_names || []),
+              ...(wikidataMetadata.subject_names || [])
+            ];
+
+            if (wikidataGenres.length > 0) {
+              await updateWorkSubjects(sql, workKey, wikidataGenres, 'wikidata', logger);
+
+              logger.info('Wikidata genre enrichment complete', {
+                isbn,
+                work_key: workKey,
+                genres_count: wikidataGenres.length,
+                duration_ms: 0, // Already fetched in batch
+              });
+
+              // Track analytics for donation calculation
+              if (c.env.ANALYTICS) {
+                await c.env.ANALYTICS.writeDataPoint({
+                  indexes: ['wikidata_genre_enrichment'],
+                  blobs: [`isbn_${isbn}`, `work_${workKey}`, `genres_${wikidataGenres.length}`],
+                  doubles: [wikidataGenres.length, wikidataDuration]
+                });
+              }
+            }
+          } catch (wikidataError) {
+            // Log but don't fail enrichment if Wikidata fails
+            logger.warn('Wikidata genre enrichment failed (non-blocking)', {
+              isbn,
+              error: wikidataError instanceof Error ? wikidataError.message : String(wikidataError),
             });
           }
         }

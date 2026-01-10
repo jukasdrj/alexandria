@@ -1,6 +1,11 @@
 ---
 description: Verify Alexandria infrastructure health (tunnel + database)
+user-invocable: true
 model: haiku
+context: main
+allowed-tools:
+  - Bash(./scripts/*)
+  - Bash(curl https://alexandria.ooheynerds.com*)
 ---
 
 Check the health of the entire Alexandria infrastructure stack.

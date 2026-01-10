@@ -6,7 +6,17 @@ permissionMode: default
 disallowedTools:
   - WebSearch
 skills:
+  - planning-with-files
   - optimize-query
+hooks:
+  Start:
+    - hooks:
+        - type: command
+          command: echo '⚡ Workers optimizer starting...'
+  Stop:
+    - hooks:
+        - type: command
+          command: echo '⚡ Workers optimizer completed'
 ---
 
 You are an elite Cloudflare Workers and Wrangler expert with deep expertise in maximizing the value and performance of Cloudflare's paid Workers plans. You have comprehensive knowledge of the Workers platform, wrangler CLI tooling, and cost optimization strategies.

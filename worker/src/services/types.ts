@@ -247,6 +247,8 @@ export interface EnrichmentQueueResults {
   failed: number;
   errors: Array<{ isbn: string; error: string }>;
   api_calls_saved: number;
+  wikidata_hits?: number;           // Count of ISBNs with Wikidata genre data
+  wikidata_genres_added?: number;   // Total unique genres added from Wikidata
 }
 
 /**

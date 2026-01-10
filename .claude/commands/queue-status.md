@@ -1,6 +1,11 @@
 ---
 description: Check Cloudflare queue status and recent activity
+user-invocable: true
 model: haiku
+context: main
+allowed-tools:
+  - Bash(cd worker && *)
+  - Bash(npx wrangler *)
 ---
 
 Check the status of Alexandria's Cloudflare Queues.

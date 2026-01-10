@@ -1,11 +1,16 @@
 ---
 description: Run comprehensive performance check on API endpoints
+user-invocable: true
 model: haiku
+context: main
+allowed-tools:
+  - Bash(curl *)
+  - Bash(echo *)
 ---
 
 Test performance of key Alexandria API endpoints.
 
-think about what endpoints might have performance issues before testing
+Think about what endpoints might have performance issues before testing.
 
 ## Steps
 

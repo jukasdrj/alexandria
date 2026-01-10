@@ -16,6 +16,10 @@ import { findOrCreateWork, linkWorkToAuthors } from './work-utils.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
 import { Logger } from '../../lib/logger.js';
 import { QuotaManager } from './quota-manager.js';
+import { extractGoogleBooksCategories } from '../../services/google-books.js';
+import { updateWorkSubjects } from './subject-enrichment.js';
+import { fetchBookByISBN } from '../../services/wikidata.js';
+import type { WikidataBookMetadata } from '../../types/open-apis.js';
 import type {
   CoverQueueMessage,
   EnrichmentQueueMessage,
@@ -324,6 +328,10 @@ export async function processEnrichmentQueue(
 ): Promise<EnrichmentQueueResults> {
   const logger = Logger.forQueue(env, 'alexandria-enrichment-queue', batch.messages.length);
 
+  // Time budget for Google Books enrichment (prevent Worker timeout)
+  const TIME_BUDGET_MS = 30_000; // 30 seconds max
+  const startTime = Date.now();
+
   logger.info('Enrichment queue processing started (BATCHED)', {
     messageCount: batch.messages.length,
   });
@@ -341,6 +349,8 @@ export async function processEnrichmentQueue(
     failed: 0,
     errors: [],
     api_calls_saved: 0,
+    wikidata_hits: 0,
+    wikidata_genres_added: 0,
   };
 
   try {
@@ -430,6 +440,17 @@ export async function processEnrichmentQueue(
       api_calls_saved: results.api_calls_saved,
     });
 
+    // Parallel Wikidata genre enrichment (non-blocking)
+    const wikidataStartTime = Date.now();
+    const wikidataData = await fetchWikidataBatch(isbnsToFetch, env, logger);
+    const wikidataDuration = Date.now() - wikidataStartTime;
+
+    logger.info('Wikidata batch fetch complete', {
+      found: wikidataData.size,
+      requested: isbnsToFetch.length,
+      durationMs: wikidataDuration,
+    });
+
     // Create request-scoped caches for work/author deduplication
     const localAuthorKeyCache = new Map<string, string>();
     const localWorkKeyCache = new Map<string, string>();
@@ -491,6 +512,95 @@ export async function processEnrichmentQueue(
           env
         );
 
+        // Merge Wikidata genres if available
+        const wikidataMetadata = wikidataData.get(isbn);
+        if (wikidataMetadata?.genre_names || wikidataMetadata?.subject_names) {
+          const mergeResult = mergeGenres(
+            externalData.subjects,
+            wikidataMetadata.genre_names,
+            wikidataMetadata.subject_names
+          );
+
+          // Update work with merged subjects
+          if (mergeResult.wikidata_added > 0) {
+            const wikidataGenres = mergeResult.merged.slice(mergeResult.isbndb_count); // Extract only Wikidata additions
+            await updateWorkSubjects(sql, workKey, wikidataGenres, 'wikidata', logger);
+
+            logger.debug('Wikidata genre enrichment applied', {
+              isbn,
+              work_key: workKey,
+              genres_added: mergeResult.wikidata_added,
+              total_subjects: mergeResult.merged.length,
+            });
+
+            // Track analytics
+            if (env.ANALYTICS) {
+              await env.ANALYTICS.writeDataPoint({
+                indexes: ['wikidata_genre_enrichment'],
+                blobs: [
+                  `isbn_${isbn}`,
+                  `work_${workKey}`,
+                  `genres_${mergeResult.wikidata_added}`
+                ],
+                doubles: [mergeResult.wikidata_added, wikidataDuration]
+              });
+            }
+
+            results.wikidata_hits = (results.wikidata_hits || 0) + 1;
+            results.wikidata_genres_added = (results.wikidata_genres_added || 0) + mergeResult.wikidata_added;
+          }
+        }
+
+        // Phase 2: Enrich subjects with Google Books categories (opportunistic, non-blocking)
+        // This adds complementary broad categories to ISBNdb's specific subjects
+        // Protected by feature flag + time budget circuit breaker to prevent Worker timeouts
+        if (env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true' && (Date.now() - startTime < TIME_BUDGET_MS)) {
+          try {
+            const googleStartTime = Date.now();
+            const googleCategories = await extractGoogleBooksCategories(isbn, env, logger);
+            const googleDuration = Date.now() - googleStartTime;
+
+            if (googleCategories.length > 0) {
+              await updateWorkSubjects(sql, workKey, googleCategories, 'google-books', logger);
+
+              logger.info('Google Books subject enrichment complete', {
+                isbn,
+                work_key: workKey,
+                categories_count: googleCategories.length,
+                duration_ms: googleDuration,
+              });
+
+              // Track analytics for donation calculation
+              if (env.ANALYTICS) {
+                await env.ANALYTICS.writeDataPoint({
+                  indexes: ['google_books_subject_enrichment'],
+                  blobs: [
+                    `isbn_${isbn}`,
+                    `work_${workKey}`,
+                    `categories_${googleCategories.length}`
+                  ],
+                  doubles: [googleCategories.length, googleDuration]
+                });
+              }
+            } else {
+              logger.debug('No Google Books categories found', { isbn });
+            }
+          } catch (googleError) {
+            // Log but don't fail enrichment if Google Books fails
+            logger.warn('Google Books subject enrichment failed (non-blocking)', {
+              isbn,
+              error: googleError instanceof Error ? googleError.message : String(googleError),
+            });
+          }
+        } else if (env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true') {
+          // Time budget exceeded - skip remaining ISBNs
+          logger.debug('Skipping Google Books enrichment due to time budget', {
+            isbn,
+            elapsed_ms: Date.now() - startTime,
+            budget_ms: TIME_BUDGET_MS,
+          });
+        }
+
         logger.debug('Enriched ISBN from batch', { isbn });
 
         results.enriched++;
@@ -531,6 +641,8 @@ export async function processEnrichmentQueue(
       cached: results.cached,
       failed: results.failed,
       api_calls_saved: results.api_calls_saved,
+      wikidata_hits: results.wikidata_hits,
+      wikidata_genres_added: results.wikidata_genres_added,
       errorCount: results.errors.length,
     });
   } finally {
@@ -560,6 +672,111 @@ export interface AuthorQueueResults {
   quota_blocked: number;
   errors: Array<{ author_key: string; error: string }>;
 }
+
+// =================================================================================
+// Wikidata Enrichment Helpers
+// =================================================================================
+
+/**
+ * Fetch Wikidata metadata for multiple ISBNs in parallel
+ *
+ * Uses Promise.allSettled to handle partial failures gracefully.
+ * Respects Wikidata rate limiting (2 req/sec) via built-in enforceRateLimit.
+ *
+ * @param isbns - Array of normalized ISBNs
+ * @param env - Environment with KV bindings
+ * @param logger - Logger instance
+ * @returns Map of ISBN -> Wikidata metadata (only successful fetches)
+ */
+async function fetchWikidataBatch(
+  isbns: string[],
+  env: Env,
+  logger: Logger
+): Promise<Map<string, WikidataBookMetadata>> {
+  const results = new Map<string, WikidataBookMetadata>();
+
+  // Fetch all ISBNs in parallel (fetchBookByISBN handles rate limiting internally)
+  const promises = isbns.map(isbn =>
+    fetchBookByISBN(isbn, env, logger)
+      .then(metadata => ({ isbn, metadata }))
+      .catch(error => {
+        logger.warn('Wikidata fetch failed for ISBN', {
+          isbn,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { isbn, metadata: null };
+      })
+  );
+
+  const settled = await Promise.allSettled(promises);
+
+  // Extract successful results
+  for (const result of settled) {
+    if (result.status === 'fulfilled' && result.value.metadata) {
+      results.set(result.value.isbn, result.value.metadata);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Merge ISBNdb subjects with Wikidata genres/subjects
+ *
+ * Deduplicates case-insensitively, preserves ISBNdb subjects as primary.
+ * Tracks contribution statistics for analytics.
+ *
+ * @param isbndbSubjects - Subjects from ISBNdb
+ * @param wikidataGenres - Genre names from Wikidata (P136)
+ * @param wikidataSubjects - Subject names from Wikidata (P921)
+ * @returns Merged subjects + statistics
+ */
+function mergeGenres(
+  isbndbSubjects: string[] | undefined,
+  wikidataGenres: string[] | undefined,
+  wikidataSubjects: string[] | undefined
+): {
+  merged: string[];
+  isbndb_count: number;
+  wikidata_added: number;
+} {
+  const merged = [...(isbndbSubjects || [])];
+  const isbndbCount = merged.length;
+  let wikidataAdded = 0;
+
+  // Create lowercase set for deduplication
+  const lowerCaseSet = new Set(merged.map(s => s.toLowerCase()));
+
+  // Add Wikidata genres
+  for (const genre of wikidataGenres || []) {
+    const normalized = genre.trim();
+    if (normalized && !lowerCaseSet.has(normalized.toLowerCase())) {
+      merged.push(normalized);
+      lowerCaseSet.add(normalized.toLowerCase());
+      wikidataAdded++;
+    }
+  }
+
+  // Add Wikidata subjects
+  for (const subject of wikidataSubjects || []) {
+    const normalized = subject.trim();
+    if (normalized && !lowerCaseSet.has(normalized.toLowerCase())) {
+      merged.push(normalized);
+      lowerCaseSet.add(normalized.toLowerCase());
+      wikidataAdded++;
+    }
+  }
+
+  return {
+    merged,
+    isbndb_count: isbndbCount,
+    wikidata_added: wikidataAdded,
+  };
+}
+
+// =================================================================================
+// Author Queue Handler
+// =================================================================================
 
 /**
  * Process author enrichment queue
