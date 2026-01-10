@@ -570,7 +570,7 @@ export async function processEnrichmentQueue(
                 duration_ms: googleDuration,
               });
 
-              // Track analytics for donation calculation
+              // Track analytics for Open API usage
               if (env.ANALYTICS) {
                 await env.ANALYTICS.writeDataPoint({
                   indexes: ['google_books_subject_enrichment'],

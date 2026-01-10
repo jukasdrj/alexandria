@@ -1,14 +1,14 @@
 # Open API Integrations Guide
 
-**Last Updated**: 2026-01-09
+**Last Updated**: 2026-01-10
 **Issue**: #159
-**Status**: Phase 1-4 Complete, Production Ready
+**Status**: Phase 1-5 Complete, Production Ready (Phase 2: Archive.org Metadata added)
 
 ## Overview
 
 Alexandria integrates three free, open APIs to reduce dependence on paid services and enable author diversity tracking:
 
-1. **Archive.org** - Cover images (especially pre-2000 books)
+1. **Archive.org** - Cover images + full metadata (especially pre-2000 books)
 2. **Wikipedia** - Author biographies (diversity tracking)
 3. **Wikidata** - Book metadata and author enrichment
 
@@ -28,7 +28,7 @@ Each API has a dedicated service module:
 
 | Service | Location | Purpose |
 |---------|----------|---------|
-| **Archive.org** | `worker/services/archive-org.ts` | Cover images from digital library |
+| **Archive.org** | `worker/services/archive-org.ts` | Cover images + full metadata (descriptions, subjects, authors, ISBNs, OpenLibrary IDs) |
 | **Wikipedia** | `worker/services/wikipedia.ts` | Author biographies and portraits |
 | **Wikidata** | `worker/services/wikidata.ts` | Book metadata and SPARQL queries |
 
@@ -81,20 +81,38 @@ Alexandria fetches covers from multiple providers with intelligent fallback:
 - Metadata: `https://archive.org/metadata/{identifier}`
 - Image Service: `https://archive.org/services/img/{identifier}`
 
-**Strategy**: Two-step lookup
+**Strategy**: Two-step lookup (shared between covers and metadata)
 1. ISBN → identifier (search API)
-2. identifier → cover URL (metadata API or image service)
+2. identifier → cover URL or metadata (metadata API or image service)
 
-**Features**:
+**Functions**:
+- `fetchArchiveOrgCover()` - Cover images with quality detection
+- `fetchArchiveOrgMetadata()` - Full book metadata (Phase 2, Jan 2026)
+
+**Cover Features**:
 - Smart file pattern matching (cover.jp2, _0000.jp2, cover.jpg)
 - Quality detection (high/medium/low based on file size/format)
 - Dual strategy: Direct image service + metadata API fallback
 
-**Rate Limit**: 1 req/sec (KV-backed, respectful delay)
-**Cache TTL**: 7 days (covers may update)
-**User-Agent**: `Alexandria/2.3.0 (nerd@ooheynerds.com; Cover images; Donate: https://archive.org/donate)`
+**Metadata Features** (Phase 2):
+- **Descriptions**: Rich, multi-paragraph descriptions (superior to ISBNdb)
+- **Subjects**: Library of Congress classifications and subject headings
+- **Authors**: Creator names (string or array)
+- **Publication**: Publisher, publication date, language, LCCN
+- **ISBNs**: Alternate ISBNs (merged with existing data)
+- **OpenLibrary IDs**: Authoritative edition and work IDs for crosswalking
 
-**Best For**: Pre-2000 books, public domain works, historical texts
+**Integration**: Archive.org metadata is fetched in parallel with Wikidata during enrichment:
+- **Description Priority**: Archive.org > ISBNdb (richer content)
+- **Subject Merging**: Archive.org subjects merged with ISBNdb + Wikidata genres (normalized, deduplicated)
+- **OpenLibrary IDs**: Archive.org is primary source (most authoritative)
+- **Contributors Tracking**: All providers tracked in `contributors` array for audit trail
+
+**Rate Limit**: 1 req/sec (KV-backed, respectful delay)
+**Cache TTL**: 7 days (covers/metadata may update)
+**User-Agent**: `Alexandria/2.3.0 (nerd@ooheynerds.com; Book metadata enrichment; Donate: https://archive.org/donate)`
+
+**Best For**: Pre-2000 books, public domain works, historical texts, rich descriptions
 
 ### Wikipedia
 
@@ -187,6 +205,41 @@ const wikidataCover = await fetchWikidataCover('9780747532743', env, logger);
 if (wikidataCover) {
   console.log(`Found via Wikidata: ${wikidataCover.url}`);
   console.log(`Quality: ${wikidataCover.quality}`);
+}
+```
+
+### Fetch Archive.org Metadata
+
+```typescript
+import { fetchArchiveOrgMetadata } from './services/archive-org.js';
+
+// Fetch full metadata (Phase 2)
+const metadata = await fetchArchiveOrgMetadata('9780060935467', env);
+
+if (metadata) {
+  console.log(`Identifier: ${metadata.identifier}`);
+  console.log(`Title: ${metadata.title}`);
+  console.log(`Creator: ${metadata.creator}`);
+  console.log(`Publisher: ${metadata.publisher} (${metadata.date})`);
+
+  // Rich, multi-paragraph descriptions
+  if (metadata.description) {
+    console.log(`Description: ${metadata.description.join('\n\n')}`);
+  }
+
+  // Library of Congress subjects
+  if (metadata.subject) {
+    console.log(`Subjects: ${metadata.subject.join(', ')}`);
+  }
+
+  // OpenLibrary crosswalk IDs (authoritative)
+  console.log(`OpenLibrary Edition: ${metadata.openlibrary_edition}`);
+  console.log(`OpenLibrary Work: ${metadata.openlibrary_work}`);
+
+  // Alternate ISBNs
+  if (metadata.isbn) {
+    console.log(`ISBNs: ${metadata.isbn.join(', ')}`);
+  }
 }
 ```
 

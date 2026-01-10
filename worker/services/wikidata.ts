@@ -15,7 +15,7 @@
  * - KV-backed rate limiting (500ms between requests = 2 req/sec)
  * - Response caching (30-day TTL for metadata)
  * - Graceful error handling (returns null, never throws)
- * - User-Agent with donation link following API best practices
+ * - User-Agent with contact info following API best practices
  *
  * @module services/wikidata
  * @since 2.3.0
@@ -54,7 +54,7 @@ import type { Logger } from '../lib/logger.js';
 const WIKIDATA_SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 
 /**
- * User-Agent for Wikidata API (with donation link)
+ * User-Agent for Wikidata API
  */
 const USER_AGENT = buildUserAgent('wikidata', 'Book metadata enrichment');
 

@@ -1,19 +1,20 @@
 /**
- * Archive.org Cover Image Fetcher Service
+ * Archive.org Cover Image & Metadata Fetcher Service
  *
- * Fetches cover image URLs from Archive.org's digital library using a two-step process:
+ * Fetches cover images and book metadata from Archive.org's digital library using a two-step process:
  * 1. ISBN → Identifier lookup via Advanced Search API
- * 2. Identifier → Cover URL via Metadata API or Image Service
+ * 2. Identifier → Cover URL/Metadata via Metadata API or Image Service
  *
  * Features:
  * - KV-backed rate limiting (1 req/sec, respectful to Archive.org)
  * - Response caching (7 days TTL)
  * - Cover quality detection based on file metadata
+ * - Metadata enrichment (descriptions, subjects, OpenLibrary crosswalk)
  * - Graceful error handling (returns null, never throws)
- * - User-Agent with donation link following API best practices
+ * - User-Agent with contact info following API best practices
  *
  * @module services/archive-org
- * @since 2.3.0
+ * @since 2.3.0 (covers), 2.4.0 (metadata)
  */
 
 import { fetchWithRetry } from '../lib/fetch-utils.js';
@@ -50,7 +51,7 @@ const ARCHIVE_ORG_IMAGE_SERVICE = 'https://archive.org/services/img';
 /**
  * User-Agent for Archive.org API requests
  */
-const USER_AGENT = buildUserAgent('archive.org', 'Cover images');
+const USER_AGENT = buildUserAgent('archive.org', 'Book metadata enrichment');
 
 /**
  * Cover file formats in priority order (highest quality first)
@@ -69,6 +70,60 @@ const COVER_FILE_PATTERNS = [
   /_0000\.jp2$/i,  // First page scan
   /_0001\.jp2$/i,  // Sometimes front matter
 ];
+
+// =================================================================================
+// Type Definitions
+// =================================================================================
+
+/**
+ * Archive.org book metadata result
+ *
+ * Extracted from Archive.org Metadata API response.
+ * Fields are optional as Archive.org metadata quality varies by item.
+ *
+ * @see https://archive.org/metadata/{identifier}/metadata
+ */
+export interface ArchiveOrgMetadata {
+  /** Book title */
+  title?: string;
+
+  /** Creator/author (can be string or array) */
+  creator?: string | string[];
+
+  /** Publisher name */
+  publisher?: string | string[];
+
+  /** Publication date (typically YYYY format) */
+  date?: string;
+
+  /** ISBN array (includes ISBN-10 and ISBN-13 variants) */
+  isbn?: string[];
+
+  /** Subject tags (Library of Congress classifications) */
+  subject?: string[];
+
+  /**
+   * Description array
+   * Can include physical description, plot summary, awards, publication history
+   * Join with '\n\n' when storing in database
+   */
+  description?: string[];
+
+  /** Language code (e.g., 'eng') */
+  language?: string | string[];
+
+  /** Library of Congress Control Number */
+  lccn?: string;
+
+  /** OpenLibrary edition ID (e.g., 'OL37027463M') */
+  openlibrary_edition?: string;
+
+  /** OpenLibrary work ID (e.g., 'OL3140822W') */
+  openlibrary_work?: string;
+
+  /** Archive.org identifier */
+  identifier?: string;
+}
 
 // =================================================================================
 // Helper Functions
@@ -306,6 +361,171 @@ function detectCoverQuality(sizeBytes: number, format: string): CoverResult['qua
 
   // Unknown size
   return 'low';
+}
+
+/**
+ * Fetch full book metadata from Archive.org for a given ISBN
+ *
+ * Process:
+ * 1. Check cache (7-day TTL)
+ * 2. Normalize ISBN
+ * 3. Search Archive.org for identifier (ISBN → identifier via Advanced Search API)
+ * 4. Fetch metadata from identifier (identifier → metadata via Metadata API)
+ * 5. Extract and parse metadata fields
+ * 6. Cache result
+ * 7. Return ArchiveOrgMetadata
+ *
+ * Error Handling:
+ * - Returns null on any error (never throws)
+ * - Logs errors with context for debugging
+ * - Gracefully handles rate limit failures, API errors, network timeouts
+ * - Defensive parsing for missing/malformed fields
+ *
+ * Rate Limiting:
+ * - Enforces 1 req/sec via KV storage
+ * - Distributed across Worker isolates
+ * - Reuses existing searchArchiveOrgByISBN() for identifier lookup
+ *
+ * Caching:
+ * - 7-day TTL (metadata may be updated/corrected)
+ * - Caches final ArchiveOrgMetadata result
+ * - Key format: "archive.org:metadata:{isbn}"
+ * - Caches null results to avoid repeated failed lookups
+ *
+ * Data Quality Notes:
+ * - Description is an **array of strings** (join with '\n\n' in enrichment)
+ * - Subject is an **array of strings** (Library of Congress tags)
+ * - ISBN is an **array** containing ISBN-10 and ISBN-13 variants
+ * - Creator/Publisher can be string or array (normalize as needed)
+ * - All fields are optional due to varying metadata quality
+ *
+ * @param isbn - ISBN to lookup (10 or 13 digits)
+ * @param env - Worker environment with CACHE KV binding
+ * @param logger - Logger instance for structured logging
+ * @returns Metadata object or null if not found
+ *
+ * @example
+ * ```typescript
+ * const metadata = await fetchArchiveOrgMetadata('9780060935467', env, logger);
+ * if (metadata) {
+ *   console.log(`Title: ${metadata.title}`);
+ *   console.log(`Author: ${Array.isArray(metadata.creator) ? metadata.creator[0] : metadata.creator}`);
+ *   console.log(`Description: ${metadata.description?.join('\n\n')}`);
+ *   console.log(`Subjects: ${metadata.subject?.join(', ')}`);
+ * }
+ * ```
+ */
+export async function fetchArchiveOrgMetadata(
+  isbn: string,
+  env: Env,
+  logger: typeof console = console
+): Promise<ArchiveOrgMetadata | null> {
+  // Normalize ISBN
+  const normalizedISBN = normalizeISBN(isbn);
+  if (!normalizedISBN) {
+    logger.log(`Archive.org: Invalid ISBN "${isbn}"`);
+    return null;
+  }
+
+  try {
+    // Check cache first
+    const cacheKey = buildCacheKey('archive.org', 'metadata', normalizedISBN);
+    const cached = await getCachedResponse<ArchiveOrgMetadata>(env.CACHE, cacheKey);
+
+    if (cached) {
+      logger.log(`Archive.org: Metadata cache hit for ISBN ${normalizedISBN}`);
+      return cached;
+    }
+
+    // Step 1: Search for identifier by ISBN (reuses existing function)
+    const identifier = await searchArchiveOrgByISBN(normalizedISBN, env);
+    if (!identifier) {
+      logger.log(`Archive.org: No identifier found for ISBN ${normalizedISBN}`);
+      // Cache null result to avoid repeated failed lookups
+      await setCachedResponse(env.CACHE, cacheKey, null, CACHE_TTLS['archive.org']);
+      return null;
+    }
+
+    // Step 2: Fetch metadata from Archive.org Metadata API
+    await enforceRateLimit(
+      env.CACHE,
+      buildRateLimitKey('archive.org'),
+      RATE_LIMITS['archive.org']
+    );
+
+    const metadataUrl = `${ARCHIVE_ORG_METADATA_API}/${identifier}/metadata`;
+    const metadataResponse = await fetchWithRetry(
+      metadataUrl,
+      {
+        headers: {
+          'User-Agent': USER_AGENT,
+        },
+      },
+      { timeoutMs: 10000, maxRetries: 2 }
+    );
+
+    if (!metadataResponse.ok) {
+      logger.error(
+        `Archive.org: Metadata API error ${metadataResponse.status} for identifier ${identifier}`
+      );
+      // Cache null result
+      await setCachedResponse(env.CACHE, cacheKey, null, CACHE_TTLS['archive.org']);
+      return null;
+    }
+
+    const response = (await metadataResponse.json()) as { result?: any };
+
+    // Step 3: Extract metadata from response with defensive parsing
+    const result = response?.result;
+    if (!result) {
+      logger.log(`Archive.org: No metadata result for identifier ${identifier}`);
+      await setCachedResponse(env.CACHE, cacheKey, null, CACHE_TTLS['archive.org']);
+      return null;
+    }
+
+    // Build metadata object with optional chaining for safety
+    const metadata: ArchiveOrgMetadata = {
+      identifier,
+      title: result.title,
+      creator: result.creator,
+      publisher: result.publisher,
+      date: result.date,
+      isbn: Array.isArray(result.isbn)
+        ? result.isbn
+        : result.isbn
+          ? [result.isbn]
+          : undefined,
+      subject: Array.isArray(result.subject)
+        ? result.subject
+        : result.subject
+          ? [result.subject]
+          : undefined,
+      description: Array.isArray(result.description)
+        ? result.description
+        : result.description
+          ? [result.description]
+          : undefined,
+      language: result.language,
+      lccn: result.lccn,
+      openlibrary_edition: result.openlibrary_edition,
+      openlibrary_work: result.openlibrary_work,
+    };
+
+    // Cache successful result
+    await setCachedResponse(env.CACHE, cacheKey, metadata, CACHE_TTLS['archive.org']);
+
+    logger.log(
+      `Archive.org: Successfully fetched metadata for ISBN ${normalizedISBN} (identifier: ${identifier})`
+    );
+
+    // TODO: Add analytics tracking when trackOpenApiUsage() is implemented for metadata
+    // await trackOpenApiUsage(env.ANALYTICS, 'archive-org', 'metadata', true, logger);
+
+    return metadata;
+  } catch (error) {
+    logger.error('Archive.org: Metadata fetch error:', (error as Error).message);
+    return null;
+  }
 }
 
 // =================================================================================

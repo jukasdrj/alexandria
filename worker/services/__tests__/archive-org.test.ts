@@ -7,7 +7,6 @@ vi.mock('../../lib/fetch-utils.js', () => ({
   fetchWithRetry: vi.fn(),
 }));
 
-// Mock open-api-utils
 vi.mock('../../lib/open-api-utils.js', () => ({
   enforceRateLimit: vi.fn().mockResolvedValue(undefined),
   buildRateLimitKey: (api: string) => `rate_limit:${api}`,
@@ -16,6 +15,8 @@ vi.mock('../../lib/open-api-utils.js', () => ({
   buildUserAgent: (provider: string, purpose: string) =>
     `Alexandria/2.3.0 (test@test.com; ${purpose}; https://test.com)`,
   trackOpenApiUsage: vi.fn().mockResolvedValue(undefined),
+  getCachedResponse: vi.fn().mockResolvedValue(null),
+  setCachedResponse: vi.fn().mockResolvedValue(undefined),
   RATE_LIMITS: {
     'archive.org': 1000,
   },
@@ -25,8 +26,10 @@ vi.mock('../../lib/open-api-utils.js', () => ({
 }));
 
 import { fetchWithRetry } from '../../lib/fetch-utils.js';
+import { getCachedResponse } from '../../lib/open-api-utils.js';
 
 const mockFetchWithRetry = fetchWithRetry as any;
+const mockGetCachedResponse = getCachedResponse as any;
 
 // Mock environment
 const createMockEnv = (): Env => ({
@@ -53,147 +56,342 @@ describe('archive-org', () => {
   });
 
   describe('fetchArchiveOrgCover', () => {
-    it('should fetch cover URL from Archive.org by ISBN', async () => {
+    it('should fetch cover using image service (fast path)', async () => {
       const env = createMockEnv();
-      const logger = createMockLogger();
 
-      // Mock Archive.org metadata API response
+      // Step 1: Search API (ISBN → identifier)
       mockFetchWithRetry.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          'ISBN:9780439064873': {
-            cover: {
-              small: 'https://covers.openlibrary.org/b/id/12345-S.jpg',
-              medium: 'https://covers.openlibrary.org/b/id/12345-M.jpg',
-              large: 'https://covers.openlibrary.org/b/id/12345-L.jpg',
-            },
+          response: {
+            docs: [{ identifier: 'harrypotterphilo00rowl' }],
           },
         }),
       });
 
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
+      // Step 2: Image service HEAD request (identifier → cover URL)
+      mockFetchWithRetry.mockResolvedValueOnce({
+        ok: true,
+        headers: {
+          get: (key: string) => {
+            if (key === 'content-type') return 'image/jpeg';
+            if (key === 'content-length') return '150000'; // 150KB
+            return null;
+          },
+        },
+      });
+
+      const result = await fetchArchiveOrgCover('9780439064873', env);
 
       expect(result).toBeTruthy();
-      expect(result?.url).toBe('https://covers.openlibrary.org/b/id/12345-L.jpg');
+      expect(result?.url).toBe('https://archive.org/services/img/harrypotterphilo00rowl');
       expect(result?.source).toBe('archive-org');
       expect(result?.quality).toBe('high');
-      expect(logger.info).toHaveBeenCalledWith(
-        'Archive.org: Cover found',
-        expect.objectContaining({ isbn: '9780439064873' })
-      );
     });
 
-    it('should return null when no cover found', async () => {
+    it('should return null when search finds no identifier', async () => {
       const env = createMockEnv();
-      const logger = createMockLogger();
 
+      // Mock search API returning no results
       mockFetchWithRetry.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          'ISBN:9999999999999': {}, // No cover field
+          response: { docs: [] },
         }),
       });
 
-      const result = await fetchArchiveOrgCover('9999999999999', env, logger);
+      const result = await fetchArchiveOrgCover('9999999999999', env);
 
       expect(result).toBeNull();
-      expect(logger.debug).toHaveBeenCalledWith(
-        'Archive.org: No cover data found',
-        expect.objectContaining({ isbn: '9999999999999' })
-      );
+      expect(mockFetchWithRetry).toHaveBeenCalledTimes(1); // Only search, no image service
     });
 
-    it('should return cached cover when available', async () => {
+    it('should use cached cover when available', async () => {
       const env = createMockEnv();
-      const logger = createMockLogger();
 
       const cachedCover = {
-        url: 'https://covers.openlibrary.org/b/id/12345-L.jpg',
+        url: 'https://archive.org/services/img/test',
         source: 'archive-org' as const,
         quality: 'high' as const,
       };
 
-      (env.CACHE.get as any).mockResolvedValueOnce(JSON.stringify(cachedCover));
+      mockGetCachedResponse.mockResolvedValueOnce(cachedCover);
 
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
+      const result = await fetchArchiveOrgCover('9780439064873', env);
 
       expect(result).toEqual(cachedCover);
-      expect(logger.debug).toHaveBeenCalledWith(
-        'Archive.org: Using cached cover',
-        expect.any(Object)
-      );
       expect(mockFetchWithRetry).not.toHaveBeenCalled();
     });
 
-    it('should prefer large size over medium/small', async () => {
+    it('should detect quality based on file size', async () => {
       const env = createMockEnv();
-      const logger = createMockLogger();
 
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          'ISBN:9780439064873': {
-            cover: {
-              small: 'https://covers.openlibrary.org/b/id/12345-S.jpg',
-              medium: 'https://covers.openlibrary.org/b/id/12345-M.jpg',
-              large: 'https://covers.openlibrary.org/b/id/12345-L.jpg',
+      mockFetchWithRetry
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            response: { docs: [{ identifier: 'test_id' }] },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: {
+            get: (key: string) => {
+              if (key === 'content-type') return 'image/jpeg';
+              if (key === 'content-length') return '50000'; // 50KB - medium quality
+              return null;
             },
           },
-        }),
-      });
+        });
 
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
+      const result = await fetchArchiveOrgCover('9780439064873', env);
 
-      expect(result?.url).toBe('https://covers.openlibrary.org/b/id/12345-L.jpg');
-      expect(result?.quality).toBe('high');
-    });
-
-    it('should fall back to medium size when large not available', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          'ISBN:9780439064873': {
-            cover: {
-              small: 'https://covers.openlibrary.org/b/id/12345-S.jpg',
-              medium: 'https://covers.openlibrary.org/b/id/12345-M.jpg',
-            },
-          },
-        }),
-      });
-
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
-
-      expect(result?.url).toBe('https://covers.openlibrary.org/b/id/12345-M.jpg');
       expect(result?.quality).toBe('medium');
     });
 
-    it('should fall back to small size when only small available', async () => {
+    it('should return null when image service fails and no metadata fallback', async () => {
       const env = createMockEnv();
-      const logger = createMockLogger();
 
+      mockFetchWithRetry
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            response: { docs: [{ identifier: 'test_id' }] },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: false, // Image service HEAD fails
+          status: 404,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            files: [], // No cover files in metadata
+          }),
+        });
+
+      const result = await fetchArchiveOrgCover('9780439064873', env);
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle search API errors gracefully', async () => {
+      const env = createMockEnv();
+
+      mockFetchWithRetry.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+      });
+
+      const result = await fetchArchiveOrgCover('9780439064873', env);
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle network errors gracefully', async () => {
+      const env = createMockEnv();
+
+      mockFetchWithRetry.mockRejectedValueOnce(new Error('Network timeout'));
+
+      const result = await fetchArchiveOrgCover('9780439064873', env);
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle invalid ISBN gracefully', async () => {
+      const env = createMockEnv();
+
+      const result = await fetchArchiveOrgCover('invalid', env);
+
+      expect(result).toBeNull();
+      expect(mockFetchWithRetry).not.toHaveBeenCalled(); // Short-circuit on invalid ISBN
+    });
+  });
+
+  describe('fetchArchiveOrgMetadata', () => {
+    it('should fetch metadata using 2-step process (search → metadata)', async () => {
+      const env = createMockEnv();
+
+      // Step 1: Mock search API (ISBN → identifier)
       mockFetchWithRetry.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          'ISBN:9780439064873': {
-            cover: {
-              small: 'https://covers.openlibrary.org/b/id/12345-S.jpg',
-            },
+          response: {
+            docs: [{ identifier: 'tokillmockingbir00leeh' }],
           },
         }),
       });
 
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
+      // Step 2: Mock metadata API (identifier → metadata)
+      mockFetchWithRetry.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: {
+            title: 'To Kill a Mockingbird',
+            creator: 'Harper Lee',
+            publisher: 'J. B. Lippincott & Co.',
+            date: '1960',
+            isbn: ['9780060935467', '0060935464'],
+            subject: ['Fiction', 'Southern Gothic', 'Legal drama'],
+            description: [
+              'A novel set in the 1930s Deep South.',
+              'Deals with serious issues of rape and racial inequality.',
+            ],
+            language: 'eng',
+            openlibrary_edition: 'OL37027463M',
+            openlibrary_work: 'OL45883W',
+          },
+        }),
+      });
 
-      expect(result?.url).toBe('https://covers.openlibrary.org/b/id/12345-S.jpg');
-      expect(result?.quality).toBe('low');
+      const result = await fetchArchiveOrgMetadata('9780060935467', env);
+
+      expect(result).toBeTruthy();
+      expect(result?.identifier).toBe('tokillmockingbir00leeh');
+      expect(result?.title).toBe('To Kill a Mockingbird');
+      expect(result?.creator).toBe('Harper Lee');
+      expect(result?.publisher).toBe('J. B. Lippincott & Co.');
+      expect(result?.date).toBe('1960');
+      expect(result?.isbn).toEqual(['9780060935467', '0060935464']);
+      expect(result?.subject).toEqual(['Fiction', 'Southern Gothic', 'Legal drama']);
+      expect(result?.description).toEqual([
+        'A novel set in the 1930s Deep South.',
+        'Deals with serious issues of rape and racial inequality.',
+      ]);
+      expect(result?.language).toBe('eng');
+      expect(result?.openlibrary_edition).toBe('OL37027463M');
+      expect(result?.openlibrary_work).toBe('OL45883W');
+
+      // Verify both API calls happened
+      expect(mockFetchWithRetry).toHaveBeenCalledTimes(2);
     });
 
-    it('should handle API errors gracefully', async () => {
+    it('should return null when search finds no identifier', async () => {
       const env = createMockEnv();
-      const logger = createMockLogger();
+
+      // Mock search API returning no results
+      mockFetchWithRetry.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          response: { docs: [] }, // No results
+        }),
+      });
+
+      const result = await fetchArchiveOrgMetadata('9999999999999', env);
+
+      expect(result).toBeNull();
+      expect(mockFetchWithRetry).toHaveBeenCalledTimes(1); // Only search, no metadata call
+    });
+
+    it('should return null when metadata API returns no result', async () => {
+      const env = createMockEnv();
+
+      // Step 1: Search succeeds
+      mockFetchWithRetry.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          response: { docs: [{ identifier: 'test_identifier' }] },
+        }),
+      });
+
+      // Step 2: Metadata API returns empty result
+      mockFetchWithRetry.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}), // No result field
+      });
+
+      const result = await fetchArchiveOrgMetadata('9780439064873', env);
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle arrays and strings for creator/publisher fields', async () => {
+      const env = createMockEnv();
+
+      mockFetchWithRetry
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            response: { docs: [{ identifier: 'test_id' }] },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            result: {
+              title: 'Test Book',
+              creator: ['Author One', 'Author Two'], // Array
+              publisher: 'Single Publisher', // String
+            },
+          }),
+        });
+
+      const result = await fetchArchiveOrgMetadata('9780439064873', env);
+
+      expect(result?.creator).toEqual(['Author One', 'Author Two']);
+      expect(result?.publisher).toBe('Single Publisher');
+    });
+
+    it('should normalize single-value subject/description/isbn to arrays', async () => {
+      const env = createMockEnv();
+
+      mockFetchWithRetry
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            response: { docs: [{ identifier: 'test_id' }] },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            result: {
+              title: 'Test Book',
+              subject: 'Single Subject', // String, not array
+              description: 'Single description', // String, not array
+              isbn: '9780439064873', // String, not array
+            },
+          }),
+        });
+
+      const result = await fetchArchiveOrgMetadata('9780439064873', env);
+
+      expect(result?.subject).toEqual(['Single Subject']);
+      expect(result?.description).toEqual(['Single description']);
+      expect(result?.isbn).toEqual(['9780439064873']);
+    });
+
+    it('should handle partial metadata gracefully', async () => {
+      const env = createMockEnv();
+
+      mockFetchWithRetry
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            response: { docs: [{ identifier: 'test_id' }] },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            result: {
+              title: 'Minimal Book',
+              // Missing most fields
+            },
+          }),
+        });
+
+      const result = await fetchArchiveOrgMetadata('9780439064873', env);
+
+      expect(result).toBeTruthy();
+      expect(result?.title).toBe('Minimal Book');
+      expect(result?.creator).toBeUndefined();
+      expect(result?.publisher).toBeUndefined();
+      expect(result?.subject).toBeUndefined();
+    });
+
+    it('should handle search API errors gracefully', async () => {
+      const env = createMockEnv();
 
       mockFetchWithRetry.mockResolvedValueOnce({
         ok: false,
@@ -201,191 +399,40 @@ describe('archive-org', () => {
         statusText: 'Service Unavailable',
       });
 
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
+      const result = await fetchArchiveOrgMetadata('9780439064873', env);
 
       expect(result).toBeNull();
-      expect(logger.error).toHaveBeenCalledWith(
-        'Archive.org: API error',
-        expect.objectContaining({ status: 503 })
-      );
+    });
+
+    it('should handle metadata API errors gracefully', async () => {
+      const env = createMockEnv();
+
+      mockFetchWithRetry
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            response: { docs: [{ identifier: 'test_id' }] },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+        });
+
+      const result = await fetchArchiveOrgMetadata('9780439064873', env);
+
+      expect(result).toBeNull();
     });
 
     it('should handle network errors gracefully', async () => {
       const env = createMockEnv();
-      const logger = createMockLogger();
 
       mockFetchWithRetry.mockRejectedValueOnce(new Error('Network timeout'));
 
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
+      const result = await fetchArchiveOrgMetadata('9780439064873', env);
 
       expect(result).toBeNull();
-      expect(logger.error).toHaveBeenCalledWith(
-        'Archive.org fetch error',
-        expect.objectContaining({ error: 'Network timeout' })
-      );
-    });
-
-    it('should handle invalid JSON responses', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => {
-          throw new Error('Invalid JSON');
-        },
-      });
-
-      const result = await fetchArchiveOrgCover('9780439064873', env, logger);
-
-      expect(result).toBeNull();
-      expect(logger.error).toHaveBeenCalled();
-    });
-  });
-
-  describe('fetchArchiveOrgMetadata', () => {
-    it('should fetch book metadata from Archive.org', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          'ISBN:9780439064873': {
-            title: 'Harry Potter and the Sorcerer\'s Stone',
-            authors: [{ name: 'J. K. Rowling' }],
-            publish_date: '1998',
-            publishers: [{ name: 'Scholastic Inc.' }],
-            number_of_pages: 309,
-            subjects: [
-              { name: 'Fiction' },
-              { name: 'Fantasy' },
-              { name: 'Magic' },
-            ],
-            cover: {
-              large: 'https://covers.openlibrary.org/b/id/12345-L.jpg',
-            },
-          },
-        }),
-      });
-
-      const result = await fetchArchiveOrgMetadata('9780439064873', env, logger);
-
-      expect(result).toBeTruthy();
-      expect(result?.title).toBe('Harry Potter and the Sorcerer\'s Stone');
-      expect(result?.authors).toEqual(['J. K. Rowling']);
-      expect(result?.publish_date).toBe('1998');
-      expect(result?.publishers).toEqual(['Scholastic Inc.']);
-      expect(result?.number_of_pages).toBe(309);
-      expect(result?.subjects).toEqual(['Fiction', 'Fantasy', 'Magic']);
-      expect(result?.cover_url).toBe('https://covers.openlibrary.org/b/id/12345-L.jpg');
-    });
-
-    it('should return null when book not found', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({}), // Empty response
-      });
-
-      const result = await fetchArchiveOrgMetadata('9999999999999', env, logger);
-
-      expect(result).toBeNull();
-      expect(logger.debug).toHaveBeenCalledWith(
-        'Archive.org: No metadata found',
-        expect.objectContaining({ isbn: '9999999999999' })
-      );
-    });
-
-    it('should use cached metadata when available', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      const cachedMetadata = {
-        title: 'Cached Book',
-        authors: ['Test Author'],
-        publish_date: '2020',
-      };
-
-      (env.CACHE.get as any).mockResolvedValueOnce(JSON.stringify(cachedMetadata));
-
-      const result = await fetchArchiveOrgMetadata('9780439064873', env, logger);
-
-      expect(result).toEqual(cachedMetadata);
-      expect(logger.debug).toHaveBeenCalledWith(
-        'Archive.org: Using cached metadata',
-        expect.any(Object)
-      );
-      expect(mockFetchWithRetry).not.toHaveBeenCalled();
-    });
-
-    it('should handle partial metadata gracefully', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          'ISBN:9780439064873': {
-            title: 'Harry Potter',
-            // Missing authors, publishers, etc.
-          },
-        }),
-      });
-
-      const result = await fetchArchiveOrgMetadata('9780439064873', env, logger);
-
-      expect(result).toBeTruthy();
-      expect(result?.title).toBe('Harry Potter');
-      expect(result?.authors).toBeUndefined();
-      expect(result?.publishers).toBeUndefined();
-    });
-
-    it('should extract author names from author objects', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          'ISBN:9780439064873': {
-            title: 'Test Book',
-            authors: [
-              { name: 'Author One' },
-              { name: 'Author Two' },
-            ],
-          },
-        }),
-      });
-
-      const result = await fetchArchiveOrgMetadata('9780439064873', env, logger);
-
-      expect(result?.authors).toEqual(['Author One', 'Author Two']);
-    });
-
-    it('should extract subject names from subject objects', async () => {
-      const env = createMockEnv();
-      const logger = createMockLogger();
-
-      mockFetchWithRetry.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          'ISBN:9780439064873': {
-            title: 'Test Book',
-            subjects: [
-              { name: 'Fiction' },
-              { name: 'Adventure' },
-              { name: 'Young Adult' },
-            ],
-          },
-        }),
-      });
-
-      const result = await fetchArchiveOrgMetadata('9780439064873', env, logger);
-
-      expect(result?.subjects).toEqual(['Fiction', 'Adventure', 'Young Adult']);
     });
   });
 });

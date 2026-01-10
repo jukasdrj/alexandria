@@ -23,15 +23,20 @@ import {
   flattenFieldKeys,
   normalizePriority,
 } from './utils.js';
+import type { WikidataBookMetadata } from '../../types/open-apis.js';
+import type { ArchiveOrgMetadata } from '../../services/archive-org.js';
 
 /**
  * Enrich an edition in the database
+ *
+ * @param archiveOrgData - Optional Archive.org metadata for supplemental enrichment
  */
 export async function enrichEdition(
   sql: Sql | TransactionSql,
   edition: EnrichEditionRequest,
   logger: Logger,
-  env?: Env
+  env?: Env,
+  archiveOrgData?: ArchiveOrgMetadata | null
 ): Promise<EnrichmentData & { isbn: string; quality_improvement: number }> {
   const startTime = Date.now();
   const qualityScore = calculateEditionQuality(edition);
@@ -49,6 +54,28 @@ export async function enrichEdition(
     'google_books_volume_ids',
     'goodreads_edition_ids',
   ]);
+
+  // =========================================================================
+  // Archive.org Merge Logic (Edition-Level)
+  // =========================================================================
+  // Merge alternate ISBNs from Archive.org (if provided)
+  let mergedAlternateIsbns = edition.alternate_isbns || [];
+  if (archiveOrgData?.isbn) {
+    const archiveIsbns = archiveOrgData.isbn.filter(
+      (isbn) => isbn !== edition.isbn // Exclude primary ISBN
+    );
+    mergedAlternateIsbns = [...new Set([...mergedAlternateIsbns, ...archiveIsbns])];
+  }
+
+  // Merge OpenLibrary edition ID (Archive.org primary)
+  const mergedOpenLibraryEditionId =
+    archiveOrgData?.openlibrary_edition || edition.openlibrary_edition_id;
+
+  // Update contributors array
+  const contributors = [edition.primary_provider];
+  if (archiveOrgData) {
+    contributors.push('archive-org');
+  }
 
   try {
     // Fetch existing quality score before upsert (for quality improvement calculation)
@@ -94,7 +121,7 @@ export async function enrichEdition(
         last_isbndb_sync
       ) VALUES (
         ${edition.isbn},
-        ${formatPgArray(edition.alternate_isbns)},
+        ${formatPgArray(mergedAlternateIsbns)},
         ${edition.work_key || null},
         ${edition.title || null},
         ${edition.subtitle || null},
@@ -108,7 +135,7 @@ export async function enrichEdition(
         ${edition.cover_urls?.small || null},
         ${edition.cover_urls?.original || null},
         ${edition.cover_source || null},
-        ${edition.openlibrary_edition_id || null},
+        ${mergedOpenLibraryEditionId || null},
         ${formatPgArray(edition.amazon_asins)},
         ${formatPgArray(edition.google_books_volume_ids)},
         ${formatPgArray(edition.goodreads_edition_ids)},
@@ -117,7 +144,7 @@ export async function enrichEdition(
         ${edition.binding || null},
         ${edition.related_isbns ? JSON.stringify(edition.related_isbns) : null},
         ${edition.primary_provider},
-        ${formatPgArray([edition.primary_provider])},
+        ${formatPgArray(contributors)},
         ${qualityScore},
         ${completenessScore},
         ${edition.work_match_confidence || null},
@@ -313,11 +340,16 @@ export async function enrichEdition(
 
 /**
  * Enrich a work in the database
+ *
+ * @param wikidataData - Optional Wikidata metadata for genre enrichment
+ * @param archiveOrgData - Optional Archive.org metadata for supplemental enrichment
  */
 export async function enrichWork(
   sql: Sql | TransactionSql,
   work: EnrichWorkRequest,
-  logger: Logger
+  logger: Logger,
+  wikidataData?: WikidataBookMetadata | null,
+  archiveOrgData?: ArchiveOrgMetadata | null
 ): Promise<EnrichmentData & { work_key: string }> {
   const startTime = Date.now();
   const qualityScore = calculateWorkQuality(work);
@@ -334,6 +366,42 @@ export async function enrichWork(
     'amazon_asins',
     'google_books_volume_ids',
   ]);
+
+  // =========================================================================
+  // 3-Way Merge Logic (ISBNdb + Wikidata + Archive.org)
+  // =========================================================================
+
+  // Description: Archive.org primary (richer), fallback to ISBNdb
+  let mergedDescription = work.description;
+  if (archiveOrgData?.description && archiveOrgData.description.length > 0) {
+    mergedDescription = archiveOrgData.description.join('\n\n');
+  }
+
+  // Subject Tags: Merge all sources with normalization (lowercase + trim)
+  let mergedSubjectTags = work.subject_tags || [];
+  if (wikidataData?.genres) {
+    mergedSubjectTags = [...mergedSubjectTags, ...wikidataData.genres];
+  }
+  if (archiveOrgData?.subject) {
+    mergedSubjectTags = [...mergedSubjectTags, ...archiveOrgData.subject];
+  }
+  // Normalize: lowercase, trim, deduplicate
+  mergedSubjectTags = [
+    ...new Set(mergedSubjectTags.map((tag) => tag.toLowerCase().trim())),
+  ];
+
+  // OpenLibrary Work ID: Archive.org primary
+  const mergedOpenLibraryWorkId =
+    archiveOrgData?.openlibrary_work || work.openlibrary_work_id;
+
+  // Contributors: Track all providers
+  const contributors = [work.primary_provider];
+  if (wikidataData) {
+    contributors.push('wikidata');
+  }
+  if (archiveOrgData) {
+    contributors.push('archive-org');
+  }
 
   try {
     const result = await sql`
@@ -363,20 +431,20 @@ export async function enrichWork(
         ${work.work_key},
         ${work.title},
         ${work.subtitle || null},
-        ${work.description || null},
+        ${mergedDescription || null},
         ${work.original_language || null},
         ${work.first_publication_year || null},
-        ${formatPgArray(work.subject_tags)},
+        ${formatPgArray(mergedSubjectTags)},
         ${work.cover_urls?.large || null},
         ${work.cover_urls?.medium || null},
         ${work.cover_urls?.small || null},
         ${work.cover_source || null},
-        ${work.openlibrary_work_id || null},
+        ${mergedOpenLibraryWorkId || null},
         ${formatPgArray(work.goodreads_work_ids)},
         ${formatPgArray(work.amazon_asins)},
         ${formatPgArray(work.google_books_volume_ids)},
         ${work.primary_provider},
-        ${formatPgArray([work.primary_provider])},
+        ${formatPgArray(contributors)},
         ${qualityScore},
         ${completenessScore},
         NOW(),

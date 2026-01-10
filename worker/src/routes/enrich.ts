@@ -39,6 +39,8 @@ import { extractGoogleBooksCategories } from '../../services/google-books.js';
 import { updateWorkSubjects } from '../services/subject-enrichment.js';
 import { fetchBookByISBN } from '../../services/wikidata.js';
 import type { WikidataBookMetadata } from '../../types/open-apis.js';
+import { fetchArchiveOrgMetadata } from '../../services/archive-org.js';
+import type { ArchiveOrgMetadata } from '../../services/archive-org.js';
 
 // Create enrichment router
 export const enrichRoutes = new OpenAPIHono<AppBindings>();
@@ -529,35 +531,67 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
       duration_ms: batchDuration,
     });
 
-    // Parallel Wikidata genre enrichment (non-blocking)
-    const wikidataStartTime = Date.now();
+    // Parallel Open API enrichment (Wikidata + Archive.org, non-blocking)
+    const openApiStartTime = Date.now();
     const wikidataData = new Map<string, WikidataBookMetadata>();
+    const archiveOrgData = new Map<string, ArchiveOrgMetadata>();
 
-    // Fetch Wikidata metadata for all ISBNs in parallel
-    const wikidataPromises = normalizedISBNs.map(isbn =>
-      fetchBookByISBN(isbn, c.env, logger)
-        .then(metadata => ({ isbn, metadata }))
-        .catch(error => {
-          logger.warn('Wikidata fetch failed for ISBN', {
-            isbn,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return { isbn, metadata: null };
-        })
-    );
+    // Fetch Wikidata and Archive.org metadata for all ISBNs in parallel
+    const [wikidataResults, archiveOrgResults] = await Promise.allSettled([
+      // Wikidata fetch
+      Promise.all(
+        normalizedISBNs.map(isbn =>
+          fetchBookByISBN(isbn, c.env, logger)
+            .then(metadata => ({ isbn, metadata }))
+            .catch(error => {
+              logger.warn('Wikidata fetch failed for ISBN', {
+                isbn,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return { isbn, metadata: null };
+            })
+        )
+      ),
+      // Archive.org fetch
+      Promise.all(
+        normalizedISBNs.map(isbn =>
+          fetchArchiveOrgMetadata(isbn, c.env, logger)
+            .then(metadata => ({ isbn, metadata }))
+            .catch(error => {
+              logger.warn('Archive.org fetch failed for ISBN', {
+                isbn,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return { isbn, metadata: null };
+            })
+        )
+      )
+    ]);
 
-    const wikidataResults = await Promise.allSettled(wikidataPromises);
-    for (const result of wikidataResults) {
-      if (result.status === 'fulfilled' && result.value.metadata) {
-        wikidataData.set(result.value.isbn, result.value.metadata);
+    // Populate Wikidata map
+    if (wikidataResults.status === 'fulfilled') {
+      for (const result of wikidataResults.value) {
+        if (result.metadata) {
+          wikidataData.set(result.isbn, result.metadata);
+        }
       }
     }
 
-    const wikidataDuration = Date.now() - wikidataStartTime;
-    logger.info('Wikidata batch fetch complete', {
-      found: wikidataData.size,
+    // Populate Archive.org map
+    if (archiveOrgResults.status === 'fulfilled') {
+      for (const result of archiveOrgResults.value) {
+        if (result.metadata) {
+          archiveOrgData.set(result.isbn, result.metadata);
+        }
+      }
+    }
+
+    const openApiDuration = Date.now() - openApiStartTime;
+    logger.info('Open API batch fetch complete', {
+      wikidata_found: wikidataData.size,
+      archive_org_found: archiveOrgData.size,
       requested: normalizedISBNs.length,
-      durationMs: wikidataDuration,
+      durationMs: openApiDuration,
     });
 
     // Get database connection
@@ -582,14 +616,24 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
         // Generate a work key for grouping editions
         const workKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
 
+        // Get Open API metadata for this ISBN
+        const wikidataMetadata = wikidataData.get(isbn);
+        const archiveOrgMetadata = archiveOrgData.get(isbn);
+
         // First, create the enriched_work so FK constraint is satisfied
-        await enrichWork(sql, {
-          work_key: workKey,
-          title: externalData.title,
-          description: externalData.description,
-          subject_tags: externalData.subjects,
-          primary_provider: 'isbndb',
-        }, c.get('logger'));
+        await enrichWork(
+          sql,
+          {
+            work_key: workKey,
+            title: externalData.title,
+            description: externalData.description,
+            subject_tags: externalData.subjects,
+            primary_provider: 'isbndb',
+          },
+          c.get('logger'),
+          wikidataMetadata,
+          archiveOrgMetadata
+        );
 
         // Then enrich the edition (stores metadata + cover URLs)
         await enrichEdition(
@@ -613,7 +657,8 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
             related_isbns: externalData.relatedISBNs,
           },
           c.get('logger'),
-          c.env
+          c.env,
+          archiveOrgMetadata
         );
 
         // Phase 2: Enrich subjects with Google Books categories (opportunistic, non-blocking)
@@ -640,7 +685,7 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
                 duration_ms: googleDuration,
               });
 
-              // Track analytics for donation calculation
+              // Track analytics for Open API usage
               if (c.env.ANALYTICS) {
                 await c.env.ANALYTICS.writeDataPoint({
                   indexes: ['google_books_subject_enrichment'],
@@ -659,7 +704,7 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
         }
 
         // Phase 3: Enrich genres with Wikidata (opportunistic, non-blocking)
-        const wikidataMetadata = wikidataData.get(isbn);
+        // Note: wikidataMetadata already retrieved on line 620
         if (wikidataMetadata?.genre_names || wikidataMetadata?.subject_names) {
           try {
             const wikidataGenres = [
@@ -677,7 +722,7 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
                 duration_ms: 0, // Already fetched in batch
               });
 
-              // Track analytics for donation calculation
+              // Track analytics for Open API usage
               if (c.env.ANALYTICS) {
                 await c.env.ANALYTICS.writeDataPoint({
                   indexes: ['wikidata_genre_enrichment'],

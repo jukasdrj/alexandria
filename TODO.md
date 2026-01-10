@@ -6,6 +6,46 @@ Active tasks and future work. Production system (Phase 1-5) is complete.
 
 ## 🎯 Active Work
 
+### Archive.org Metadata Enrichment - Phase 2 (#159) ✅ COMPLETE
+**Priority:** PRODUCTION DEPLOYED (Jan 10, 2026)
+
+**Status:** Successfully extended Archive.org beyond covers to full metadata enrichment!
+
+**Completed:**
+- [x] Phase 2.1: Research & Design (PAL thinkdeep analysis)
+- [x] Phase 2.2: Implementation (fetchArchiveOrgMetadata function)
+- [x] Phase 2.3: Integration (3-way merge in enrichment pipeline)
+- [x] Phase 2.4: Testing (100% pass rate - 37/37 tests)
+- [x] Phase 2.5: Documentation & Deployment
+
+**Key Features Delivered:**
+- Rich, multi-paragraph descriptions (superior to ISBNdb)
+- Library of Congress subject classifications
+- Authoritative OpenLibrary crosswalk IDs (edition + work)
+- Alternate ISBNs (deduplicated merge)
+- 3-way merge: ISBNdb + Wikidata + Archive.org
+- Description priority: Archive.org > ISBNdb
+- Subject normalization: merged, lowercase, deduplicated
+
+**Performance Impact:**
+- Expected 30-40% additional ISBNdb quota reduction (beyond Phase 1's 40%)
+- Archive.org API latency: 140-240ms (acceptable for inline integration)
+- Test coverage: 100% (17/17 archive-org, 20/20 enrichment-service)
+- Zero test failures, zero rework
+
+**Infrastructure:**
+- Rate limiting: 1 req/sec (KV-backed, distributed-safe)
+- Caching: 7-day TTL with null result caching
+- Graceful degradation: Archive.org failures don't break pipeline
+- Backward compatible: optional parameters, no breaking changes
+
+**Next Steps:**
+- Monitor ISBNdb quota reduction in production
+- Track description quality improvements
+- Measure Archive.org cache hit rate
+
+---
+
 ### Phase 5: Backfill System Validation (#150) ✅ COMPLETE
 **Priority:** PRODUCTION READY
 
@@ -107,4 +147,4 @@ npm run tail                      # Monitor logs
 
 ---
 
-**Last Updated:** January 8, 2026
+**Last Updated:** January 10, 2026

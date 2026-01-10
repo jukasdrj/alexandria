@@ -15,8 +15,10 @@ vi.mock('../../lib/open-api-utils.js', () => ({
   buildCacheKey: (provider: string, type: string, identifier: string) =>
     `${provider}:${type}:${identifier}`,
   buildUserAgent: (provider: string, purpose: string) =>
-    `Alexandria/2.3.0 (test@test.com; ${purpose}; https://test.com)`,
+    `Alexandria/2.3.0 (test@test.com; ${purpose})`,
   trackOpenApiUsage: vi.fn().mockResolvedValue(undefined),
+  getCachedResponse: vi.fn().mockResolvedValue(null),
+  setCachedResponse: vi.fn().mockResolvedValue(undefined),
   RATE_LIMITS: {
     'wikipedia': 1000,
   },

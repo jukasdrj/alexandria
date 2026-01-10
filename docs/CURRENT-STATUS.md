@@ -1,6 +1,6 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 7, 2026
+**Last Updated:** January 10, 2026
 
 ## 🎯 Active Issues
 
@@ -23,7 +23,58 @@
 
 ---
 
-## ✅ Recently Completed (January 7, 2026)
+## ✅ Recently Completed
+
+### Archive.org Metadata Enrichment - Phase 2 (COMPLETED - Jan 10) 🎉
+**Issue #159 - Extended Archive.org integration beyond covers to full metadata:**
+
+**Overview:**
+- Archive.org now provides full book metadata (not just covers)
+- Rich descriptions, Library of Congress subjects, OpenLibrary IDs
+- 3-way merge: ISBNdb + Wikidata + Archive.org
+- Expected 30-40% additional ISBNdb quota reduction (beyond Phase 1's 40%)
+
+**Key Features:**
+- **Rich Descriptions**: Multi-paragraph descriptions superior to ISBNdb
+- **Subject Tags**: Library of Congress classifications merged with Wikidata genres
+- **OpenLibrary IDs**: Authoritative edition/work IDs for crosswalking
+- **Alternate ISBNs**: Deduplicated merge with existing data
+- **Publication Data**: Publisher, date, language, LCCN
+
+**Integration:**
+- Parallel fetch (Archive.org + Wikidata) - non-blocking
+- Description priority: Archive.org > ISBNdb
+- Subject normalization: lowercase + trim + deduplicate
+- Contributors tracking: audit trail for all providers
+- Backward compatible: optional parameters, no breaking changes
+
+**Infrastructure:**
+- Rate limiting: 1 req/sec (KV-backed, distributed-safe)
+- Caching: 7-day TTL with null result caching
+- Graceful degradation: Archive.org failures don't break pipeline
+- 2-step API: Reused search → metadata pattern
+
+**Test Coverage:**
+- Archive.org service: 17/17 tests passing (100%)
+- Enrichment service: 20/20 tests passing (100%)
+- Total new/updated tests: 29
+- Zero test failures
+
+**Files Modified:**
+- `worker/services/archive-org.ts` - Added fetchArchiveOrgMetadata()
+- `worker/src/routes/enrich.ts` - Parallel fetch integration
+- `worker/src/services/enrichment-service.ts` - 3-way merge logic
+- `worker/services/__tests__/archive-org.test.ts` - Comprehensive test rewrite
+- `worker/src/services/__tests__/enrichment-service.test.ts` - Phase 2.3 tests
+
+**Documentation:**
+- `docs/api/OPEN-API-INTEGRATIONS.md` - Updated with metadata features
+- `.planning/phase2-archive-org/` - Complete planning artifacts
+
+**Status:** DEPLOYED - Jan 10, 2026
+**Next Steps:** Monitor ISBNdb quota reduction, track description quality improvements
+
+---
 
 ### Author Just-in-Time Enrichment (COMPLETED - Jan 7) 🎉
 **Implemented view-triggered automatic author enrichment system:**

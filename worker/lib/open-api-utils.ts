@@ -46,16 +46,7 @@ export const CACHE_TTLS = {
   'google-books': 2592000,   // 30 days (book metadata stable)
 } as const;
 
-/**
- * Donation URLs for User-Agent strings
- * Note: Google Books doesn't have a public donation page
- */
-export const DONATION_URLS = {
-  'archive.org': 'https://archive.org/donate',
-  'wikipedia': 'https://donate.wikimedia.org',
-  'wikidata': 'https://donate.wikimedia.org',
-  'google-books': undefined,  // No public donation page
-} as const;
+// Donation URLs removed per user request
 
 /**
  * Provider types
@@ -145,15 +136,14 @@ export async function enforceRateLimit(
 // =================================================================================
 
 /**
- * Build provider-specific User-Agent string with donation link
+ * Build provider-specific User-Agent string
  *
  * Follows best practices for API citizenship:
  * - Identifies our application and version
  * - Provides contact email for API operators
  * - Describes our purpose
- * - Includes donation link to support the service (if available)
  *
- * Format: "Alexandria/{version} ({contact}; {purpose}[; Donate: {donation_url}])"
+ * Format: "Alexandria/{version} ({contact}; {purpose})"
  *
  * @param provider - Provider name (archive.org, wikipedia, wikidata, google-books)
  * @param purpose - Brief description of how we use the API
@@ -162,21 +152,14 @@ export async function enforceRateLimit(
  * @example
  * ```typescript
  * buildUserAgent('wikipedia', 'Author biographies')
- * // Returns: "Alexandria/2.3.0 (nerd@ooheynerds.com; Author biographies; Donate: https://donate.wikimedia.org)"
+ * // Returns: "Alexandria/2.3.0 (nerd@ooheynerds.com; Author biographies)"
  *
  * buildUserAgent('google-books', 'Book metadata')
  * // Returns: "Alexandria/2.3.0 (nerd@ooheynerds.com; Book metadata)"
  * ```
  */
 export function buildUserAgent(provider: Provider, purpose: string): string {
-  const donationUrl = DONATION_URLS[provider];
-  const baseAgent = `Alexandria/${ALEXANDRIA_VERSION} (${CONTACT_EMAIL}; ${purpose}`;
-
-  if (donationUrl) {
-    return `${baseAgent}; Donate: ${donationUrl})`;
-  }
-
-  return `${baseAgent})`;
+  return `Alexandria/${ALEXANDRIA_VERSION} (${CONTACT_EMAIL}; ${purpose})`;
 }
 
 // =================================================================================
