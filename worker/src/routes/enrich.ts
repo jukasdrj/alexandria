@@ -35,6 +35,8 @@ import { normalizeISBN, validateISBNBatch } from '../../lib/isbn-utils.js';
 import { enrichEdition, enrichWork } from '../services/enrichment-service.js';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
 import { createQuotaManager } from '../services/quota-manager.js';
+import { extractGoogleBooksCategories } from '../../services/google-books.js';
+import { updateWorkSubjects } from '../services/subject-enrichment.js';
 
 // Create enrichment router
 export const enrichRoutes = new OpenAPIHono<AppBindings>();
@@ -580,6 +582,48 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
           c.get('logger'),
           c.env
         );
+
+        // Phase 2: Enrich subjects with Google Books categories (opportunistic, non-blocking)
+        logger.info('[DEBUG] Google Books check', {
+          flag_value: c.env.ENABLE_GOOGLE_BOOKS_ENRICHMENT,
+          flag_type: typeof c.env.ENABLE_GOOGLE_BOOKS_ENRICHMENT,
+          will_run: c.env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true'
+        });
+
+        if (c.env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true') {
+          logger.info('[DEBUG] Google Books enrichment starting', { isbn });
+          try {
+            const googleStartTime = Date.now();
+            const googleCategories = await extractGoogleBooksCategories(isbn, c.env, logger);
+            const googleDuration = Date.now() - googleStartTime;
+
+            if (googleCategories.length > 0) {
+              await updateWorkSubjects(sql, workKey, googleCategories, 'google-books', logger);
+
+              logger.info('Google Books subject enrichment complete', {
+                isbn,
+                work_key: workKey,
+                categories_count: googleCategories.length,
+                duration_ms: googleDuration,
+              });
+
+              // Track analytics for donation calculation
+              if (c.env.ANALYTICS) {
+                await c.env.ANALYTICS.writeDataPoint({
+                  indexes: ['google_books_subject_enrichment'],
+                  blobs: [`isbn_${isbn}`, `work_${workKey}`, `categories_${googleCategories.length}`],
+                  doubles: [googleCategories.length, googleDuration]
+                });
+              }
+            }
+          } catch (googleError) {
+            // Log but don't fail enrichment if Google Books fails
+            logger.warn('Google Books subject enrichment failed (non-blocking)', {
+              isbn,
+              error: googleError instanceof Error ? googleError.message : String(googleError),
+            });
+          }
+        }
 
         results.enriched++;
 
