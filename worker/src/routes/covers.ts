@@ -232,13 +232,29 @@ export async function handleQueueCovers(c: Context<AppBindings>): Promise<Respon
         // Optimized: Send all messages in a single batch
         await c.env.COVER_QUEUE.sendBatch(messages);
         queued.push(...validBooks);
-      } catch (error) {
-        // If batch fails, all valid messages fail
-        const message = error instanceof Error ? error.message : 'Queue batch failed';
-        logger.error('Cover queue batch send failed', { error: message });
 
+        // Log successful batch send
+        logger.info('Cover queue batch sent successfully', {
+          batch_size: validBooks.length,
+          sample_isbns: validBooks.slice(0, 5),
+        });
+      } catch (error) {
+        // If batch fails, all valid messages fail (atomic operation)
+        const message = error instanceof Error ? error.message : 'Queue batch failed';
+        const errorType = error instanceof Error ? error.constructor.name : 'UnknownError';
+
+        logger.error('Cover queue batch send failed - NO messages were queued (atomic operation)', {
+          error: message,
+          error_type: errorType,
+          stack: error instanceof Error ? error.stack : undefined,
+          batch_size: validBooks.length,
+          sample_isbns: validBooks.slice(0, 5),
+        });
+
+        // Mark all ISBNs as failed since batch operations are all-or-nothing
+        const failureMessage = `Batch queue operation failed: NO messages were queued (transient error - retry entire batch of ${validBooks.length} ISBNs)`;
         for (const isbn of validBooks) {
-          failed.push({ isbn, error: message });
+          failed.push({ isbn, error: failureMessage });
         }
       }
     }
