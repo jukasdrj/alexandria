@@ -6,6 +6,7 @@
  */
 
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import type { Context } from 'hono';
 import type { AppBindings } from '../env.js';
 import {
   ProcessCoverSchema,
@@ -180,8 +181,7 @@ const queueCoverRoute = createRoute({
   },
 });
 
-// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
-app.openapi(queueCoverRoute, async (c) => {
+export async function handleQueueCovers(c: Context<AppBindings>): Promise<Response> {
   const logger = c.get('logger');
 
   try {
@@ -198,20 +198,22 @@ app.openapi(queueCoverRoute, async (c) => {
 
     const queued: string[] = [];
     const failed: Array<{ isbn: string; error: string }> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const messages: any[] = [];
+    const validBooks: string[] = [];
 
+    // 1. Validate all books first
     for (const book of books) {
       const { isbn, work_key, priority = 'normal', source = 'unknown', title, author } = book;
 
-      // Validate ISBN using utility
       const normalizedISBN = normalizeISBN(isbn);
       if (!normalizedISBN) {
         failed.push({ isbn: isbn || 'undefined', error: 'Invalid ISBN format' });
         continue;
       }
 
-      try {
-        // Queue cover processing
-        await c.env.COVER_QUEUE.send({
+      messages.push({
+        body: {
           isbn: normalizedISBN,
           work_key,
           priority,
@@ -219,12 +221,41 @@ app.openapi(queueCoverRoute, async (c) => {
           title,
           author,
           queued_at: new Date().toISOString(),
+        }
+      });
+      validBooks.push(normalizedISBN);
+    }
+
+    // 2. Batch send if we have valid messages
+    if (messages.length > 0) {
+      try {
+        // Optimized: Send all messages in a single batch
+        await c.env.COVER_QUEUE.sendBatch(messages);
+        queued.push(...validBooks);
+
+        // Log successful batch send
+        logger.info('Cover queue batch sent successfully', {
+          batch_size: validBooks.length,
+          sample_isbns: validBooks.slice(0, 5),
+        });
+      } catch (error) {
+        // If batch fails, all valid messages fail (atomic operation)
+        const message = error instanceof Error ? error.message : 'Queue batch failed';
+        const errorType = error instanceof Error ? error.constructor.name : 'UnknownError';
+
+        logger.error('Cover queue batch send failed - NO messages were queued (atomic operation)', {
+          error: message,
+          error_type: errorType,
+          stack: error instanceof Error ? error.stack : undefined,
+          batch_size: validBooks.length,
+          sample_isbns: validBooks.slice(0, 5),
         });
 
-        queued.push(normalizedISBN);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        failed.push({ isbn: normalizedISBN, error: message });
+        // Mark all ISBNs as failed since batch operations are all-or-nothing
+        const failureMessage = `Batch queue operation failed: NO messages were queued (transient error - retry entire batch of ${validBooks.length} ISBNs)`;
+        for (const isbn of validBooks) {
+          failed.push({ isbn, error: failureMessage });
+        }
       }
     }
 
@@ -249,6 +280,9 @@ app.openapi(queueCoverRoute, async (c) => {
       500
     );
   }
-});
+}
+
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+app.openapi(queueCoverRoute, handleQueueCovers);
 
 export default app;

@@ -1022,8 +1022,8 @@ describe('POST /api/books/enrich-new-releases', () => {
     });
 
     it('should continue on cover queue failure', () => {
-      let coversQueued = 0;
-      let failed = 0;
+      const coversQueued = 0;
+      const failed = 0;
 
       try {
         // Simulate cover queue failure
