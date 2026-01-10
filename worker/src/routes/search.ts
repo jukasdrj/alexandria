@@ -79,49 +79,46 @@ async function fallbackISBNSearch(sql: SqlClient, isbn: string): Promise<Edition
 async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number, offset: number): Promise<{ total: number; results: EditionSearchResult[] }> {
   const titlePattern = `%${sanitizeSqlPattern(title)}%`;
 
-  const [countResult, dataResult] = await Promise.all([
-    sql`
-      SELECT COUNT(*)::int AS total
-      FROM editions e
-      WHERE e.data->>'title' ILIKE ${titlePattern}
-    `,
-    sql`
-      SELECT
-        e.data->>'title' AS title,
-        (SELECT ei.isbn FROM edition_isbns ei WHERE ei.edition_key = e.key LIMIT 1) AS isbn,
-        e.data->>'publish_date' AS publish_date,
-        e.data->>'publishers' AS publishers,
-        (e.data->>'number_of_pages')::int AS pages,
-        w.data->>'title' AS work_title,
-        e.key AS edition_key,
-        e.work_key,
-        (CASE 
-          WHEN e.data->'covers' IS NOT NULL AND jsonb_array_length(e.data->'covers') > 0 
-          THEN 'https://covers.openlibrary.org/b/id/' || (e.data->'covers'->>0) || '-L.jpg' 
-          ELSE NULL 
-        END) AS cover_url,
-        COALESCE(
-          json_agg(
-            DISTINCT jsonb_build_object(
-              'name', a.data->>'name',
-              'key', a.key
-            )
-          ) FILTER (WHERE a.key IS NOT NULL),
-          '[]'::json
-        ) AS authors
-      FROM editions e
-      LEFT JOIN works w ON w.key = e.work_key
-      LEFT JOIN author_works aw ON aw.work_key = w.key
-      LEFT JOIN authors a ON a.key = aw.author_key
-      WHERE e.data->>'title' ILIKE ${titlePattern}
-      GROUP BY e.key, e.data, w.data, e.work_key
-      ORDER BY e.data->>'title'
-      LIMIT ${limit}
-      OFFSET ${offset}
-    `
-  ]);
+  const dataResult = await sql`
+    SELECT
+      e.data->>'title' AS title,
+      (SELECT ei.isbn FROM edition_isbns ei WHERE ei.edition_key = e.key LIMIT 1) AS isbn,
+      e.data->>'publish_date' AS publish_date,
+      e.data->>'publishers' AS publishers,
+      (e.data->>'number_of_pages')::int AS pages,
+      w.data->>'title' AS work_title,
+      e.key AS edition_key,
+      e.work_key,
+      (CASE
+        WHEN e.data->'covers' IS NOT NULL AND jsonb_array_length(e.data->'covers') > 0
+        THEN 'https://covers.openlibrary.org/b/id/' || (e.data->'covers'->>0) || '-L.jpg'
+        ELSE NULL
+      END) AS cover_url,
+      COALESCE(
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'name', a.data->>'name',
+            'key', a.key
+          )
+        ) FILTER (WHERE a.key IS NOT NULL),
+        '[]'::json
+      ) AS authors
+    FROM editions e
+    LEFT JOIN works w ON w.key = e.work_key
+    LEFT JOIN author_works aw ON aw.work_key = w.key
+    LEFT JOIN authors a ON a.key = aw.author_key
+    WHERE e.data->>'title' ILIKE ${titlePattern}
+    GROUP BY e.key, e.data, w.data, e.work_key
+    ORDER BY e.data->>'title'
+    LIMIT ${limit + 1}
+    OFFSET ${offset}
+  `;
 
-  return { total: countResult[0]?.total || 0, results: dataResult };
+  const hasMoreResults = dataResult.length > limit;
+  const results = hasMoreResults ? dataResult.slice(0, limit) : dataResult;
+  const total = hasMoreResults ? offset + limit + 1 : offset + results.length;
+
+  return { total, results: results as unknown as EditionSearchResult[] };
 }
 
 async function fallbackAuthorSearch(sql: SqlClient, author: string, limit: number, offset: number): Promise<EditionSearchResult[]> {
@@ -350,60 +347,56 @@ app.openapi(searchRoute, async (c) => {
     } else if (title) {
       // OPTIMIZED: Query enriched_editions with ILIKE for fast partial match
       const titlePattern = `%${sanitizeSqlPattern(title)}%`;
-      const [countResult, dataResult] = await Promise.all([
-        sql`
-          SELECT COUNT(*)::int AS total
-          FROM enriched_editions
-          WHERE title ILIKE ${titlePattern}
-        `,
-        sql`
-          SELECT
-            ee.title,
-            ee.isbn,
-            ee.publication_date AS publish_date,
-            ee.publisher AS publishers,
-            ee.page_count AS pages,
-            ew.title AS work_title,
-            ee.edition_key,
-            ee.work_key,
-            ee.cover_url_large AS cover_url,
-            ee.cover_url_medium,
-            ee.cover_url_small,
-            ee.binding,
-            ee.related_isbns,
-            COALESCE(
-              json_agg(
-                json_build_object(
-                  'name', ea.name,
-                  'key', ea.author_key,
-                  'gender', ea.gender,
-                  'nationality', ea.nationality,
-                  'birth_year', ea.birth_year,
-                  'death_year', ea.death_year,
-                  'bio', ea.bio,
-                  'wikidata_id', ea.wikidata_id,
-                  'image', ea.author_photo_url
-                )
-                ORDER BY wae.author_order
-              ) FILTER (WHERE ea.author_key IS NOT NULL),
-              '[]'::json
-            ) AS authors
-          FROM enriched_editions ee
-          LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
-          LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
-          LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
-          WHERE ee.title ILIKE ${titlePattern}
-          GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
-                   ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
-                   ee.cover_url_medium, ee.cover_url_small, ee.binding, ee.related_isbns
-          ORDER BY ee.title
-          LIMIT ${limit}
-          OFFSET ${offset}
-        `
-      ]);
 
-      total = countResult[0]?.total || 0;
-      results = dataResult as unknown as EditionSearchResult[];
+      // Fetch limit+1 to check if more results exist without expensive COUNT
+      const dataResult = await sql`
+        SELECT
+          ee.title,
+          ee.isbn,
+          ee.publication_date AS publish_date,
+          ee.publisher AS publishers,
+          ee.page_count AS pages,
+          ew.title AS work_title,
+          ee.edition_key,
+          ee.work_key,
+          ee.cover_url_large AS cover_url,
+          ee.cover_url_medium,
+          ee.cover_url_small,
+          ee.binding,
+          ee.related_isbns,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'name', ea.name,
+                'key', ea.author_key,
+                'gender', ea.gender,
+                'nationality', ea.nationality,
+                'birth_year', ea.birth_year,
+                'death_year', ea.death_year,
+                'bio', ea.bio,
+                'wikidata_id', ea.wikidata_id,
+                'image', ea.author_photo_url
+              )
+              ORDER BY wae.author_order
+            ) FILTER (WHERE ea.author_key IS NOT NULL),
+            '[]'::json
+          ) AS authors
+        FROM enriched_editions ee
+        LEFT JOIN enriched_works ew ON ew.work_key = ee.work_key
+        LEFT JOIN work_authors_enriched wae ON wae.work_key = ee.work_key
+        LEFT JOIN enriched_authors ea ON ea.author_key = wae.author_key
+        WHERE ee.title ILIKE ${titlePattern}
+        GROUP BY ee.isbn, ee.title, ee.publication_date, ee.publisher, ee.page_count,
+                  ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
+                  ee.cover_url_medium, ee.cover_url_small, ee.binding, ee.related_isbns
+        ORDER BY ee.title
+        LIMIT ${limit + 1}
+        OFFSET ${offset}
+      `;
+
+      const hasMoreResults = dataResult.length > limit;
+      results = (hasMoreResults ? dataResult.slice(0, limit) : dataResult) as unknown as EditionSearchResult[];
+      total = hasMoreResults ? offset + limit + 1 : offset + results.length;
 
       // Fallback to OpenLibrary core tables if no enriched results
       if (results.length === 0) {
@@ -560,7 +553,7 @@ app.openapi(searchRoute, async (c) => {
         total,
         hasMore,
         returnedCount: formattedResults.length,
-        ...(author && { totalEstimated: true })
+        ...((author || title) && { totalEstimated: true })
       },
       cache_hit: false,
     };
