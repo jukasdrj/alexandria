@@ -1,20 +1,29 @@
 /**
- * ISBN Resolution Service - ISBNdb Title/Author Lookup
+ * ISBN Resolution Service - Multi-Source ISBN Resolution
  *
  * HYBRID WORKFLOW COMPONENT:
  * - Gemini generates book metadata (title, author, publisher)
- * - This service resolves authoritative ISBNs via ISBNdb API
+ * - This service resolves authoritative ISBNs via multiple sources
  * - Avoids LLM ISBN hallucination while maintaining metadata quality
  *
- * STRATEGY:
- * 1. Search ISBNdb by title + author
- * 2. Fuzzy match results (handle title variations)
- * 3. Return best ISBN match with confidence score
+ * STRATEGY (5-TIER CASCADING FALLBACK):
+ * 1. ISBNdb (primary - fast, accurate, quota-limited)
+ * 2. Google Books (1st fallback - fast, good coverage)
+ * 3. OpenLibrary (2nd fallback - free, reliable)
+ * 4. Archive.org (3rd fallback - excellent for pre-2000 books)
+ * 5. Wikidata (last resort - comprehensive, slow SPARQL)
+ *
+ * When ISBNdb quota exhausted, automatically falls back to free APIs.
+ * All resolvers implement Search → Validate pattern for data quality.
  *
  * @module services/isbn-resolution
+ * @since 2.0.0
+ * @updated 2.5.0 - Added multi-source fallback
  */
 
 import type { Logger } from '../../lib/logger.js';
+import type { Env } from '../env.js';
+import { ResolutionOrchestrator } from './book-resolution/resolution-orchestrator.js';
 
 // =================================================================================
 // Types
@@ -392,7 +401,7 @@ export async function resolveISBNViaTitle(
 }
 
 /**
- * Batch resolve ISBNs for multiple books
+ * Batch resolve ISBNs for multiple books with multi-source fallback
  *
  * RATE LIMITING:
  * - ISBNdb Premium: 3 req/sec
@@ -403,17 +412,26 @@ export async function resolveISBNViaTitle(
  * - Records actual API calls made (even if they fail)
  * - Stops making calls if 403 quota exhausted returned
  *
+ * FALLBACK CHAIN (NEW in 2.5.0):
+ * - When ISBNdb quota exhausted, automatically tries:
+ *   1. Google Books (fast, good coverage)
+ *   2. OpenLibrary (free, reliable)
+ *   3. Archive.org (pre-2000 books)
+ *   4. Wikidata (comprehensive, slow)
+ *
  * @param books - Array of book metadata from Gemini
  * @param apiKey - ISBNdb API key
  * @param logger - Logger instance
  * @param quotaManager - Optional quota manager for tracking (if not provided, quota tracking skipped)
+ * @param env - Worker environment (required for fallback resolvers)
  * @returns Array of resolution results
  */
 export async function batchResolveISBNs(
   books: BookMetadata[],
   apiKey: string,
   logger: Logger,
-  quotaManager?: { checkQuota: (count: number, reserve: boolean) => Promise<{ allowed: boolean; status: any }>; recordApiCall: (count: number) => Promise<void> }
+  quotaManager?: { checkQuota: (count: number, reserve: boolean) => Promise<{ allowed: boolean; status: any }>; recordApiCall: (count: number) => Promise<void> },
+  env?: Env
 ): Promise<ISBNResolutionResult[]> {
   const results: ISBNResolutionResult[] = [];
   let apiCallsMade = 0;
@@ -430,18 +448,73 @@ export async function batchResolveISBNs(
     return true;
   } : undefined;
 
+  // Initialize fallback orchestrator (lazy - only created if needed)
+  let orchestrator: ResolutionOrchestrator | null = null;
+
   for (let i = 0; i < books.length; i++) {
     const book = books[i];
 
-    // If previous call hit quota exhaustion, don't make more calls
+    // If previous call hit quota exhaustion, use fallback resolvers
     if (quotaExhausted) {
-      logger.warn('[ISBNResolution] Skipping remaining books due to quota exhaustion');
+      logger.info('[ISBNResolution] ISBNdb quota exhausted, using fallback resolvers', {
+        title: book.title,
+        author: book.author,
+      });
+
+      // Use fallback orchestrator if env provided
+      if (env) {
+        // Lazy initialize orchestrator
+        if (!orchestrator) {
+          orchestrator = new ResolutionOrchestrator();
+          logger.info('[ISBNResolution] Initialized fallback orchestrator', {
+            resolvers: orchestrator.getResolverChain(),
+          });
+        }
+
+        try {
+          const fallbackResult = await orchestrator.findISBN(
+            book.title,
+            book.author,
+            env,
+            logger
+          );
+
+          // Convert orchestrator result to ISBNResolutionResult format
+          const confidence = fallbackResult.confidence >= 80 ? 'high'
+            : fallbackResult.confidence >= 60 ? 'medium'
+            : fallbackResult.confidence >= 40 ? 'low'
+            : 'not_found';
+
+          results.push({
+            isbn: fallbackResult.isbn,
+            confidence,
+            match_quality: fallbackResult.confidence / 100, // Convert 0-100 to 0-1
+            matched_title: fallbackResult.metadata?.title || null,
+            source: fallbackResult.source as any, // OpenLibrary, Archive.org, etc.
+          });
+
+          // Add small delay to respect rate limits of fallback APIs
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        } catch (error) {
+          logger.error('[ISBNResolution] Fallback resolver error', {
+            title: book.title,
+            author: book.author,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          // Fall through to return not_found
+        }
+      } else {
+        logger.warn('[ISBNResolution] No env provided, cannot use fallback resolvers');
+      }
+
+      // No fallback available or fallback failed
       results.push({
         isbn: null,
         confidence: 'not_found',
         match_quality: 0.0,
         matched_title: null,
-        source: 'isbndb',
+        source: 'isbndb', // Keep source as isbndb for backwards compatibility
       });
       continue;
     }

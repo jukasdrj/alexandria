@@ -225,19 +225,53 @@ export async function processBackfillJob(
     });
 
     // Step 1: Run hybrid workflow (Gemini + ISBNdb resolution)
-    // Pass quota manager for API call tracking
-    const quotaManager = env.QUOTA_KV ? { recordApiCall: async (count: number) => {
-      try {
-        const currentUsage = await env.QUOTA_KV.get<number>('isbndb_daily_calls', 'json') || 0;
-        const newUsage = currentUsage + count;
-        await env.QUOTA_KV.put('isbndb_daily_calls', JSON.stringify(newUsage));
-      } catch (error) {
-        logger.error('[QuotaTracking] Failed to record API calls', {
-          error: error instanceof Error ? error.message : String(error),
-          count,
-        });
-      }
-    }} : undefined;
+    // Pass quota manager for API call tracking and quota checking
+    const quotaManager = env.QUOTA_KV ? {
+      checkQuota: async (count: number, reserve: boolean) => {
+        // Simple dry-run-friendly quota check
+        try {
+          const currentUsage = await env.QUOTA_KV.get<number>('isbndb_daily_calls', 'json') || 0;
+          const dailyLimit = 13000; // Safety limit
+          const allowed = (currentUsage + count) <= dailyLimit;
+
+          if (reserve && allowed) {
+            // Reserve quota by incrementing counter
+            await env.QUOTA_KV.put('isbndb_daily_calls', JSON.stringify(currentUsage + count));
+          }
+
+          return {
+            allowed,
+            status: {
+              used: currentUsage,
+              limit: dailyLimit,
+              remaining: dailyLimit - currentUsage,
+            },
+          };
+        } catch (error) {
+          logger.error('[QuotaTracking] Failed to check quota', {
+            error: error instanceof Error ? error.message : String(error),
+            count,
+          });
+          // Fail-open: allow the call if quota check fails
+          return {
+            allowed: true,
+            status: { used: 0, limit: 13000, remaining: 13000 },
+          };
+        }
+      },
+      recordApiCall: async (count: number) => {
+        try {
+          const currentUsage = await env.QUOTA_KV.get<number>('isbndb_daily_calls', 'json') || 0;
+          const newUsage = currentUsage + count;
+          await env.QUOTA_KV.put('isbndb_daily_calls', JSON.stringify(newUsage));
+        } catch (error) {
+          logger.error('[QuotaTracking] Failed to record API calls', {
+            error: error instanceof Error ? error.message : String(error),
+            count,
+          });
+        }
+      },
+    } : undefined;
 
     const hybridResult = await generateHybridBackfillList(
       year,

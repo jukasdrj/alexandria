@@ -229,6 +229,21 @@ export function normalizeISBN(isbn: string): string {
 // =================================================================================
 
 /**
+ * Prompt variant registry for A/B testing
+ * Maps variant names to prompt builder functions
+ */
+export const PROMPT_VARIANTS = {
+  baseline: (year: number, month: number, batchSize: number) => buildMonthlyPrompt(year, month, batchSize),
+  'diversity-emphasis': (year: number, month: number, batchSize: number) => buildDiversityPrompt(year, month, batchSize),
+  'overlooked-significance': (year: number, month: number, batchSize: number) => buildOverlookedPrompt(year, month, batchSize),
+  'genre-rotation': (year: number, month: number, batchSize: number) => buildGenrePrompt(year, month, batchSize),
+  'era-contextualized': (year: number, month: number, batchSize: number) => buildEraPrompt(year, month, batchSize),
+  'isbn-format-aware': (year: number, month: number, batchSize: number) => buildISBNFormatPrompt(year, month, batchSize),
+} as const;
+
+export type PromptVariantName = keyof typeof PROMPT_VARIANTS;
+
+/**
  * High-quality batch prompt (Hybrid Workflow)
  *
  * STRATEGY SHIFT:
@@ -314,6 +329,193 @@ ACCURACY NOTES:
 - Focus on books with complete, verifiable metadata
 - Publisher/format define the specific edition
 - For major releases, hardcover is typical unless known otherwise
+
+Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations.`;
+}
+
+/**
+ * Variant B: Diversity Emphasis
+ * Prioritize non-English, indie publishers, regional presses
+ */
+function buildDiversityPrompt(year: number, month: number, batchSize: number = 20): string {
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[month - 1];
+
+  return `Generate a curated list of exactly ${batchSize} historically or culturally significant books from ${monthName} ${year}.
+
+PRIORITIZE (in order of importance):
+1. Non-English language editions (Spanish, French, German, Japanese, Chinese, Arabic, etc.)
+2. Small and independent publishers
+3. Regional presses from underrepresented areas (Latin America, Africa, Asia, Eastern Europe)
+4. Translated works that reached international audiences
+5. Books that shaped specific communities or movements (not necessarily bestsellers)
+
+AVOID:
+- Mainstream bestsellers from major publishers (Random House, Penguin, HarperCollins, Simon & Schuster)
+- Books that would be in every major library's collection
+- US/UK-only perspectives
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house name (prioritize indie/regional publishers)
+4. **format**: Primary format ("Hardcover", "Paperback", "eBook", "Audiobook", or "Unknown")
+5. **publication_year**: ${year}
+6. **significance** (optional): Why this book is culturally important (1-2 sentences)
+
+Geographic diversity is critical. Aim for at least 30-40% non-English or non-US/UK titles.
+
+Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations.`;
+}
+
+/**
+ * Variant C: Overlooked Significance
+ * Focus on culturally significant but not commercially successful books
+ */
+function buildOverlookedPrompt(year: number, month: number, batchSize: number = 20): string {
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[month - 1];
+
+  return `Generate a curated list of exactly ${batchSize} books from ${monthName} ${year} that were culturally or historically significant but NOT commercial bestsellers.
+
+Focus on books that:
+- Influenced specific academic fields (literature, philosophy, science, politics)
+- Were debut works by later-famous authors
+- Were controversial, banned, or censored at the time
+- Shaped subcultures, movements, or communities
+- Are considered "cult classics" or "hidden gems"
+- Were published by university presses or small publishers
+- Won critical acclaim but not commercial success
+
+AVOID:
+- NYT Bestseller list titles
+- Blockbuster commercial fiction
+- Books with major movie/TV adaptations
+- Household-name authors (unless it's their obscure early work)
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house name (university presses, small publishers preferred)
+4. **format**: Primary format ("Hardcover", "Paperback", "eBook", "Audiobook", or "Unknown")
+5. **publication_year**: ${year}
+6. **significance** (optional): Why historians/scholars consider this important (1-2 sentences)
+
+Prioritize books that historians and scholars consider important but the general public may not know.
+
+Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations.`;
+}
+
+/**
+ * Variant D: Genre Rotation
+ * Deep per-genre coverage (currently defaults to Fiction)
+ * TODO: Add genre parameter to rotate through different genres
+ */
+function buildGenrePrompt(year: number, month: number, batchSize: number = 20): string {
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[month - 1];
+  const genre = 'Fiction'; // Default genre, can be parameterized later
+
+  return `Generate a curated list of exactly ${batchSize} ${genre} books from ${monthName} ${year} that represent the best and most significant works in this genre.
+
+Genre Focus: ${genre}
+
+For ${genre}, prioritize:
+- Genre classics and award winners
+- Works that defined or influenced the genre
+- Breakout debuts and cult favorites
+- Both mainstream and indie/small press
+- International works that reached English readers
+- Diverse voices and perspectives within the genre
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house name
+4. **format**: Primary format ("Hardcover", "Paperback", "eBook", "Audiobook", or "Unknown")
+5. **publication_year**: ${year}
+6. **significance** (optional): Why this book is significant within ${genre} (1-2 sentences)
+
+Go DEEP on this genre rather than breadth across many categories.
+
+Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations.`;
+}
+
+/**
+ * Variant E: Era Contextualized
+ * Adapt prompt based on decade context
+ */
+function buildEraPrompt(year: number, month: number, batchSize: number = 20): string {
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[month - 1];
+
+  // Determine era context based on decade
+  let eraContext = '';
+  if (year >= 1920 && year < 1940) eraContext = 'defined the modernist movement and interwar period';
+  else if (year >= 1940 && year < 1960) eraContext = 'captured post-war culture and the beginning of the contemporary era';
+  else if (year >= 1960 && year < 1980) eraContext = 'embodied the social revolutions and counterculture movements';
+  else if (year >= 1980 && year < 2000) eraContext = 'defined the late Cold War era and rise of globalization';
+  else if (year >= 2000 && year < 2010) eraContext = 'captured the post-9/11 world and early digital age';
+  else if (year >= 2010 && year < 2020) eraContext = 'defined the social media era and contemporary cultural debates';
+  else if (year >= 2020) eraContext = 'represent the pandemic era and current global challenges';
+  else eraContext = 'are historically significant';
+
+  return `Generate a curated list of exactly ${batchSize} books from ${monthName} ${year} that ${eraContext}.
+
+For ${year}, focus on books that:
+- Reflected the zeitgeist of the time
+- Addressed era-specific themes and concerns
+- Became emblematic of the period (even if not immediate bestsellers)
+- Represented diverse perspectives from that era
+- Are considered essential to understanding ${year}
+
+Categories to include:
+- Literary fiction and genre fiction
+- Non-fiction (current events, social commentary, memoirs)
+- International works
+- Debut authors who later became significant
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house name
+4. **format**: Primary format ("Hardcover", "Paperback", "eBook", "Audiobook", or "Unknown")
+5. **publication_year**: ${year}
+6. **significance** (optional): Why this book represents ${year} (1-2 sentences)
+
+Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations.`;
+}
+
+/**
+ * Variant F: ISBN Format Aware
+ * Explicitly guides ISBN format expectations based on year
+ */
+function buildISBNFormatPrompt(year: number, month: number, batchSize: number = 20): string {
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[month - 1];
+
+  return `Generate a curated list of exactly ${batchSize} historically significant books from ${monthName} ${year}.
+
+Categories to ensure variety:
+- Award winners and literary fiction
+- Commercial bestsellers
+- Genre fiction (mystery, sci-fi, fantasy, romance, thriller)
+- Non-fiction (memoirs, history, science, current events)
+- International and translated works
+- Notable debuts and indie hits
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house that released this specific edition
+4. **format**: Primary format ("Hardcover", "Paperback", "eBook", "Audiobook", or "Unknown")
+5. **publication_year**: ${year}
+6. **significance** (optional): Why this book is historically important (1-2 sentences)
+
+ACCURACY GUIDELINES:
+- Focus on books with complete, verifiable metadata
+- Publisher and format help identify the specific edition
+- For major releases, assume hardcover unless known to be paperback-first
 
 Return ONLY a valid JSON array of exactly ${batchSize} books. No markdown, no explanations.`;
 }
@@ -565,6 +767,36 @@ async function callGeminiApi(
 // =================================================================================
 
 /**
+ * Resolve prompt from variant name or use full prompt string
+ * Supports both variant names (e.g., "diversity-emphasis") and full prompt text
+ *
+ * @param promptOverride - Variant name or full prompt string
+ * @param year - Year for prompt generation
+ * @param month - Month for prompt generation
+ * @param batchSize - Batch size for prompt generation
+ * @returns Resolved prompt string
+ */
+function resolvePrompt(
+  promptOverride: string | undefined,
+  year: number,
+  month: number,
+  batchSize: number
+): string {
+  if (!promptOverride) {
+    return buildMonthlyPrompt(year, month, batchSize);
+  }
+
+  // Check if it's a registered variant name
+  const variantName = promptOverride as PromptVariantName;
+  if (variantName in PROMPT_VARIANTS) {
+    return PROMPT_VARIANTS[variantName](year, month, batchSize);
+  }
+
+  // Otherwise, treat as full prompt text
+  return promptOverride;
+}
+
+/**
  * Generate curated book list for a specific year/month using Gemini API
  * with native structured output and ISBN validation
  *
@@ -572,7 +804,7 @@ async function callGeminiApi(
  * @param month - Month to generate list for (1-12)
  * @param env - Environment with API key
  * @param logger - Logger instance
- * @param promptOverride - Optional custom prompt for A/B testing
+ * @param promptOverride - Optional variant name (e.g., "diversity-emphasis") or full custom prompt
  * @returns Object containing candidates and generation stats
  */
 export async function generateCuratedBookList(
@@ -595,8 +827,8 @@ export async function generateCuratedBookList(
   // Select model (use override if provided, otherwise use default for monthly ops)
   const model = modelOverride || selectModelForMonthly();
 
-  // Build prompt (use override if provided, otherwise use default)
-  const prompt = promptOverride || buildMonthlyPrompt(year, month, batchSize);
+  // Resolve prompt (supports variant names or full prompt strings)
+  const prompt = resolvePrompt(promptOverride, year, month, batchSize);
 
   logger.info('[GeminiBackfill] Starting generation', { year, month, model });
   

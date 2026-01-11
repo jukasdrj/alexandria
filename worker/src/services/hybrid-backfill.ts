@@ -150,7 +150,8 @@ export async function generateHybridBackfillList(
     books_to_resolve: booksMetadata.length,
   });
 
-  const resolutions = await batchResolveISBNs(booksMetadata, apiKey, logger, quotaManager);
+  // Pass env to enable fallback resolvers when ISBNdb quota exhausted
+  const resolutions = await batchResolveISBNs(booksMetadata, apiKey, logger, quotaManager, env);
 
   // Step 3: Merge Gemini metadata with resolved ISBNs
   // IMPORTANT: Include candidates WITHOUT ISBNs for staged enrichment

@@ -11,6 +11,8 @@ import {
   isValidISBN,
   isbn10ToIsbn13,
   normalizeISBN,
+  PROMPT_VARIANTS,
+  type PromptVariantName,
 } from '../gemini-backfill.js';
 
 describe('ISBN Validation', () => {
@@ -111,11 +113,79 @@ describe('ISBN Hallucination Detection', () => {
   it('should detect common hallucination patterns', () => {
     // Sequential digits (likely hallucinated)
     expect(isValidISBN13('9781234567890')).toBe(false);
-    
+
     // All zeros (definitely hallucinated)
     expect(isValidISBN13('9780000000000')).toBe(false);
-    
+
     // Repeated digits (likely hallucinated)
     expect(isValidISBN13('9781111111111')).toBe(false);
+  });
+});
+
+describe('Prompt Variant Registry', () => {
+  it('should have all documented variants registered', () => {
+    const expectedVariants: PromptVariantName[] = [
+      'baseline',
+      'diversity-emphasis',
+      'overlooked-significance',
+      'genre-rotation',
+      'era-contextualized',
+      'isbn-format-aware',
+    ];
+
+    for (const variant of expectedVariants) {
+      expect(variant in PROMPT_VARIANTS).toBe(true);
+      expect(typeof PROMPT_VARIANTS[variant]).toBe('function');
+    }
+  });
+
+  it('should generate valid prompts for all variants', () => {
+    const year = 2024;
+    const month = 6;
+    const batchSize = 20;
+
+    for (const [name, builder] of Object.entries(PROMPT_VARIANTS)) {
+      const prompt = builder(year, month, batchSize);
+
+      expect(typeof prompt).toBe('string');
+      expect(prompt.length).toBeGreaterThan(100); // Prompts should be substantial
+      expect(prompt).toContain('June'); // Month name should be included
+      expect(prompt).toContain('2024'); // Year should be included
+      expect(prompt).toContain(`${batchSize}`); // Batch size should be included
+    }
+  });
+
+  it('should generate different prompts for different variants', () => {
+    const year = 2024;
+    const month = 6;
+    const batchSize = 20;
+
+    const baselinePrompt = PROMPT_VARIANTS.baseline(year, month, batchSize);
+    const diversityPrompt = PROMPT_VARIANTS['diversity-emphasis'](year, month, batchSize);
+    const overlookedPrompt = PROMPT_VARIANTS['overlooked-significance'](year, month, batchSize);
+
+    // Baseline should differ from diversity
+    expect(baselinePrompt).not.toBe(diversityPrompt);
+
+    // Diversity should contain specific keywords
+    expect(diversityPrompt).toContain('Non-English');
+    expect(diversityPrompt).toContain('independent publishers');
+
+    // Overlooked should contain specific keywords
+    expect(overlookedPrompt).toContain('NOT commercial bestsellers');
+    expect(overlookedPrompt).toContain('cult classics');
+  });
+
+  it('should adapt era-contextualized prompt based on year', () => {
+    const month = 6;
+    const batchSize = 20;
+
+    const prompt1960s = PROMPT_VARIANTS['era-contextualized'](1965, month, batchSize);
+    const prompt2020s = PROMPT_VARIANTS['era-contextualized'](2022, month, batchSize);
+
+    // Different eras should have different context
+    expect(prompt1960s).toContain('counterculture');
+    expect(prompt2020s).toContain('pandemic');
+    expect(prompt1960s).not.toBe(prompt2020s);
   });
 });

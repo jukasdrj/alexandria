@@ -1,6 +1,6 @@
 # Alexandria Documentation Index
 
-**Last Updated:** January 7, 2026
+**Last Updated:** January 11, 2026
 
 > **Quick Start:** New to Alexandria? Start with [README.md](../README.md) → [CURRENT-STATUS.md](./CURRENT-STATUS.md) → [CLAUDE.md](../CLAUDE.md)
 
@@ -114,6 +114,15 @@
 - **[planning/DOCUMENTATION_HEALTH_REPORT.md](./planning/DOCUMENTATION_HEALTH_REPORT.md)** - Documentation audit (Jan 4, 2026)
 - **[planning/AUTHOR-NORMALIZATION.md](./planning/AUTHOR-NORMALIZATION.md)** - Author deduplication strategy (Issue #114 - ⚠️ Pending DB Migration)
 - **[planning/PLAN-CONTRACT-TESTING.md](./planning/PLAN-CONTRACT-TESTING.md)** - Cross-repo type safety plan
+
+---
+
+## 🔄 ISBN Resolution
+
+### Multi-Source Fallback System
+- **[features/MULTI-SOURCE-ISBN-RESOLUTION.md](./features/MULTI-SOURCE-ISBN-RESOLUTION.md)** - **⭐ 5-tier cascading ISBN resolution** (v2.5.0, Jan 11, 2026)
+
+**Purpose:** Resolves ISBNdb quota exhaustion blocking backfill. Implements cascading fallback chain (ISBNdb → Google Books → OpenLibrary → Archive.org → Wikidata) with Search → Validate pattern to ensure data quality.
 
 ---
 

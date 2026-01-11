@@ -28,12 +28,14 @@ import type { Logger } from './logger.js';
  * - Wikipedia: 1 req/sec (bot policy: max 200 req/sec, we use 1/sec)
  * - Wikidata: 2 req/sec (SPARQL endpoint: max 60 req/min)
  * - Google Books: 1 req/sec (free tier: 1000 requests/day)
+ * - OpenLibrary: 1 req per 3 sec (100 req per 5 min documented limit)
  */
 export const RATE_LIMITS = {
   'archive.org': 1000,       // 1 second
   'wikipedia': 1000,         // 1 second
   'wikidata': 500,           // 500ms (2 req/sec)
   'google-books': 1000,      // 1 second
+  'open-library': 3000,      // 3 seconds (100 req per 5 minutes)
 } as const;
 
 /**
@@ -44,6 +46,7 @@ export const CACHE_TTLS = {
   'wikipedia': 2592000,      // 30 days (biographies rarely change)
   'wikidata': 2592000,       // 30 days (metadata stable)
   'google-books': 2592000,   // 30 days (book metadata stable)
+  'open-library': 604800,    // 7 days (book metadata may update)
 } as const;
 
 // Donation URLs removed per user request

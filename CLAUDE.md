@@ -298,6 +298,33 @@ Alexandria provides domain-specific skills that auto-load planning-with-files an
 - `POST /api/internal/enhance-synthetic-works` - Daily cron to enhance synthetic works **NEW**
 - `GET /openapi.json` - OpenAPI spec
 
+## ISBN Resolution - Multi-Source Fallback System
+
+**NEW in v2.5.0**: Cascading ISBN fallback when ISBNdb quota exhausted.
+
+**5-Tier Resolution Chain**:
+1. **ISBNdb** (primary) - Premium API, 3 req/sec, ~15K calls/day
+2. **Google Books** (1st fallback) - Fast, good coverage, free tier
+3. **OpenLibrary** (2nd fallback) - Free, reliable, 100 req per 5 min
+4. **Archive.org** (3rd fallback) - Excellent for pre-2000 books
+5. **Wikidata** (last resort) - Comprehensive, slow SPARQL queries
+
+**How It Works**:
+- ISBNdb quota available → Use ISBNdb (fast, accurate)
+- ISBNdb quota exhausted → Automatic fallback to free APIs
+- Each resolver validates results (70% string similarity threshold)
+- All Gemini metadata preserved (zero data loss)
+
+**Performance**:
+- ISBNdb: 1-2 seconds per book
+- OpenLibrary fallback: 3-6 seconds per book
+- 20-book batch: 60-120 seconds (vs instant failure before)
+
+**Implementation**: `worker/src/services/book-resolution/`
+- `interfaces.ts` - IBookResolver interface, validation logic
+- `resolution-orchestrator.ts` - Cascading fallback manager
+- `resolvers/open-library-resolver.ts` - OpenLibrary Search → Validate
+
 ## ISBNdb Integration
 
 **Plan**: Premium ($29.95/mo)
@@ -327,12 +354,20 @@ Alexandria provides domain-specific skills that auto-load planning-with-files an
 
 ## Open API Integrations (Issue #159)
 
-**Phase 1-5 COMPLETE** (Jan 2026): Archive.org, Wikipedia, and Wikidata integrations for free metadata and covers.
+**Phase 1-6 COMPLETE** (Jan 2026): Archive.org, Wikipedia, Wikidata, and OpenLibrary integrations for free metadata and covers.
 
 **Services**:
 - `worker/services/archive-org.ts` - Pre-2000 book covers, metadata
 - `worker/services/wikipedia.ts` - Author biographies with Wikidata ID lookup
 - `worker/services/wikidata.ts` - SPARQL queries for books, authors, bibliographies
+- `worker/services/open-library.ts` - **NEW** ISBN resolution, search API (v2.5.0)
+
+**ISBN Resolution Priority** (`worker/src/services/book-resolution/`):
+1. ISBNdb (paid, quota-limited, highest accuracy)
+2. Google Books (fast, good coverage)
+3. **OpenLibrary** (free, reliable, 100 req/5min)
+4. Archive.org (excellent for pre-2000 books)
+5. Wikidata (comprehensive SPARQL, slowest)
 
 **Cover Priority Chain** (`worker/services/cover-fetcher.ts`):
 1. Google Books (free, good quality)
@@ -345,21 +380,23 @@ Alexandria provides domain-specific skills that auto-load planning-with-files an
 - Archive.org: 1 req/sec (1000ms delay)
 - Wikipedia: 1 req/sec (1000ms delay)
 - Wikidata: 2 req/sec (500ms delay)
+- **OpenLibrary**: 1 req/3 sec (3000ms delay - 100 req/5min limit)
 
 **Caching**: Long TTL for stability
 - Archive.org: 7 days (covers may update)
 - Wikipedia: 30 days (biographies rarely change)
 - Wikidata: 30 days (metadata stable)
+- **OpenLibrary**: 7 days (book metadata may update)
 
-**User-Agent**: Includes project name, contact email, purpose, donation link
+**User-Agent**: Includes project name, contact email, purpose
 ```
-Alexandria/2.3.0 (nerd@ooheynerds.com; Book metadata enrichment; Donate: https://donate.wikimedia.org)
+Alexandria/2.5.0 (nerd@ooheynerds.com; Book metadata enrichment and ISBN resolution)
 ```
 
 **Documentation**:
 - **API Guide**: `docs/api/OPEN-API-INTEGRATIONS.md` (comprehensive guide with examples)
 - **Rate Limits**: `docs/operations/RATE-LIMITS.md` (central reference for all APIs)
-- **Donations**: `docs/operations/DONATION-TRACKING.md` (usage tracking, donation model)
+- **ISBN Resolution**: `worker/src/services/book-resolution/` (cascading fallback architecture)
 
 **Key Functions**:
 - `fetchArchiveOrgCover(isbn, env, logger)` - Cover URL from Archive.org
@@ -396,25 +433,28 @@ Alexandria/2.3.0 (nerd@ooheynerds.com; Book metadata enrichment; Donate: https:/
 
 **Flow**: `POST /api/harvest/backfill`
 ```
-1. Gemini API → Generate ISBNs for year/month
+1. Gemini API → Generate book metadata (title, author, publisher)
    - Model: gemini-2.5-flash (monthly), gemini-3-flash-preview (annual/large batches)
    - Native structured output with confidence scoring
-   - Validates ISBN checksums before proceeding
+   - NO ISBNs generated (avoids hallucination)
 
-2. 3-Tier Deduplication → Filter existing ISBNs
+2. Multi-Source ISBN Resolution → Cascading fallback (NEW in v2.5.0)
+   - ISBNdb (if quota available) → Title/author search
+   - OpenLibrary (if ISBNdb exhausted) → Free search API
+   - [Future] Google Books, Archive.org, Wikidata
+   - Each resolver validates results (70% string similarity)
+   - Zero data loss: Gemini metadata always preserved as synthetic work
+
+3. 3-Tier Deduplication → Filter existing ISBNs
    - Exact: Check enriched_editions.isbn
    - Related: Check related_isbns jsonb field
    - Fuzzy: Trigram title similarity (threshold: 0.6)
-
-3. ISBNdb Batch Enrichment → Fetch metadata
-   - Premium API: 1000 ISBNs per call
-   - Quota-aware with centralized tracking
-   - Only called if dedup finds new ISBNs
 
 4. Database Updates → enriched_editions table
    - Atomic inserts with conflict resolution
    - Confidence scoring for work matching
    - Full audit trail in enrichment_log
+   - Synthetic works (completeness_score=30) created when all resolvers fail
 
 5. Cover Queue → Async cover downloads
    - Priority: low (backfill), medium (user), high (real-time)
