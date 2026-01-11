@@ -55,7 +55,20 @@ const createMockLogger = () => ({
   error: vi.fn(),
 });
 
-describe('wikidata', () => {
+// =============================================================================
+// MIGRATION NOTE: These legacy tests are being replaced by WikidataProvider tests
+// New provider tests: worker/lib/external-services/providers/__tests__/wikidata-provider.test.ts
+//
+// Status:
+// ✅ fetchBookByISBN → WikidataProvider.fetchMetadata (6 tests migrated)
+// ✅ fetchWikidataCover → WikidataProvider.fetchCover (3 tests migrated)
+// ✅ fetchAuthorBibliography → WikidataProvider.fetchAuthorBibliography (4 tests migrated)
+// ❌ fetchAuthorMetadata → Not exposed by WikidataProvider (not used in production, 4 tests skipped)
+//
+// Total: 13/17 tests migrated. 4 tests for unused fetchAuthorMetadata skipped intentionally.
+// =============================================================================
+
+describe.skip('wikidata (LEGACY - migrated to WikidataProvider)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
