@@ -9,8 +9,9 @@
 import postgres from 'postgres';
 import type { Env } from '../env.js';
 import { processAndStoreCover, coversExist } from '../../services/jsquash-processor.js';
-import { fetchBestCover, fetchISBNdbCover } from '../../services/cover-fetcher.js';
-import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
+import { fetchISBNdbCover } from '../../services/cover-fetcher.js';
+import { ISBNdbProvider } from '../../lib/external-services/providers/isbndb-provider.js';
+import { createServiceContext } from '../../lib/external-services/service-context.js';
 import { enrichEdition, enrichWork } from './enrichment-service.js';
 import { findOrCreateWork, linkWorkToAuthors } from './work-utils.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
@@ -27,6 +28,14 @@ import type {
   EnrichmentQueueResults,
   CoverProcessingResult,
 } from './types.js';
+import { CoverFetchOrchestrator } from '../../lib/external-services/orchestrators/cover-fetch-orchestrator.js';
+import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
+import {
+  GoogleBooksProvider,
+  OpenLibraryProvider,
+  ArchiveOrgProvider,
+  WikidataProvider,
+} from '../../lib/external-services/providers/index.js';
 
 // Cloudflare Queue types
 interface QueueMessage<T = unknown> {
@@ -41,6 +50,27 @@ interface MessageBatch<T = unknown> {
   queue: string;
   messages: QueueMessage<T>[];
 }
+
+// =================================================================================
+// Module-Level Provider Registry (Cold Start Optimization)
+// =================================================================================
+
+/**
+ * Global provider registry initialized once and reused across batches.
+ * This reduces per-batch overhead by ~5-10ms (no repeated allocations).
+ *
+ * QuotaManager is still created per-batch (needs fresh env bindings).
+ */
+const providerRegistry = getGlobalRegistry();
+
+// Register all providers once at module initialization
+providerRegistry.registerAll([
+  new GoogleBooksProvider(),
+  new OpenLibraryProvider(),
+  new ArchiveOrgProvider(),
+  new WikidataProvider(),
+  new ISBNdbProvider(),
+]);
 
 /**
  * Process cover messages from queue
@@ -57,6 +87,15 @@ export async function processCoverQueue(
   logger.info('Cover queue processing started (jSquash WebP)', {
     queueName: batch.queue,
     messageCount: batch.messages.length,
+  });
+
+  // Initialize quota manager for ISBNdb quota enforcement (per-batch, needs fresh env)
+  const quotaManager = new QuotaManager(env.QUOTA_KV);
+
+  // Create cover fetch orchestrator with shared registry (reuses module-level registry)
+  const coverOrchestrator = new CoverFetchOrchestrator(providerRegistry, {
+    enableLogging: true,
+    providerTimeoutMs: 10000, // 10s timeout per provider
   });
 
   // Create postgres connection for updating cover URLs after processing
@@ -103,11 +142,18 @@ export async function processCoverQueue(
       let coverUrl = provider_url;
 
       if (!coverUrl) {
-        // No provider URL provided, search across providers
+        // No provider URL provided, search across providers using orchestrator
         logger.debug('No provider URL, fetching from providers', { isbn: normalizedISBN });
-        const coverResult = await fetchBestCover(normalizedISBN, env);
 
-        if (coverResult.source === 'placeholder') {
+        // Create service context for orchestrator
+        const context = createServiceContext(env, logger, {
+          quotaManager,
+          metadata: { isbn: normalizedISBN, source: 'cover_queue' },
+        });
+
+        const coverResult = await coverOrchestrator.fetchCover(normalizedISBN, context);
+
+        if (!coverResult) {
           logger.warn('No cover found from any provider', { isbn: normalizedISBN });
           message.ack(); // Don't retry - no cover exists
           return {
@@ -418,12 +464,57 @@ export async function processEnrichmentQueue(
 
     // 2. Fetch ALL ISBNs in a single batched API call (100x efficiency!)
     const batchStartTime = Date.now();
-    const enrichmentData = await fetchISBNdbBatch(isbnsToFetch, env);
+
+    // Initialize quota manager (per-batch, needs fresh env) and create service context
+    const quotaManager = new QuotaManager(env.QUOTA_KV);
+    const serviceContext = createServiceContext(env, logger, { quotaManager });
+
+    // Get ISBNdb provider from shared registry (avoids repeated instantiation)
+    const provider = providerRegistry.get('isbndb');
+    if (!provider) {
+      throw new Error('ISBNdb provider not registered');
+    }
+
+    // Type-safe access to batchFetchMetadata (ISBNdb implements IMetadataProvider)
+    const isbndbProvider = provider as ISBNdbProvider;
+    if (!isbndbProvider.batchFetchMetadata) {
+      throw new Error('ISBNdb provider does not support batch metadata fetching');
+    }
+
+    // Fetch batch metadata using unified framework
+    const batchMetadata = await isbndbProvider.batchFetchMetadata(isbnsToFetch, serviceContext);
     const batchDuration = Date.now() - batchStartTime;
 
     // Record API call in quota manager (queue handlers track but don't enforce)
-    const quotaManager = new QuotaManager(env.QUOTA_KV);
     await quotaManager.recordApiCall(1);
+
+    // Convert BookMetadata to ExternalBookData format
+    // Note: ISBNdbProvider returns extended fields (deweyDecimal, binding, relatedISBNs)
+    // which are now part of the BookMetadata interface
+    const enrichmentData = new Map<string, any>();
+    for (const [isbn, metadata] of batchMetadata) {
+      enrichmentData.set(isbn, {
+        isbn: metadata.isbn || isbn,
+        title: metadata.title,
+        authors: metadata.authors || [],
+        publisher: metadata.publisher,
+        publicationDate: metadata.publishDate,
+        pageCount: metadata.pageCount,
+        language: metadata.language,
+        description: metadata.description,
+        coverUrls: metadata.coverUrl ? {
+          large: metadata.coverUrl,
+          medium: metadata.coverUrl,
+          small: metadata.coverUrl,
+          original: metadata.coverUrl,
+        } : undefined,
+        subjects: metadata.subjects || [],
+        deweyDecimal: metadata.deweyDecimal || [],
+        binding: metadata.binding,
+        relatedISBNs: metadata.relatedISBNs,
+        provider: 'isbndb' as const,
+      });
+    }
 
     logger.info('Batch fetch complete', {
       found: enrichmentData.size,

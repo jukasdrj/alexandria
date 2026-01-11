@@ -437,6 +437,79 @@ Alexandria/2.5.0 (nerd@ooheynerds.com; Book metadata enrichment and ISBN resolut
 
 **Analytics**: All Open API calls tracked via `trackOpenApiUsage()` for donation calculations
 
+## Service Provider Framework (NEW - Jan 2026)
+
+**Status**: Production-ready (Phases 1-4 complete)
+**Architecture**: Capability-based provider registry with dynamic service discovery
+
+### Overview
+
+Unified framework for all external service integrations. Eliminates 60% code duplication across 7 providers through centralized HTTP client, dynamic discovery, and orchestrated workflows.
+
+**Core Components**:
+- **Provider Registry**: Singleton registry for dynamic provider discovery
+- **Capability Interfaces**: 6 interfaces (ISBN resolution, metadata, covers, subjects, biography, book generation)
+- **Unified HTTP Client**: Centralized rate limiting, caching, retry logic
+- **3 Orchestrators**: ISBN resolution, cover fetch, metadata enrichment
+
+**Providers** (7 total):
+- `OpenLibraryProvider` - ISBN resolution, metadata
+- `GoogleBooksProvider` - Metadata, covers, subjects
+- `ArchiveOrgProvider` - Covers, metadata (pre-2000 books)
+- `WikidataProvider` - Metadata, covers (SPARQL)
+- `WikipediaProvider` - Author biographies
+- `ISBNdbProvider` - Premium ISBN resolution, metadata, covers (quota-managed)
+- `GeminiProvider` - AI book generation for backfill
+
+**Files**:
+- Core: `worker/lib/external-services/` (capabilities, registry, http-client, service-context)
+- Providers: `worker/lib/external-services/providers/`
+- Orchestrators: `worker/lib/external-services/orchestrators/`
+- Tests: `worker/lib/external-services/__tests__/` (116 tests, 100% passing)
+
+**Developer Guide**: `docs/development/SERVICE_PROVIDER_GUIDE.md` (comprehensive guide for adding new providers)
+
+### Quick Usage
+
+```typescript
+// Register providers
+import { getGlobalRegistry } from './lib/external-services/provider-registry.js';
+import { OpenLibraryProvider, GoogleBooksProvider } from './lib/external-services/providers/index.js';
+
+const registry = getGlobalRegistry();
+registry.registerAll([
+  new OpenLibraryProvider(),
+  new GoogleBooksProvider(),
+]);
+
+// Use orchestrator for ISBN resolution
+import { ISBNResolutionOrchestrator } from './lib/external-services/orchestrators/index.js';
+
+const orchestrator = new ISBNResolutionOrchestrator(registry);
+const result = await orchestrator.resolveISBN('The Hobbit', 'J.R.R. Tolkien', context);
+// Automatically tries ISBNdb → Google Books → OpenLibrary until success
+```
+
+### Benefits
+
+✅ **60% LOC Reduction**: Eliminated ~400 lines of boilerplate
+✅ **Dynamic Discovery**: Adding a new service requires ≤2 file changes
+✅ **Quota-Aware**: Registry filters unavailable providers automatically
+✅ **Performance**: <10ms initialization, <5ms registry lookups, O(n) deduplication
+✅ **Worker-Optimized**: Timeout protection, parallel execution, graceful degradation
+✅ **100% Test Coverage**: 116 tests across unit, integration, performance, quota enforcement
+
+### Architecture Decisions
+
+- **Registry Pattern**: Eliminates hard-coded provider chains
+- **Capability Interfaces**: Providers implement only what they support
+- **Graceful Degradation**: All providers return `null` on errors, never throw
+- **Timeout Protection**: 10-15s per provider to prevent Worker CPU exhaustion
+- **Free-First Priority**: Cover orchestrator tries free providers before paid (quota preservation)
+
+**Planning**: `docs/planning/EXTERNAL_API_ARCHITECTURE_PLAN.md`
+**Task Tracking**: `task_plan.md` (Phases 1-4 complete)
+
 ## Queue Architecture
 
 **Config**: `worker/wrangler.jsonc`

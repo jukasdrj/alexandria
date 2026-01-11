@@ -82,8 +82,11 @@ export class JSONParseError extends Error {
 /**
  * Fetch with timeout - wraps native fetch with AbortController timeout
  *
+ * Supports external AbortSignal for request cancellation (e.g., orchestrator timeouts).
+ * If external signal is provided, abort triggers when EITHER timeout OR external signal fires.
+ *
  * @param url - URL to fetch
- * @param options - Fetch options
+ * @param options - Fetch options (may include signal)
  * @param timeoutMs - Timeout in milliseconds (default 10s)
  * @returns Promise resolving to Response
  * @throws {TimeoutError} On timeout
@@ -96,6 +99,21 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  // Listen to external signal if provided
+  const externalSignal = options.signal;
+  if (externalSignal) {
+    // If external signal is already aborted, abort immediately
+    if (externalSignal.aborted) {
+      clearTimeout(timeoutId);
+      throw new Error('Request aborted by caller');
+    }
+
+    // Listen for external abort
+    externalSignal.addEventListener('abort', () => {
+      controller.abort();
+    });
+  }
+
   try {
     const response = await fetch(url, {
       ...options,
@@ -104,6 +122,10 @@ export async function fetchWithTimeout(
     return response;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
+      // Check if external signal caused the abort
+      if (externalSignal?.aborted) {
+        throw new Error('Request cancelled by caller');
+      }
       throw new TimeoutError(url, timeoutMs);
     }
     throw error;
