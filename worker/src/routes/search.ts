@@ -76,16 +76,10 @@ async function fallbackISBNSearch(sql: SqlClient, isbn: string): Promise<Edition
   `;
 }
 
-async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number, offset: number): Promise<{ total: number; results: EditionSearchResult[] }> {
+async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number, offset: number): Promise<EditionSearchResult[]> {
   const titlePattern = `%${sanitizeSqlPattern(title)}%`;
 
-  const [countResult, dataResult] = await Promise.all([
-    sql`
-      SELECT COUNT(*)::int AS total
-      FROM editions e
-      WHERE e.data->>'title' ILIKE ${titlePattern}
-    `,
-    sql`
+  const dataResult = await sql`
       SELECT
         e.data->>'title' AS title,
         (SELECT ei.isbn FROM edition_isbns ei WHERE ei.edition_key = e.key LIMIT 1) AS isbn,
@@ -116,12 +110,11 @@ async function fallbackTitleSearch(sql: SqlClient, title: string, limit: number,
       WHERE e.data->>'title' ILIKE ${titlePattern}
       GROUP BY e.key, e.data, w.data, e.work_key
       ORDER BY e.data->>'title'
-      LIMIT ${limit}
+      LIMIT ${limit + 1}
       OFFSET ${offset}
-    `
-  ]);
+    `;
 
-  return { total: countResult[0]?.total || 0, results: dataResult };
+  return dataResult;
 }
 
 async function fallbackAuthorSearch(sql: SqlClient, author: string, limit: number, offset: number): Promise<EditionSearchResult[]> {
@@ -350,13 +343,9 @@ app.openapi(searchRoute, async (c) => {
     } else if (title) {
       // OPTIMIZED: Query enriched_editions with ILIKE for fast partial match
       const titlePattern = `%${sanitizeSqlPattern(title)}%`;
-      const [countResult, dataResult] = await Promise.all([
-        sql`
-          SELECT COUNT(*)::int AS total
-          FROM enriched_editions
-          WHERE title ILIKE ${titlePattern}
-        `,
-        sql`
+
+      // Removed expensive COUNT(*) query in favor of limit + 1 strategy
+      const dataResult = await sql`
           SELECT
             ee.title,
             ee.isbn,
@@ -397,22 +386,24 @@ app.openapi(searchRoute, async (c) => {
                    ew.title, ee.edition_key, ee.work_key, ee.cover_url_large,
                    ee.cover_url_medium, ee.cover_url_small, ee.binding, ee.related_isbns
           ORDER BY ee.title
-          LIMIT ${limit}
+          LIMIT ${limit + 1}
           OFFSET ${offset}
-        `
-      ]);
+        `;
 
-      total = countResult[0]?.total || 0;
-      results = dataResult as unknown as EditionSearchResult[];
+      // Check if we got more results than the limit to determine if there are more pages
+      const hasMoreResults = dataResult.length > limit;
+      results = (hasMoreResults ? dataResult.slice(0, limit) : dataResult) as unknown as EditionSearchResult[];
+      total = hasMoreResults ? offset + limit + 1 : offset + results.length;
 
       // Fallback to OpenLibrary core tables if no enriched results
       if (results.length === 0) {
         logger.info('Falling back to OpenLibrary core tables for title search', { title });
-        const fallback = await fallbackTitleSearch(sql as SqlClient, title, limit, offset);
-        if (fallback.results.length > 0) {
-          logger.info('OpenLibrary fallback found results', { title, count: fallback.results.length });
-          results = fallback.results;
-          total = fallback.total;
+        const fallbackData = await fallbackTitleSearch(sql as SqlClient, title, limit, offset);
+        if (fallbackData.length > 0) {
+          logger.info('OpenLibrary fallback found results', { title, count: fallbackData.length });
+          const fallbackHasMore = fallbackData.length > limit;
+          results = fallbackHasMore ? fallbackData.slice(0, limit) : fallbackData;
+          total = fallbackHasMore ? offset + limit + 1 : offset + results.length;
         }
       }
 
@@ -560,7 +551,7 @@ app.openapi(searchRoute, async (c) => {
         total,
         hasMore,
         returnedCount: formattedResults.length,
-        ...(author && { totalEstimated: true })
+        ...((author || title) && { totalEstimated: true })
       },
       cache_hit: false,
     };
