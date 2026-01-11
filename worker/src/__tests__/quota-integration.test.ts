@@ -6,7 +6,7 @@
  * without requiring the full app stack (which has WASM dependencies).
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { QuotaManager } from '../services/quota-manager.js';
 
 // Mock KV namespace for integration tests
@@ -50,7 +50,16 @@ describe('Quota Integration Tests', () => {
 
   beforeEach(() => {
     mockKV = new MockKVNamespace();
-    quotaManager = new QuotaManager(mockKV as unknown as KVNamespace);
+    const mockLogger = {
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn()
+    };
+    quotaManager = new QuotaManager(
+      mockKV as unknown as KVNamespace,
+      mockLogger as any
+    );
   });
 
   describe('Multi-operation quota coordination', () => {

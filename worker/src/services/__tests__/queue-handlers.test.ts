@@ -35,9 +35,32 @@ vi.mock('../../../services/cover-fetcher', () => ({
   fetchISBNdbCover: vi.fn(),
 }));
 
-vi.mock('../../../services/batch-isbndb', () => ({
-  fetchISBNdbBatch: vi.fn(),
-}));
+vi.mock('../../../lib/external-services/providers/isbndb-provider', () => {
+  // Create mock provider inside factory to avoid hoisting
+  let providerInstance: any = null;
+
+  const MockISBNdbProvider = function() {
+    if (!providerInstance) {
+      providerInstance = {
+        name: 'isbndb',
+        providerType: 'paid' as const,
+        capabilities: ['isbn-resolution', 'metadata-enrichment', 'cover-images'],
+        batchFetchMetadata: vi.fn(),
+        isAvailable: vi.fn().mockResolvedValue(true),
+      };
+    }
+    return providerInstance;
+  };
+
+  // Attach a getter to access the instance
+  Object.defineProperty(MockISBNdbProvider, 'getInstance', {
+    get: () => providerInstance,
+  });
+
+  return {
+    ISBNdbProvider: MockISBNdbProvider,
+  };
+});
 
 vi.mock('../enrichment-service', () => ({
   enrichEdition: vi.fn(),
@@ -47,6 +70,28 @@ vi.mock('../enrichment-service', () => ({
 vi.mock('../../../lib/isbn-utils', () => ({
   normalizeISBN: (isbn: string) => isbn?.replace(/[-\s]/g, '') || null,
 }));
+
+vi.mock('../../../lib/external-services/provider-registry', () => {
+  return {
+    getGlobalRegistry: vi.fn(() => {
+      // Lazy-load the ISBNdb provider instance
+      let cachedProvider: any = null;
+
+      return {
+        registerAll: vi.fn((providers: any[]) => {
+          // When providers are registered, capture the ISBNdb instance
+          cachedProvider = providers.find(p => p?.name === 'isbndb');
+        }),
+        get: vi.fn((name: string) => {
+          if (name === 'isbndb') {
+            return cachedProvider;
+          }
+          return null;
+        }),
+      };
+    }),
+  };
+});
 
 // Mock postgres
 const mockSql = vi.fn() as any;
@@ -58,8 +103,12 @@ vi.mock('postgres', () => ({
 // Import mocked modules
 import { processAndStoreCover, coversExist } from '../../../services/jsquash-processor';
 import { fetchBestCover, fetchISBNdbCover } from '../../../services/cover-fetcher';
-import { fetchISBNdbBatch } from '../../../services/batch-isbndb';
+import { ISBNdbProvider } from '../../../lib/external-services/providers/isbndb-provider';
 import { enrichEdition, enrichWork } from '../enrichment-service';
+
+// Get the mock provider instance (created when the module is imported)
+// The instance is created during queue-handlers.ts initialization
+const globalMockProvider = new ISBNdbProvider();
 
 // =================================================================================
 // Test Helpers
@@ -109,6 +158,13 @@ function createMockEnv(overrides?: Partial<Env>): Env {
       head: vi.fn(),
     } as any,
     CACHE: {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn(),
+      list: vi.fn(),
+      getWithMetadata: vi.fn(),
+    } as any,
+    QUOTA_KV: {
       get: vi.fn().mockResolvedValue(null),
       put: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn(),
@@ -515,22 +571,24 @@ describe('processEnrichmentQueue', () => {
           return [
             isbn,
             {
+              isbn,
               title: `Book ${i}`,
-              subtitle: '',
+              authors: ['Test Author'],
               publisher: 'Test Publisher',
-              publicationDate: '2024-01-01',
+              publishDate: '2024-01-01',
               pageCount: 300,
               binding: 'Paperback',
               language: 'en',
-              coverUrls: {},
+              coverUrl: undefined,
               subjects: [],
+              deweyDecimal: [],
               relatedISBNs: {},
             },
           ];
         })
       );
 
-      (fetchISBNdbBatch as Mock).mockResolvedValue(mockEnrichmentData);
+      globalMockProvider.batchFetchMetadata.mockResolvedValue(mockEnrichmentData);
       (enrichWork as Mock).mockResolvedValue(undefined);
       (enrichEdition as Mock).mockResolvedValue(undefined);
 
@@ -561,7 +619,7 @@ describe('processEnrichmentQueue', () => {
       expect(results.cached).toBe(1);
       expect(results.enriched).toBe(0);
       expect(message.ack).toHaveBeenCalledTimes(1);
-      expect(fetchISBNdbBatch).not.toHaveBeenCalled();
+      expect(globalMockProvider.batchFetchMetadata).not.toHaveBeenCalled();
     });
 
     it('should calculate correct API call savings', async () => {
@@ -580,16 +638,19 @@ describe('processEnrichmentQueue', () => {
           return [
             isbn,
             {
+              isbn,
               title: `Book ${i}`,
+              authors: [],
               publisher: 'Test',
-              publicationDate: '2024',
-              coverUrls: {},
+              publishDate: '2024',
+              coverUrl: undefined,
+              subjects: [],
             },
           ];
         })
       );
 
-      (fetchISBNdbBatch as Mock).mockResolvedValue(mockEnrichmentData);
+      globalMockProvider.batchFetchMetadata.mockResolvedValue(mockEnrichmentData);
       (enrichWork as Mock).mockResolvedValue(undefined);
       (enrichEdition as Mock).mockResolvedValue(undefined);
 
@@ -612,15 +673,18 @@ describe('processEnrichmentQueue', () => {
         [
           '9780439064873',
           {
+            isbn: '9780439064873',
             title: 'Harry Potter',
+            authors: [],
             publisher: 'Scholastic',
-            publicationDate: '1998',
-            coverUrls: {},
+            publishDate: '1998',
+            coverUrl: undefined,
+            subjects: [],
           },
         ],
       ]);
 
-      (fetchISBNdbBatch as Mock).mockResolvedValue(mockEnrichmentData);
+      globalMockProvider.batchFetchMetadata.mockResolvedValue(mockEnrichmentData);
       (enrichWork as Mock).mockResolvedValue(undefined);
       (enrichEdition as Mock).mockRejectedValue(new Error('Database error'));
 
@@ -639,7 +703,7 @@ describe('processEnrichmentQueue', () => {
       const batch = createMockBatch('alexandria-enrichment-queue', [message]);
 
       // ISBN not found in ISBNdb
-      (fetchISBNdbBatch as Mock).mockResolvedValue(new Map());
+      globalMockProvider.batchFetchMetadata.mockResolvedValue(new Map());
 
       const results = await processEnrichmentQueue(batch, env);
 
@@ -662,7 +726,7 @@ describe('processEnrichmentQueue', () => {
       expect(results.failed).toBe(1);
       expect(message.ack).toHaveBeenCalledTimes(1);
       expect(message.retry).not.toHaveBeenCalled();
-      expect(fetchISBNdbBatch).not.toHaveBeenCalled();
+      expect(globalMockProvider.batchFetchMetadata).not.toHaveBeenCalled();
     });
   });
 
@@ -678,21 +742,24 @@ describe('processEnrichmentQueue', () => {
         [
           '9780439064873',
           {
+            isbn: '9780439064873',
             title: 'Harry Potter and the Chamber of Secrets',
+            authors: ['J.K. Rowling'],
             description: 'The second book',
             publisher: 'Scholastic',
-            publicationDate: '1999-06-02',
+            publishDate: '1999-06-02',
             pageCount: 341,
             binding: 'Hardcover',
             language: 'en',
             subjects: ['Fiction', 'Magic'],
-            coverUrls: {},
+            coverUrl: undefined,
+            deweyDecimal: [],
             relatedISBNs: {},
           },
         ],
       ]);
 
-      (fetchISBNdbBatch as Mock).mockResolvedValue(mockEnrichmentData);
+      globalMockProvider.batchFetchMetadata.mockResolvedValue(mockEnrichmentData);
 
       let workCreatedFirst = false;
       (enrichWork as Mock).mockImplementation(() => {
@@ -721,7 +788,7 @@ describe('processEnrichmentQueue', () => {
       });
       const batch = createMockBatch('alexandria-enrichment-queue', [message]);
 
-      (fetchISBNdbBatch as Mock).mockResolvedValue(new Map());
+      globalMockProvider.batchFetchMetadata.mockResolvedValue(new Map());
 
       await processEnrichmentQueue(batch, env);
 
@@ -735,9 +802,9 @@ describe('processEnrichmentQueue', () => {
       });
       const batch = createMockBatch('alexandria-enrichment-queue', [message]);
 
-      (fetchISBNdbBatch as Mock).mockRejectedValue(new Error('Network error'));
+      globalMockProvider.batchFetchMetadata.mockRejectedValue(new Error('Network error'));
 
-      // processEnrichmentQueue will throw since fetchISBNdbBatch fails
+      // processEnrichmentQueue will throw since batchFetchMetadata fails
       // But the finally block should still close the connection
       await expect(processEnrichmentQueue(batch, env)).rejects.toThrow('Network error');
 

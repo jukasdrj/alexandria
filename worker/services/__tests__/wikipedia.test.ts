@@ -28,8 +28,10 @@ vi.mock('../../lib/open-api-utils.js', () => ({
 }));
 
 import { fetchWithRetry } from '../../lib/fetch-utils.js';
+import { getCachedResponse } from '../../lib/open-api-utils.js';
 
 const mockFetchWithRetry = fetchWithRetry as any;
+const mockGetCachedResponse = getCachedResponse as any;
 
 // Mock SQL
 const createMockSql = () => {
@@ -58,7 +60,8 @@ const createMockLogger = () => ({
 
 describe('wikipedia', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset fetch mock between tests to avoid interference
+    mockFetchWithRetry.mockReset();
   });
 
   describe('fetchAuthorBiography', () => {
@@ -112,15 +115,14 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
       expect(result).toBeTruthy();
-      expect(result?.bio).toContain('Joanne Rowling');
-      expect(result?.wikipedia_page_title).toBe('J._K._Rowling');
-      expect(result?.wikidata_id).toBe('Q34660');
+      expect(result?.extract).toContain('Joanne Rowling');
+      expect(result?.article_title).toBe('J. K. Rowling');
+      expect(result?.wikidata_qid).toBe('Q34660');
       expect(result?.birth_year).toBe(1965);
       expect(result?.confidence).toBeGreaterThan(50);
-      expect(logger.info).toHaveBeenCalled();
     });
 
     it('should fallback to name-based search when no Wikidata ID', async () => {
@@ -128,8 +130,11 @@ describe('wikipedia', () => {
       const env = createMockEnv();
       const logger = createMockLogger();
 
+      // Ensure cache returns null for this test
+      mockGetCachedResponse.mockResolvedValueOnce(null);
+
       // Mock database query (no Wikidata ID)
-      sql.mockResolvedValueOnce([
+      sql.mockImplementation(async () => [
         {
           author_key: '/authors/OL999999A',
           wikidata_id: null,
@@ -151,7 +156,7 @@ describe('wikipedia', () => {
             pages: {
               '123456': {
                 title: 'Unknown Author',
-                extract: 'Unknown Author is a writer...',
+                extract: 'Unknown Author is a writer who has published numerous works across multiple genres...',
                 categories: [
                   { title: 'Category:Living people' },
                   { title: 'Category:American writers' },
@@ -162,16 +167,12 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL999999A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL999999A', env);
 
       expect(result).toBeTruthy();
-      expect(result?.bio).toContain('Unknown Author is a writer');
-      expect(result?.wikipedia_page_title).toBe('Unknown Author');
-      expect(result?.wikidata_id).toBeNull();
-      expect(logger.warn).toHaveBeenCalledWith(
-        'Wikipedia: Using name-based lookup (no Wikidata ID)',
-        expect.any(Object)
-      );
+      expect(result?.extract).toContain('Unknown Author is a writer who has published');
+      expect(result?.article_title).toBe('Unknown Author');
+      expect(result?.wikidata_qid).toBeUndefined();
     });
 
     it('should return null when author not found in database', async () => {
@@ -181,13 +182,9 @@ describe('wikipedia', () => {
 
       sql.mockResolvedValueOnce([]); // No results
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL999999A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL999999A', env);
 
       expect(result).toBeNull();
-      expect(logger.error).toHaveBeenCalledWith(
-        'Wikipedia: Author not found',
-        expect.objectContaining({ authorKey: '/authors/OL999999A' })
-      );
     });
 
     it('should return null when Wikipedia page not found', async () => {
@@ -216,13 +213,9 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
       expect(result).toBeNull();
-      expect(logger.debug).toHaveBeenCalledWith(
-        'Wikipedia: No Wikipedia page found via Wikidata',
-        expect.any(Object)
-      );
     });
 
     it('should extract birth year from categories', async () => {
@@ -254,7 +247,7 @@ describe('wikipedia', () => {
             pages: {
               '143751': {
                 title: 'J. K. Rowling',
-                extract: 'British author...',
+                extract: 'British author and writer of the Harry Potter fantasy series...',
                 categories: [
                   { title: 'Category:1965 births' },
                   { title: 'Category:Living people' },
@@ -265,7 +258,7 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
       expect(result?.birth_year).toBe(1965);
     });
@@ -299,7 +292,7 @@ describe('wikipedia', () => {
             pages: {
               '987654': {
                 title: 'Historical Author',
-                extract: 'Was a writer...',
+                extract: 'Was a writer and historian who published many important works during the 20th century...',
                 categories: [
                   { title: 'Category:1920 births' },
                   { title: 'Category:2005 deaths' },
@@ -310,7 +303,7 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL12345A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL12345A', env);
 
       expect(result?.birth_year).toBe(1920);
       expect(result?.death_year).toBe(2005);
@@ -345,7 +338,7 @@ describe('wikipedia', () => {
             pages: {
               '143751': {
                 title: 'J. K. Rowling',
-                extract: 'British author...',
+                extract: 'British author and writer of the Harry Potter fantasy series...',
                 categories: [
                   { title: 'Category:1965 births' },
                   { title: 'Category:English novelists' },
@@ -357,9 +350,9 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
-      expect(result?.nationality).toBe('English');
+      expect(result?.nationality).toEqual(expect.arrayContaining(['English', 'British']));
     });
 
     it('should calculate confidence score correctly', async () => {
@@ -391,7 +384,7 @@ describe('wikipedia', () => {
             pages: {
               '143751': {
                 title: 'J. K. Rowling',
-                extract: 'Joanne Rowling is a British author...',
+                extract: 'Joanne Rowling is a British author and philanthropist known for writing the Harry Potter fantasy series...',
                 categories: [
                   { title: 'Category:1965 births' },
                   { title: 'Category:English novelists' },
@@ -402,7 +395,7 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
       // High confidence: Wikidata ID (50) + extract (20) + birth year (15) + categories (10)
       expect(result?.confidence).toBeGreaterThanOrEqual(95);
@@ -414,22 +407,23 @@ describe('wikipedia', () => {
       const logger = createMockLogger();
 
       const cachedData = {
-        bio: 'Cached bio',
-        wikipedia_page_title: 'Cached_Author',
-        wikidata_id: 'Q12345',
+        source: 'wikipedia' as const,
+        article_title: 'Cached_Author',
+        extract: 'Cached bio',
+        wikidata_qid: 'Q12345',
         birth_year: 1965,
         confidence: 90,
+        fetched_at: new Date().toISOString(),
+        wikipedia_url: 'https://en.wikipedia.org/wiki/Cached_Author',
       };
 
-      (env.CACHE.get as any).mockResolvedValueOnce(JSON.stringify(cachedData));
+      // Mock getCachedResponse to return cached data for this test
+      mockGetCachedResponse.mockResolvedValueOnce(cachedData);
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
       expect(result).toEqual(cachedData);
-      expect(logger.debug).toHaveBeenCalledWith(
-        'Wikipedia: Using cached biography',
-        expect.any(Object)
-      );
+      // Note: Service uses console.log, not logger parameter
       expect(sql).not.toHaveBeenCalled();
       expect(mockFetchWithRetry).not.toHaveBeenCalled();
     });
@@ -470,13 +464,10 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL999999A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL999999A', env);
 
       expect(result).toBeNull();
-      expect(logger.warn).toHaveBeenCalledWith(
-        'Wikipedia: Disambiguation page detected, skipping',
-        expect.any(Object)
-      );
+      // Note: Service uses console.log instead of logger parameter
     });
 
     it('should handle API errors gracefully', async () => {
@@ -494,13 +485,10 @@ describe('wikipedia', () => {
 
       mockFetchWithRetry.mockRejectedValueOnce(new Error('Network timeout'));
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
       expect(result).toBeNull();
-      expect(logger.error).toHaveBeenCalledWith(
-        'Wikipedia fetch error',
-        expect.objectContaining({ error: 'Network timeout' })
-      );
+      // Note: Service uses console.error for errors
     });
 
     it('should handle missing categories gracefully', async () => {
@@ -532,7 +520,7 @@ describe('wikipedia', () => {
             pages: {
               '143751': {
                 title: 'J. K. Rowling',
-                extract: 'British author...',
+                extract: 'British author and writer of the Harry Potter fantasy series...',
                 // No categories field
               },
             },
@@ -540,12 +528,12 @@ describe('wikipedia', () => {
         }),
       });
 
-      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env, logger);
+      const result = await fetchAuthorBiography(sql, '/authors/OL23919A', env);
 
       expect(result).toBeTruthy();
-      expect(result?.birth_year).toBeNull();
-      expect(result?.death_year).toBeNull();
-      expect(result?.nationality).toBeNull();
+      expect(result?.birth_year).toBeUndefined();
+      expect(result?.death_year).toBeUndefined();
+      expect(result?.nationality).toBeUndefined();
     });
   });
 });
