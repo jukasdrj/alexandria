@@ -94,7 +94,7 @@ Internet → Worker (alexandria.ooheynerds.com)
 → Hyperdrive (pooling) → Service Token Auth → Tunnel → Unraid PostgreSQL (54.8M editions)
 
 Queues:
-- Enrichment Queue (100 batch/1 concurrent)
+- Enrichment Queue (10 batch/1 concurrent)
 - Cover Queue (5 batch/3 concurrent)
 - Backfill Queue (1 batch/1 concurrent)
 - Author Queue (10 batch/1 concurrent) [NEW - Jan 2026]

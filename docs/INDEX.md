@@ -11,9 +11,8 @@
 ### Essential Reading
 - **[../README.md](../README.md)** - Project overview and quick start
 - **[../CLAUDE.md](../CLAUDE.md)** - Complete development guide (42KB, authoritative)
-- **[../MASTER-TODO.md](../MASTER-TODO.md)** - Comprehensive todo list (task-centric view)
+- **[../TODO.md](../TODO.md)** - Development roadmap and active tasks
 - **[CURRENT-STATUS.md](./CURRENT-STATUS.md)** - Active issues and priorities (P1/P2/P3)
-- **[../TODO.md](../TODO.md)** - Development roadmap and phase tracking
 - **[../CHANGELOG.md](../CHANGELOG.md)** - Version history
 
 ---
@@ -204,8 +203,7 @@ npx wrangler queues list | grep alexandria
 
 ### By Priority
 - **P1 Issues** → CURRENT-STATUS.md
-- **All Tasks** → MASTER-TODO.md (comprehensive task list)
-- **Current Work** → TODO.md (phase-based roadmap)
+- **Current Work** → TODO.md (active tasks and roadmap)
 - **Recent Changes** → CHANGELOG.md
 
 ---
@@ -218,7 +216,7 @@ npx wrangler queues list | grep alexandria
 - Prefix with type: `API-`, `ISSUE-`, `GUIDE-`
 
 ### Location
-- **Root** - Only README, CLAUDE, TODO, CHANGELOG, MASTER-TODO
+- **Root** - Only README, CLAUDE, TODO, CHANGELOG
 - **docs/** - All other documentation
 - **docs/planning/** - Strategy and planning documents
 - **docs/archive/** - Superseded or completed documentation
