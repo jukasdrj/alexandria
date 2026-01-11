@@ -29,6 +29,7 @@ import { handleScheduledWikidataEnrichment } from './routes/authors.js';
 import backfillAsyncRoutes from './routes/backfill-async.js';
 import externalIdRoutes from './routes/external-ids.js';
 import recommendationsRoutes from './routes/recommendations.js';
+import enhancementCronRoutes, { handleScheduledSyntheticEnhancement } from './routes/enhancement-cron.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue, processAuthorQueue } from './services/queue-handlers.js';
@@ -147,6 +148,7 @@ const subRouters = [
   backfillAsyncRoutes,
   externalIdRoutes,
   recommendationsRoutes,
+  enhancementCronRoutes,
   testRoutes,
   migrateRoutes,
 ];
@@ -232,22 +234,33 @@ export * from '../types.js';
 export default {
   fetch: app.fetch,
 
-  // Scheduled cron handler (runs daily at 2 AM UTC)
+  // Scheduled cron handler
+  // - "0 0 * * *" (midnight UTC): Synthetic enhancement (right after ISBNdb quota reset)
+  // - "0 2 * * *" (2 AM UTC): Cover harvest + Wikidata enrichment
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
     const logger = Logger.forScheduled(env);
 
     try {
       logger.info('Scheduled event triggered', { cron: event.cron });
 
-      // Run both scheduled tasks in parallel
-      await Promise.all([
-        handleScheduledCoverHarvest(env),
-        handleScheduledWikidataEnrichment(env)
-      ]);
+      if (event.cron === '0 0 * * *') {
+        // Midnight UTC: Synthetic enhancement (daily)
+        logger.info('Running synthetic enhancement cron');
+        await handleScheduledSyntheticEnhancement(env);
+      } else if (event.cron === '0 2 * * *') {
+        // 2 AM UTC: Cover harvest + Wikidata enrichment
+        logger.info('Running cover harvest + Wikidata enrichment crons');
+        await Promise.all([
+          handleScheduledCoverHarvest(env),
+          handleScheduledWikidataEnrichment(env)
+        ]);
+      } else {
+        logger.warn('Unknown cron schedule', { cron: event.cron });
+      }
 
-      logger.info('All scheduled tasks completed');
+      logger.info('All scheduled tasks completed', { cron: event.cron });
     } catch (error) {
-      logger.error('Scheduled handler error', { error });
+      logger.error('Scheduled handler error', { error, cron: event.cron });
       throw error;
     }
   },
