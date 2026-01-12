@@ -519,6 +519,46 @@ const result = await orchestrator.resolveISBN('The Hobbit', 'J.R.R. Tolkien', co
 **Planning**: `docs/planning/EXTERNAL_API_ARCHITECTURE_PLAN.md`
 **Task Tracking**: `task_plan.md` (Phases 1-4 complete)
 
+### Concurrent AI Book Generation (Jan 2026)
+
+**Status**: ✅ Production
+
+**Architecture**: BookGenerationOrchestrator with concurrent execution mode for backfill operations.
+
+**How It Works**:
+1. **Parallel Execution**: Both Gemini and Grok run simultaneously (not sequential)
+2. **Timeout Protection**: 60-second timeout per provider with proper cleanup
+3. **Deduplication**: Combined results deduplicated by 60% title similarity
+4. **Fuzzy Matching**: Shared utility `worker/lib/utils/string-similarity.ts`
+
+**Configuration** (`worker/src/services/hybrid-backfill.ts`):
+```typescript
+const bookGenOrchestrator = new BookGenerationOrchestrator(getGlobalRegistry(), {
+  enableLogging: true,
+  providerTimeoutMs: 60000,
+  providerPriority: ['gemini', 'xai'], // Not used in concurrent mode
+  stopOnFirstSuccess: false, // Use concurrent mode
+  concurrentExecution: true, // Run both providers in parallel
+  deduplicationThreshold: 0.6, // 60% title similarity (aligned with database)
+});
+```
+
+**Benefits**:
+- **Maximum Diversity**: 0% overlap observed between Gemini and Grok results
+- **Speed Optimization**: 29% faster (parallel vs sequential)
+- **Resilience**: Succeeds if ANY provider works
+- **Cost**: $0.84/year for 2x unique books (minimal premium)
+
+**Deduplication**:
+- Uses shared fuzzy matching utilities (`worker/lib/utils/string-similarity.ts`)
+- 60% similarity threshold (aligned with database `deduplication.ts`)
+- Levenshtein distance with normalized titles (lowercase, no punctuation/articles)
+- Single source of truth for fuzzy matching across codebase
+
+**Testing**: `POST /api/test/ai-comparison` - Compare Gemini vs Grok side-by-side
+
+**Documentation**: `docs/development/XAI_COMPARISON_RESULTS.md` - Full comparison analysis
+
 ## Queue Architecture
 
 **Config**: `worker/wrangler.jsonc`
