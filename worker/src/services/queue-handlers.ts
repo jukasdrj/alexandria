@@ -9,7 +9,6 @@
 import postgres from 'postgres';
 import type { Env } from '../env.js';
 import { processAndStoreCover, coversExist } from '../../services/jsquash-processor.js';
-import { fetchISBNdbCover } from '../../services/cover-fetcher.js';
 import { ISBNdbProvider } from '../../lib/external-services/providers/isbndb-provider.js';
 import { createServiceContext } from '../../lib/external-services/service-context.js';
 import { enrichEdition, enrichWork } from './enrichment-service.js';
@@ -188,7 +187,14 @@ export async function processCoverQueue(
           originalError: result.error,
         });
 
-        const freshCover = await fetchISBNdbCover(normalizedISBN, env);
+        // Use ISBNdbProvider directly (part of External Service Provider Framework)
+        const isbndbProvider = new ISBNdbProvider();
+        const context = createServiceContext(env, logger, {
+          quotaManager,
+          metadata: { isbn: normalizedISBN, source: 'jwt_recovery' },
+        });
+
+        const freshCover = await isbndbProvider.fetchCover(normalizedISBN, context);
         if (freshCover?.url) {
           logger.info('Got fresh cover URL from ISBNdb, retrying download', {
             isbn: normalizedISBN,

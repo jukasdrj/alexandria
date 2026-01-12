@@ -32,7 +32,7 @@ vi.mock('../../../services/jsquash-processor', () => ({
 
 vi.mock('../../../services/cover-fetcher', () => ({
   fetchBestCover: vi.fn(),
-  fetchISBNdbCover: vi.fn(),
+  // fetchISBNdbCover removed - now using ISBNdbProvider.fetchCover
 }));
 
 vi.mock('../../../lib/external-services/providers/isbndb-provider', () => {
@@ -46,6 +46,7 @@ vi.mock('../../../lib/external-services/providers/isbndb-provider', () => {
         providerType: 'paid' as const,
         capabilities: ['isbn-resolution', 'metadata-enrichment', 'cover-images'],
         batchFetchMetadata: vi.fn(),
+        fetchCover: vi.fn(), // NEW: Mock for JWT recovery
         isAvailable: vi.fn().mockResolvedValue(true),
       };
     }
@@ -102,7 +103,7 @@ vi.mock('postgres', () => ({
 
 // Import mocked modules
 import { processAndStoreCover, coversExist } from '../../../services/jsquash-processor';
-import { fetchBestCover, fetchISBNdbCover } from '../../../services/cover-fetcher';
+import { fetchBestCover } from '../../../services/cover-fetcher';
 import { ISBNdbProvider } from '../../../lib/external-services/providers/isbndb-provider';
 import { enrichEdition, enrichWork } from '../enrichment-service';
 
@@ -365,10 +366,11 @@ describe('processCoverQueue', () => {
         metrics: {} as any,
       });
 
-      // Fetch fresh URL from ISBNdb
-      (fetchISBNdbCover as Mock).mockResolvedValue({
+      // Fetch fresh URL from ISBNdb via NEW provider
+      (globalMockProvider.fetchCover as Mock).mockResolvedValue({
         url: 'https://images.isbndb.com/fresh-jwt.jpg',
         source: 'isbndb',
+        size: 'large',
       });
 
       // Second attempt: Success
@@ -384,7 +386,7 @@ describe('processCoverQueue', () => {
       const results = await processCoverQueue(batch, env);
 
       expect(results.processed).toBe(1);
-      expect(fetchISBNdbCover).toHaveBeenCalledWith('9780439064873', env);
+      expect(globalMockProvider.fetchCover).toHaveBeenCalledWith('9780439064873', expect.any(Object));
       expect(processAndStoreCover).toHaveBeenCalledTimes(2);
       expect(message.ack).toHaveBeenCalledTimes(1);
     });
