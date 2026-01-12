@@ -25,7 +25,10 @@ import type postgres from 'postgres';
 import type { Env } from '../env.js';
 import type { Logger } from '../../lib/logger.js';
 import { QuotaManager } from './quota-manager.js';
-import { resolveISBNViaTitle, type ISBNResolutionResult } from './isbn-resolution.js';
+import type { ISBNResolutionResult } from './isbn-resolution.js';
+import { ISBNResolutionOrchestrator } from '../../lib/external-services/orchestrators/index.js';
+import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
+import { ISBNdbProvider } from '../../lib/external-services/providers/index.js';
 
 // =================================================================================
 // Types
@@ -239,27 +242,39 @@ export async function enhanceSyntheticWork(
       author: candidate.author,
     });
 
-    // Get ISBNdb API key
-    const apiKey = await env.ISBNDB_API_KEY.get();
-    if (!apiKey) {
-      throw new Error('ISBNDB_API_KEY not configured');
-    }
+    // Initialize orchestrator with ISBNdb provider only
+    // (Synthetic enhancement uses ISBNdb directly for high-quality resolution)
+    const registry = getGlobalRegistry();
+    registry.registerAll([new ISBNdbProvider()]);
 
-    // Resolve ISBN via ISBNdb title/author search
-    // Reuses existing isbn-resolution.ts service (battle-tested fuzzy matching)
-    const resolution: ISBNResolutionResult = await resolveISBNViaTitle(
-      {
-        title: candidate.title,
-        author: candidate.author,
-        publisher: candidate.publisher,
-        format: candidate.format,
-        publication_year: candidate.publication_year,
-      },
-      apiKey,
-      logger
+    const orchestrator = new ISBNResolutionOrchestrator(registry, {
+      providerTimeoutMs: 15000,
+      enableLogging: true,
+    });
+
+    // Resolve ISBN via NEW orchestrator
+    // Uses Service Provider Framework with ISBNdb
+    const result = await orchestrator.resolveISBN(
+      candidate.title,
+      candidate.author,
+      { env, logger, quotaManager }
     );
 
-    const apiCallsUsed = resolution.isbn ? 1 : 1; // Always 1 call (search endpoint)
+    // Convert NEW confidence (0-100) to OLD format (string enum) for backward compatibility
+    const confidence = result.confidence >= 85 ? 'high'
+      : result.confidence >= 65 ? 'medium'
+      : result.confidence >= 45 ? 'low'
+      : 'not_found';
+
+    const resolution: ISBNResolutionResult = {
+      isbn: result.isbn,
+      confidence,
+      match_quality: result.confidence / 100,
+      matched_title: null, // NEW orchestrator doesn't return matched_title
+      source: result.source as any,
+    };
+
+    const apiCallsUsed = result.isbn ? 1 : 1; // Always 1 call (search endpoint)
 
     // If no ISBN found, mark as attempted and skip
     if (!resolution.isbn || resolution.confidence === 'not_found') {

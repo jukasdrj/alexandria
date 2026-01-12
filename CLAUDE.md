@@ -18,14 +18,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 4. **Use planning-with-files structure** - ALL complex tasks (>5 tool calls) MUST use structured planning
 5. **Trust but verify** - Agent outputs are generally correct, but I must validate against requirements
 
-**Task Routing Rules:**
-- Database work → `/schema-migration` (postgres-optimizer agent)
-- API integration → `/api-integration` (forked context, planning-with-files)
-- Queue tuning → `/queue-optimization` (cloudflare-workers-optimizer agent)
-- Multi-step tasks → `/planning-with-files` (structured execution with task files)
-- Complex debugging → PAL MCP `thinkdeep` or `debug` tools
-- Code review → PAL MCP `codereview` tool
-- Architecture decisions → PAL MCP `consensus` tool (multi-model validation)
+**Task Routing Rules (Priority Order):**
+
+**PRIMARY: Use Skill-Based Planning for Implementation**
+- **All multi-step implementation tasks** → `/planning-with-files` skill (creates task_plan.md, findings.md, progress.md)
+- Database work → `/schema-migration` (auto-loads planning-with-files + postgres-optimizer agent)
+- API integration → `/api-integration` (auto-loads planning-with-files, forked context)
+- Queue tuning → `/queue-optimization` (auto-loads planning-with-files + cloudflare-workers-optimizer agent)
+
+**SECONDARY: Use PAL MCP for Post-Implementation Validation**
+- Deep debugging mysterious bugs → PAL MCP `debug` tool (NOT for planning implementation)
+- Post-implementation code review → PAL MCP `codereview` tool
+- Security vulnerability scanning → PAL MCP `secaudit` tool
+- Multi-model architectural validation → PAL MCP `consensus` tool
+
+**NEVER use `mcp__pal__planner` for implementation tasks** - It's for conceptual architectural planning only (rarely needed). Use the `planning-with-files` skill instead.
 
 **Verification Strategy:**
 - Simple changes: Personal review of agent output

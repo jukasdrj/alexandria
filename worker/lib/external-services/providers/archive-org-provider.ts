@@ -256,6 +256,15 @@ export class ArchiveOrgProvider implements ICoverProvider, IMetadataProvider, II
   }
 
   /**
+   * Common stop words to filter from title matching
+   * Reduces false positives from generic words like "the", "a", "and"
+   */
+  private readonly STOP_WORDS = new Set([
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'be',
+  ]);
+
+  /**
    * Calculate confidence score for ISBN resolution
    *
    * Base score: 40 (Archive.org returned a result)
@@ -283,15 +292,23 @@ export class ArchiveOrgProvider implements ICoverProvider, IMetadataProvider, II
           normalizedQueryTitle.includes(normalizedResultTitle)) {
         confidence += 20;
       } else {
-        // Partial match (common words)
-        const queryWords = new Set(normalizedQueryTitle.split(/\s+/));
-        const resultWords = new Set(normalizedResultTitle.split(/\s+/));
-        let matchCount = 0;
-        for (const word of queryWords) {
-          if (resultWords.has(word)) matchCount++;
+        // Partial match (meaningful words only - filter stop words)
+        const queryWords = new Set(
+          normalizedQueryTitle.split(/\s+/).filter(w => !this.STOP_WORDS.has(w))
+        );
+        const resultWords = new Set(
+          normalizedResultTitle.split(/\s+/).filter(w => !this.STOP_WORDS.has(w))
+        );
+
+        // Only match if both titles have meaningful words
+        if (queryWords.size > 0 && resultWords.size > 0) {
+          let matchCount = 0;
+          for (const word of queryWords) {
+            if (resultWords.has(word)) matchCount++;
+          }
+          const matchRatio = matchCount / Math.max(queryWords.size, resultWords.size);
+          confidence += Math.floor(matchRatio * 20);
         }
-        const matchRatio = matchCount / Math.max(queryWords.size, resultWords.size);
-        confidence += Math.floor(matchRatio * 20);
       }
     }
 
