@@ -23,7 +23,16 @@
 
 import type { Logger } from '../../lib/logger.js';
 import type { Env } from '../env.js';
-import { ResolutionOrchestrator } from './book-resolution/resolution-orchestrator.js';
+import { ISBNResolutionOrchestrator } from '../../lib/external-services/orchestrators/index.js';
+import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
+import type { ServiceContext } from '../../lib/external-services/service-context.js';
+import {
+  OpenLibraryProvider,
+  GoogleBooksProvider,
+  ArchiveOrgProvider,
+  WikidataProvider,
+  ISBNdbProvider,
+} from '../../lib/external-services/providers/index.js';
 
 // =================================================================================
 // Types
@@ -59,6 +68,29 @@ interface ISBNdbBook {
 interface ISBNdbSearchResponse {
   books?: ISBNdbBook[];
   total?: number;
+}
+
+// =================================================================================
+// Confidence Conversion Utilities
+// =================================================================================
+
+/**
+ * Convert NEW orchestrator confidence (0-100) to OLD confidence enum
+ *
+ * Mapping:
+ * - 85-100: high
+ * - 65-84: medium
+ * - 45-64: low
+ * - 0-44: not_found
+ *
+ * @param numericConfidence - Confidence score from NEW orchestrator (0-100)
+ * @returns Confidence enum for backward compatibility
+ */
+function convertConfidence(numericConfidence: number): 'high' | 'medium' | 'low' | 'not_found' {
+  if (numericConfidence >= 85) return 'high';
+  if (numericConfidence >= 65) return 'medium';
+  if (numericConfidence >= 45) return 'low';
+  return 'not_found';
 }
 
 // =================================================================================
@@ -403,28 +435,35 @@ export async function resolveISBNViaTitle(
 /**
  * Batch resolve ISBNs for multiple books with multi-source fallback
  *
+ * ARCHITECTURE (NEW in 2.6.0):
+ * - Uses Service Provider Framework with dynamic discovery
+ * - ISBNResolutionOrchestrator handles provider selection and cascading
+ * - Automatic fallback when ISBNdb quota exhausted
+ *
+ * FALLBACK CHAIN (5-tier cascading):
+ * 1. ISBNdb (paid, quota-limited, highest accuracy)
+ * 2. Google Books (free, fast, good coverage)
+ * 3. OpenLibrary (free, reliable, 100 req/5min)
+ * 4. Archive.org (free, excellent for pre-2000 books)
+ * 5. Wikidata (free, comprehensive SPARQL, slowest)
+ *
  * RATE LIMITING:
- * - ISBNdb Premium: 3 req/sec
- * - Add 350ms delay between requests
+ * - Handled by ServiceHttpClient in each provider
+ * - ISBNdb: 3 req/sec (333ms between calls)
+ * - OpenLibrary: 1 req/3sec (3000ms between calls)
+ * - All providers have built-in rate limiting
  *
  * QUOTA TRACKING:
- * - Reserves quota upfront for entire batch
- * - Records actual API calls made (even if they fail)
- * - Stops making calls if 403 quota exhausted returned
- *
- * FALLBACK CHAIN (NEW in 2.5.0):
- * - When ISBNdb quota exhausted, automatically tries:
- *   1. Google Books (fast, good coverage)
- *   2. OpenLibrary (free, reliable)
- *   3. Archive.org (pre-2000 books)
- *   4. Wikidata (comprehensive, slow)
+ * - ISBNdbProvider checks quota via quotaManager before each call
+ * - When quota exhausted, registry.getAvailableProviders() filters ISBNdb out
+ * - Orchestrator automatically tries next provider
  *
  * @param books - Array of book metadata from Gemini
  * @param apiKey - ISBNdb API key
  * @param logger - Logger instance
- * @param quotaManager - Optional quota manager for tracking (if not provided, quota tracking skipped)
- * @param env - Worker environment (required for fallback resolvers)
- * @returns Array of resolution results
+ * @param quotaManager - Optional quota manager for ISBNdb tracking
+ * @param env - Worker environment (required for providers)
+ * @returns Array of resolution results with backward-compatible format
  */
 export async function batchResolveISBNs(
   books: BookMetadata[],
@@ -433,130 +472,110 @@ export async function batchResolveISBNs(
   quotaManager?: { checkQuota: (count: number, reserve: boolean) => Promise<{ allowed: boolean; status: any }>; recordApiCall: (count: number) => Promise<void> },
   env?: Env
 ): Promise<ISBNResolutionResult[]> {
+  if (!env) {
+    logger.error('[ISBNResolution] Env required for NEW orchestrator - cannot proceed');
+    throw new Error('Env required for ISBN resolution');
+  }
+
+  // Initialize provider registry with all 5 ISBN resolvers
+  const registry = getGlobalRegistry();
+
+  // Register all providers (idempotent - safe to call multiple times)
+  registry.registerAll([
+    new ISBNdbProvider(),
+    new GoogleBooksProvider(),
+    new OpenLibraryProvider(),
+    new ArchiveOrgProvider(),
+    new WikidataProvider(),
+  ]);
+
+  // Create NEW orchestrator with default config
+  const orchestrator = new ISBNResolutionOrchestrator(registry, {
+    providerTimeoutMs: 15000, // 15s per provider
+    enableLogging: true,
+  });
+
+  // Build service context for providers
+  const context: ServiceContext = {
+    env,
+    logger,
+    quotaManager: quotaManager || undefined,
+  };
+
   const results: ISBNResolutionResult[] = [];
-  let apiCallsMade = 0;
-  let quotaExhausted = false;
 
-  // Create quota check function to pass to resolveISBNViaTitle (Issue #158 Fix)
-  const quotaCheck = quotaManager ? async (): Promise<boolean> => {
-    if (quotaExhausted) return false;
-    const result = await quotaManager.checkQuota(1, true);
-    if (!result.allowed) {
-      quotaExhausted = true;
-      return false;
-    }
-    return true;
-  } : undefined;
-
-  // Initialize fallback orchestrator (lazy - only created if needed)
-  let orchestrator: ResolutionOrchestrator | null = null;
+  logger.info('[ISBNResolution] Starting batch resolution with NEW orchestrator', {
+    total_books: books.length,
+  });
 
   for (let i = 0; i < books.length; i++) {
     const book = books[i];
 
-    // If previous call hit quota exhaustion, use fallback resolvers
-    if (quotaExhausted) {
-      logger.info('[ISBNResolution] ISBNdb quota exhausted, using fallback resolvers', {
-        title: book.title,
-        author: book.author,
+    try {
+      // Use NEW orchestrator - it handles all provider selection, fallback, and quota
+      const result = await orchestrator.resolveISBN(book.title, book.author, context);
+
+      // Convert NEW confidence (0-100) to OLD confidence (string enum)
+      const confidence = convertConfidence(result.confidence);
+
+      // Convert to backward-compatible format
+      results.push({
+        isbn: result.isbn,
+        confidence,
+        match_quality: result.confidence / 100, // Convert 0-100 to 0-1
+        matched_title: null, // NEW orchestrator doesn't return matched_title
+        source: result.source as any, // 'isbndb', 'google-books', 'open-library', etc.
       });
 
-      // Use fallback orchestrator if env provided
-      if (env) {
-        // Lazy initialize orchestrator
-        if (!orchestrator) {
-          orchestrator = new ResolutionOrchestrator();
-          logger.info('[ISBNResolution] Initialized fallback orchestrator', {
-            resolvers: orchestrator.getResolverChain(),
-          });
-        }
+      logger.debug('[ISBNResolution] Book resolved', {
+        title: book.title,
+        author: book.author,
+        isbn: result.isbn,
+        source: result.source,
+        confidence: result.confidence,
+        mapped_confidence: confidence,
+      });
 
-        try {
-          const fallbackResult = await orchestrator.findISBN(
-            book.title,
-            book.author,
-            env,
-            logger
-          );
+    } catch (error) {
+      // NEW orchestrator is designed to NEVER throw - it returns null on all errors
+      // This catch block is defensive fallback
+      logger.error('[ISBNResolution] Unexpected orchestrator error', {
+        title: book.title,
+        author: book.author,
+        error: error instanceof Error ? error.message : String(error),
+      });
 
-          // Convert orchestrator result to ISBNResolutionResult format
-          const confidence = fallbackResult.confidence >= 80 ? 'high'
-            : fallbackResult.confidence >= 60 ? 'medium'
-            : fallbackResult.confidence >= 40 ? 'low'
-            : 'not_found';
-
-          results.push({
-            isbn: fallbackResult.isbn,
-            confidence,
-            match_quality: fallbackResult.confidence / 100, // Convert 0-100 to 0-1
-            matched_title: fallbackResult.metadata?.title || null,
-            source: fallbackResult.source as any, // OpenLibrary, Archive.org, etc.
-          });
-
-          // Add small delay to respect rate limits of fallback APIs
-          await new Promise(resolve => setTimeout(resolve, 500));
-          continue;
-        } catch (error) {
-          logger.error('[ISBNResolution] Fallback resolver error', {
-            title: book.title,
-            author: book.author,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          // Fall through to return not_found
-        }
-      } else {
-        logger.warn('[ISBNResolution] No env provided, cannot use fallback resolvers');
-      }
-
-      // No fallback available or fallback failed
       results.push({
         isbn: null,
         confidence: 'not_found',
         match_quality: 0.0,
         matched_title: null,
-        source: 'isbndb', // Keep source as isbndb for backwards compatibility
+        source: 'isbndb', // Default source for backward compatibility
       });
-      continue;
     }
 
-    const result = await resolveISBNViaTitle(book, apiKey, logger, quotaCheck);
-    results.push(result);
-    apiCallsMade++;
-
-    // Check if we hit quota exhaustion (403 responses are already handled in resolveISBNViaTitle)
-    // We infer quota exhaustion by checking logs, but for now just count the call
-
-    // Rate limit: 350ms delay between requests (3 req/sec)
+    // Small delay between books to avoid hammering providers
+    // (Providers have their own rate limiting, but this adds buffer)
     if (i < books.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 350));
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
-  }
-
-  // Record all API calls made (even failed ones) for quota tracking
-  if (quotaManager && apiCallsMade > 0) {
-    try {
-      await quotaManager.recordApiCall(apiCallsMade);
-      logger.info('[ISBNResolution] Recorded API calls to quota manager', {
-        calls_made: apiCallsMade,
-      });
-    } catch (error) {
-      logger.error('[ISBNResolution] Failed to record API calls to quota manager', {
-        error: error instanceof Error ? error.message : String(error),
-        calls_made: apiCallsMade,
-      });
-    }
-  } else if (!quotaManager) {
-    logger.warn('[ISBNResolution] No quota manager provided - API calls not tracked');
   }
 
   const successCount = results.filter(r => r.isbn !== null).length;
   const highConfidence = results.filter(r => r.confidence === 'high').length;
+  const sourceBreakdown = results.reduce((acc, r) => {
+    if (r.isbn) {
+      acc[r.source] = (acc[r.source] || 0) + 1;
+    }
+    return acc;
+  }, {} as Record<string, number>);
 
-  logger.info('[ISBNResolution] Batch complete', {
+  logger.info('[ISBNResolution] Batch complete (NEW orchestrator)', {
     total: books.length,
     resolved: successCount,
     high_confidence: highConfidence,
     success_rate: ((successCount / books.length) * 100).toFixed(1) + '%',
+    source_breakdown: sourceBreakdown,
   });
 
   return results;
