@@ -431,6 +431,6 @@ MIT
 
 ---
 
-**Last Updated:** January 9, 2026
-**Version:** 2.4.0
+**Last Updated:** January 12, 2026
+**Version:** 2.6.0
 **Database:** 54.8M editions | 49.3M ISBNs | 40.1M works | 14.7M authors
