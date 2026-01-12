@@ -35,6 +35,8 @@ import {
   OpenLibraryProvider,
   ArchiveOrgProvider,
   WikidataProvider,
+  GeminiProvider,
+  XaiProvider,
 } from '../../lib/external-services/providers/index.js';
 
 // Cloudflare Queue types
@@ -70,6 +72,9 @@ providerRegistry.registerAll([
   new ArchiveOrgProvider(),
   new WikidataProvider(),
   new ISBNdbProvider(),
+  // AI providers for book generation (backfill)
+  new GeminiProvider(),
+  new XaiProvider(),
 ]);
 
 /**

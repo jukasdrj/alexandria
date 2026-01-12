@@ -1,16 +1,17 @@
 /**
- * Hybrid Backfill Workflow - Gemini + ISBNdb Integration
+ * Hybrid Backfill Workflow - AI + ISBNdb Integration
  *
  * ARCHITECTURE:
- * 1. Gemini API → Generate book metadata (title, author, publisher, format, year)
+ * 1. AI Provider (Gemini or Grok) → Generate book metadata (title, author, publisher, format, year)
  * 2. ISBNdb API → Resolve authoritative ISBNs via title/author search
  * 3. Deduplication → Filter already-enriched books
  * 4. Enrichment → Update database with complete metadata
  *
  * BENEFITS:
  * - 95%+ ISBN accuracy (ISBNdb authoritative source)
- * - High-quality metadata from Gemini (cultural significance, publisher info)
- * - Reduced batch size (20 books) for better Gemini accuracy
+ * - High-quality metadata from AI providers (cultural significance, publisher info)
+ * - Automatic fallback: Gemini → Grok (if quota exhausted or errors)
+ * - Reduced batch size (20 books) for better AI accuracy
  * - Fuzzy matching handles title variations
  *
  * @module services/hybrid-backfill
@@ -18,16 +19,54 @@
 
 import type { Env } from '../env.js';
 import type { Logger } from '../../lib/logger.js';
-import { generateCuratedBookList, type GenerationStats } from './gemini-backfill.js';
 import { batchResolveISBNs, type ISBNResolutionResult } from './isbn-resolution.js';
 import type { ResolvedCandidate } from './types/backfill.js';
+import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
+import { BookGenerationOrchestrator } from '../../lib/external-services/orchestrators/book-generation-orchestrator.js';
+import { createServiceContext } from '../../lib/external-services/service-context.js';
+import type { GeneratedBook } from '../../lib/external-services/capabilities.js';
+
+// =================================================================================
+// Module-Level Orchestrator (Cold Start Optimization)
+// =================================================================================
+
+/**
+ * Global book generation orchestrator initialized once and reused across requests.
+ * This reduces per-request overhead by ~5-10ms (no repeated allocations).
+ *
+ * Follows same pattern as providerRegistry in queue-handlers.ts
+ */
+const bookGenOrchestrator = new BookGenerationOrchestrator(getGlobalRegistry(), {
+  enableLogging: true,
+  providerTimeoutMs: 60000, // 60 seconds for AI generation
+  providerPriority: ['gemini', 'xai'], // Gemini first (cheaper), Grok as fallback
+  stopOnFirstSuccess: true,
+});
 
 // =================================================================================
 // Types
 // =================================================================================
 
+export interface GenerationStats {
+  model_used: string;
+  total_books: number;
+  books_with_publisher: number;
+  books_with_significance: number;
+  format_breakdown: {
+    Hardcover: number;
+    Paperback: number;
+    eBook: number;
+    Audiobook: number;
+    Unknown: number;
+  };
+  duration_ms: number;
+  failed_batches?: number;
+  failed_batch_errors?: Array<{ batch: number; error: string }>;
+}
+
 export interface HybridBackfillStats extends GenerationStats {
-  // Gemini stats (inherited from GenerationStats)
+  // AI provider stats (inherited from GenerationStats)
+  ai_provider_used: string; // 'gemini' or 'xai'
   // ISBNdb resolution stats
   isbn_resolution: {
     total_attempted: number;
@@ -40,7 +79,7 @@ export interface HybridBackfillStats extends GenerationStats {
   };
   // API call tracking
   api_calls: {
-    gemini: number;
+    ai_generation: number; // Gemini or Grok
     isbndb: number;
     total: number;
   };
@@ -57,16 +96,20 @@ export interface HybridBackfillResult {
 // =================================================================================
 
 /**
- * Generate curated book list with hybrid Gemini + ISBNdb workflow
+ * Generate curated book list with hybrid AI + ISBNdb workflow
  *
  * WORKFLOW:
- * 1. Gemini generates N high-quality book metadata records (configurable batch size)
+ * 1. AI Provider (Gemini or Grok via orchestrator) generates N high-quality book metadata records
  * 2. ISBNdb resolves authoritative ISBNs via title/author fuzzy search
  * 3. Returns enriched candidates with confidence scores
  *
  * QUOTA IMPACT:
- * - Gemini: 1 API call (N books @ temperature=0.1)
+ * - AI Provider: 1 API call (N books @ temperature=0.1)
  * - ISBNdb: N API calls (1 per book, rate-limited to 3 req/sec)
+ *
+ * FALLBACK:
+ * - Primary: Gemini (cheaper, proven track record)
+ * - Secondary: Grok (faster, if Gemini quota exhausted or fails)
  *
  * @param year - Year to generate list for
  * @param month - Month to generate list for (1-12)
@@ -94,23 +137,57 @@ export async function generateHybridBackfillList(
     model_override: modelOverride || 'default',
   });
 
-  // Step 1: Generate metadata from Gemini (no ISBNs)
-  const { candidates: metadataCandidates, stats: geminiStats } = await generateCuratedBookList(
-    year,
-    month,
-    env,
-    logger,
-    promptOverride,
-    batchSize,
-    modelOverride
-  );
+  // Step 1: Generate metadata from AI Provider (Gemini or Grok)
+  // Use module-level orchestrator for cold start optimization
+  const context = createServiceContext(env, logger);
 
-  if (metadataCandidates.length === 0) {
-    logger.warn('[HybridBackfill] No books generated from Gemini', { year, month });
+  // Build prompt
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const monthName = monthNames[month - 1];
+
+  const prompt = promptOverride || `Generate a curated list of exactly ${batchSize} historically significant books published in ${monthName} ${year}.
+
+SELECTION CRITERIA - Prioritize quality over quantity:
+- NYT Bestsellers (Fiction & Non-fiction)
+- Literary awards: Pulitzer, Booker Prize, Hugo, National Book Award, etc.
+- Critical acclaim or lasting cultural impact
+- Breakthrough debuts that shaped their genre
+- High-selling popular fiction (mystery, romance, sci-fi, fantasy, thriller)
+- Influential non-fiction (memoir, history, science, self-help, politics)
+- Notable international works reaching English-speaking markets
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house name
+4. **publication_year**: ${year}
+5. **significance** (optional): Why this book is historically important (1-2 sentences)
+
+Return ONLY a valid JSON array of exactly ${batchSize} books.`;
+
+  const generatedBooks = await bookGenOrchestrator.generateBooks(prompt, batchSize, context);
+
+  if (generatedBooks.length === 0) {
+    logger.warn('[HybridBackfill] No books generated from AI providers', { year, month });
     return {
       candidates: [],
       stats: {
-        ...geminiStats,
+        model_used: 'none',
+        total_books: 0,
+        books_with_publisher: 0,
+        books_with_significance: 0,
+        format_breakdown: {
+          Hardcover: 0,
+          Paperback: 0,
+          eBook: 0,
+          Audiobook: 0,
+          Unknown: 0,
+        },
+        duration_ms: Date.now() - startTime,
+        ai_provider_used: 'none',
         isbn_resolution: {
           total_attempted: 0,
           resolved: 0,
@@ -121,18 +198,35 @@ export async function generateHybridBackfillList(
           resolution_rate: 0,
         },
         api_calls: {
-          gemini: 1,
+          ai_generation: 0,
           isbndb: 0,
-          total: 1,
+          total: 0,
         },
       },
       resolutions: [],
     };
   }
 
-  logger.info('[HybridBackfill] Gemini generation complete', {
+  // Convert GeneratedBook to metadataCandidates format
+  const metadataCandidates = generatedBooks.map(book => {
+    // Parse year with NaN validation
+    const parsedYear = parseInt(book.publishDate || '');
+    const validYear = !isNaN(parsedYear) ? parsedYear : year; // Fallback to input year if invalid
+
+    return {
+      title: book.title,
+      author: book.author,
+      authors: [book.author],
+      publisher: book.publisher,
+      format: book.format,
+      year: validYear,
+      significance: book.description,
+    };
+  });
+
+  logger.info('[HybridBackfill] AI generation complete', {
     books_generated: metadataCandidates.length,
-    model: geminiStats.model_used,
+    provider: generatedBooks[0]?.source || 'unknown',
   });
 
   // Step 2: Resolve ISBNs via ISBNdb title/author search
@@ -153,9 +247,9 @@ export async function generateHybridBackfillList(
   // Pass env to enable fallback resolvers when ISBNdb quota exhausted
   const resolutions = await batchResolveISBNs(booksMetadata, apiKey, logger, quotaManager, env);
 
-  // Step 3: Merge Gemini metadata with resolved ISBNs
+  // Step 3: Merge AI metadata with resolved ISBNs
   // IMPORTANT: Include candidates WITHOUT ISBNs for staged enrichment
-  // When ISBNdb quota exhausted, we still want to save Gemini metadata
+  // When ISBNdb quota exhausted, we still want to save AI metadata
   const enrichedCandidates: ResolvedCandidate[] = [];
 
   for (let i = 0; i < metadataCandidates.length; i++) {
@@ -164,9 +258,9 @@ export async function generateHybridBackfillList(
 
     // Always add candidate - even without ISBN (for staged enrichment)
     const resolved: ResolvedCandidate = {
-      // GeminiBookMetadata fields
-      title: metadata.title!, // Required from Gemini (validated during generation)
-      author: (metadata.authors?.[0] || metadata.author)!, // From Gemini (authors array or author field)
+      // AI-generated metadata fields
+      title: metadata.title!, // Required from AI (validated during generation)
+      author: (metadata.authors?.[0] || metadata.author)!, // From AI (authors array or author field)
       authors: metadata.authors,
       publisher: metadata.publisher,
       format: metadata.format,
@@ -174,16 +268,14 @@ export async function generateHybridBackfillList(
       significance: metadata.significance,
       // Resolution fields
       isbn: resolution.isbn || undefined, // undefined if ISBNdb failed (quota exhausted)
-      resolution_confidence: resolution.confidence === 'not_found' ? 'not_found' :
-        resolution.confidence === 'high' ? 'high' :
-        resolution.confidence === 'medium' ? 'medium' : 'low',
+      resolution_confidence: resolution.confidence, // Direct assignment - types already match
       resolution_source: resolution.isbn ? 'isbndb' : undefined,
     };
 
     enrichedCandidates.push(resolved);
 
     if (!resolution.isbn) {
-      logger.debug('[HybridBackfill] ISBN not resolved - saving Gemini metadata only', {
+      logger.debug('[HybridBackfill] ISBN not resolved - saving AI metadata only', {
         title: metadata.title,
         author: metadata.authors?.[0] || metadata.author,
         confidence: resolution.confidence,
@@ -208,10 +300,21 @@ export async function generateHybridBackfillList(
 
   const duration = Date.now() - startTime;
 
+  // Calculate generation stats
+  const aiProviderUsed = generatedBooks[0]?.source || 'unknown';
+  const booksWithPublisher = metadataCandidates.filter(b => b.publisher).length;
+  const booksWithSignificance = metadataCandidates.filter(b => b.significance).length;
+  const formatCounts = metadataCandidates.reduce((acc, b) => {
+    const fmt = b.format || 'Unknown';
+    acc[fmt] = (acc[fmt] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   logger.info('[HybridBackfill] Workflow complete', {
     year,
     month,
-    gemini_books: metadataCandidates.length,
+    ai_books: metadataCandidates.length,
+    ai_provider: aiProviderUsed,
     isbns_resolved: enrichedCandidates.length,
     resolution_rate: `${resolutionStats.resolution_rate.toFixed(1)}%`,
     high_confidence: resolutionStats.high_confidence,
@@ -221,14 +324,25 @@ export async function generateHybridBackfillList(
   return {
     candidates: enrichedCandidates,
     stats: {
-      ...geminiStats,
+      model_used: modelOverride || 'default',
+      total_books: metadataCandidates.length,
+      books_with_publisher: booksWithPublisher,
+      books_with_significance: booksWithSignificance,
+      format_breakdown: {
+        Hardcover: formatCounts['Hardcover'] || 0,
+        Paperback: formatCounts['Paperback'] || 0,
+        eBook: formatCounts['eBook'] || 0,
+        Audiobook: formatCounts['Audiobook'] || 0,
+        Unknown: formatCounts['Unknown'] || 0,
+      },
+      duration_ms: duration,
+      ai_provider_used: aiProviderUsed,
       isbn_resolution: resolutionStats,
       api_calls: {
-        gemini: 1,
+        ai_generation: 1,
         isbndb: resolutions.length,
         total: 1 + resolutions.length,
       },
-      duration_ms: duration,
     },
     resolutions,
   };

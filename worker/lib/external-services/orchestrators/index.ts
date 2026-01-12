@@ -22,3 +22,6 @@ export type {
   MetadataEnrichmentConfig,
   EnrichmentResult,
 } from './metadata-enrichment-orchestrator.js';
+
+export { BookGenerationOrchestrator } from './book-generation-orchestrator.js';
+export type { BookGenerationConfig } from './book-generation-orchestrator.js';
