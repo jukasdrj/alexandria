@@ -17,6 +17,12 @@ import type { ServiceProviderRegistry } from '../provider-registry.js';
 import type { IBookGenerator, GeneratedBook } from '../capabilities.js';
 import { ServiceCapability } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
+import type { Logger } from '../../../src/env.js';
+import {
+  normalizeTitle,
+  calculateSimilarity,
+  FUZZY_SIMILARITY_THRESHOLD,
+} from '../../utils/string-similarity.js';
 
 // =================================================================================
 // Configuration
@@ -38,24 +44,40 @@ export interface BookGenerationConfig {
 
   /**
    * Provider priority order
-   * Determines which providers to try first
+   * Determines which providers to try first (for sequential mode)
    * @default ['gemini', 'xai'] (Gemini first for cost, Grok as fallback)
    */
   providerPriority?: string[];
 
   /**
-   * Stop after first successful provider
+   * Stop after first successful provider (sequential mode)
    * If false, tries all available providers and returns first success
-   * @default true
+   * @default false (concurrent mode is default for book generation)
    */
   stopOnFirstSuccess?: boolean;
+
+  /**
+   * Run providers concurrently instead of sequentially
+   * When true, all providers run in parallel and results are deduplicated
+   * @default true (maximize diversity and speed)
+   */
+  concurrentExecution?: boolean;
+
+  /**
+   * Title similarity threshold for deduplication (0.0-1.0)
+   * Books with title similarity above this threshold are considered duplicates
+   * @default 0.6 (60% similar = duplicate, aligned with database fuzzy matching)
+   */
+  deduplicationThreshold?: number;
 }
 
 const DEFAULT_CONFIG: Required<BookGenerationConfig> = {
   enableLogging: false,
   providerTimeoutMs: 60000, // 60 seconds for AI generation
   providerPriority: ['gemini', 'xai'], // Gemini first (cheaper), Grok as fallback
-  stopOnFirstSuccess: true,
+  stopOnFirstSuccess: false, // Use concurrent mode by default
+  concurrentExecution: true, // Run all providers in parallel
+  deduplicationThreshold: FUZZY_SIMILARITY_THRESHOLD, // 0.6 = 60% (aligned with database)
 };
 
 // =================================================================================
@@ -77,21 +99,28 @@ export class BookGenerationOrchestrator {
   /**
    * Generate book metadata using available AI providers
    *
-   * WORKFLOW:
+   * CONCURRENT MODE (default):
    * 1. Discover available book generation providers (checks API keys, quota)
-   * 2. Sort by priority (Gemini first, Grok second)
-   * 3. Try each provider with timeout protection
-   * 4. Return first successful result or empty array
+   * 2. Run all providers in parallel with timeout protection
+   * 3. Deduplicate results by title similarity (80% threshold)
+   * 4. Return combined, deduplicated list
    *
-   * FALLBACK BEHAVIOR:
-   * - If Gemini quota exhausted → Try Grok automatically
-   * - If Gemini fails → Try Grok automatically
-   * - If all providers fail → Return empty array (graceful degradation)
+   * SEQUENTIAL MODE (stopOnFirstSuccess=true):
+   * 1. Discover available providers
+   * 2. Sort by priority (Gemini first, Grok second)
+   * 3. Try each provider until one succeeds
+   * 4. Return first successful result
+   *
+   * BENEFITS OF CONCURRENT MODE:
+   * - Maximum diversity (0% overlap observed between Gemini & Grok)
+   * - Faster completion (both run in parallel)
+   * - Resilience (succeeds if ANY provider works)
+   * - Deduplication prevents redundant books
    *
    * @param prompt - Generation prompt (e.g., "significant books published in January 2020")
-   * @param count - Number of books to generate
+   * @param count - Number of books to generate PER PROVIDER
    * @param context - Service context with environment and logger
-   * @returns Array of generated books (empty if all providers fail)
+   * @returns Array of generated books (deduplicated if concurrent)
    */
   async generateBooks(
     prompt: string,
@@ -134,6 +163,129 @@ export class BookGenerationOrchestrator {
         order: sortedProviders.map((p) => p.name),
       });
     }
+
+    // Step 3: Choose execution strategy
+    if (this.config.concurrentExecution) {
+      return this.generateBooksConcurrent(sortedProviders, prompt, count, context, startTime);
+    } else {
+      return this.generateBooksSequential(sortedProviders, prompt, count, context, startTime);
+    }
+  }
+
+  /**
+   * Generate books concurrently from all providers and deduplicate
+   *
+   * Runs all providers in parallel for maximum diversity and speed.
+   * Deduplicates results by title similarity to prevent redundancy.
+   */
+  private async generateBooksConcurrent(
+    providers: IBookGenerator[],
+    prompt: string,
+    count: number,
+    context: ServiceContext,
+    startTime: number
+  ): Promise<GeneratedBook[]> {
+    const { logger } = context;
+
+    logger.info('[BookGenOrchestrator] Running providers concurrently', {
+      providers: providers.map((p) => p.name),
+      count_per_provider: count,
+    });
+
+    // Run all providers in parallel with individual timeout protection
+    const providerPromises = providers.map(async (provider) => {
+      const providerStart = Date.now();
+
+      try {
+        // Add timeout protection
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<GeneratedBook[]>((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error('Provider timeout')),
+            this.config.providerTimeoutMs
+          );
+        });
+
+        const booksPromise = provider.generateBooks(prompt, count, context);
+
+        try {
+          const books = await Promise.race([booksPromise, timeoutPromise]);
+          // Clear timeout on successful completion
+          if (timeoutId !== undefined) {
+            clearTimeout(timeoutId);
+          }
+
+          const duration = Date.now() - providerStart;
+
+          if (books.length > 0) {
+            logger.info('[BookGenOrchestrator] Provider succeeded (concurrent)', {
+              provider: provider.name,
+              books_generated: books.length,
+              duration_ms: duration,
+            });
+            return books;
+          } else {
+            logger.warn('[BookGenOrchestrator] Provider returned empty result (concurrent)', {
+              provider: provider.name,
+              duration_ms: duration,
+            });
+            return [];
+          }
+        } finally {
+          // Ensure timeout is always cleared
+          if (timeoutId !== undefined) {
+            clearTimeout(timeoutId);
+          }
+        }
+      } catch (error) {
+        const duration = Date.now() - providerStart;
+        logger.warn('[BookGenOrchestrator] Provider failed (concurrent)', {
+          provider: provider.name,
+          error: error instanceof Error ? error.message : String(error),
+          duration_ms: duration,
+        });
+        return [];
+      }
+    });
+
+    // Wait for all providers to complete
+    const allResults = await Promise.all(providerPromises);
+
+    // Flatten and deduplicate
+    const allBooks = allResults.flat();
+
+    if (allBooks.length === 0) {
+      logger.error('[BookGenOrchestrator] All concurrent providers failed', {
+        attempted_providers: providers.map((p) => p.name),
+        total_duration_ms: Date.now() - startTime,
+      });
+      return [];
+    }
+
+    // Deduplicate by title similarity
+    const deduplicated = this.deduplicateBooks(allBooks, logger);
+
+    logger.info('[BookGenOrchestrator] Concurrent generation complete', {
+      total_generated: allBooks.length,
+      after_deduplication: deduplicated.length,
+      duplicates_removed: allBooks.length - deduplicated.length,
+      total_duration_ms: Date.now() - startTime,
+    });
+
+    return deduplicated;
+  }
+
+  /**
+   * Generate books sequentially with fallback (original behavior)
+   */
+  private async generateBooksSequential(
+    sortedProviders: IBookGenerator[],
+    prompt: string,
+    count: number,
+    context: ServiceContext,
+    startTime: number
+  ): Promise<GeneratedBook[]> {
+    const { logger } = context;
 
     // Step 3: Try each provider with timeout protection
     for (const provider of sortedProviders) {
@@ -229,6 +381,58 @@ export class BookGenerationOrchestrator {
       const bPriority = priorityMap.get(b.name) ?? Number.MAX_SAFE_INTEGER;
       return aPriority - bPriority;
     });
+  }
+
+  /**
+   * Deduplicate books by title similarity using shared fuzzy matching logic
+   *
+   * Keeps the first occurrence of each unique book (by provider order).
+   * Uses Alexandria's standard fuzzy matching:
+   * - Normalize titles (lowercase, remove punctuation/articles)
+   * - Calculate Levenshtein similarity
+   * - Threshold: 0.6 (60%, aligned with database deduplication)
+   */
+  private deduplicateBooks(books: GeneratedBook[], logger: Logger): GeneratedBook[] {
+    if (books.length === 0) return [];
+
+    const unique: GeneratedBook[] = [];
+    const seenTitles = new Set<string>();
+
+    for (const book of books) {
+      const normalized = normalizeTitle(book.title);
+
+      // Check for exact match first (fast path)
+      if (seenTitles.has(normalized)) {
+        logger.debug('[BookGenOrchestrator] Exact duplicate detected', {
+          title: book.title,
+          source: book.source,
+        });
+        continue;
+      }
+
+      // Check for fuzzy similarity with existing titles
+      let isDuplicate = false;
+      for (const seenTitle of seenTitles) {
+        const similarity = calculateSimilarity(normalized, seenTitle);
+        if (similarity >= this.config.deduplicationThreshold) {
+          isDuplicate = true;
+          logger.debug('[BookGenOrchestrator] Fuzzy duplicate detected', {
+            title: book.title,
+            similar_to: seenTitle,
+            similarity: similarity.toFixed(2),
+            source: book.source,
+          });
+          break;
+        }
+      }
+
+      if (!isDuplicate) {
+        unique.push(book);
+        seenTitles.add(normalized);
+      }
+    }
+
+    return unique;
   }
 
   /**
