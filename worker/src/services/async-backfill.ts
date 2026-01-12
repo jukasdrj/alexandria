@@ -83,7 +83,7 @@ export interface BackfillQueueMessage {
   batch_size: number;
   dry_run?: boolean;
   experiment_id?: string;
-  prompt_override?: string;
+  prompt_variant?: string; // Registered prompt variant name (e.g., 'baseline', 'diversity-emphasis')
   model_override?: string;
   max_quota?: number;
 }
@@ -200,7 +200,7 @@ export async function processBackfillJob(
   env: Env,
   logger: Logger
 ): Promise<void> {
-  const { job_id, year, month, batch_size, dry_run, experiment_id, prompt_override, model_override } = message;
+  const { job_id, year, month, batch_size, dry_run, experiment_id, prompt_variant, model_override } = message;
   const startTime = Date.now();
 
   try {
@@ -220,7 +220,7 @@ export async function processBackfillJob(
         : `Generating book list for ${year}-${month.toString().padStart(2, '0')}...`,
       experiment_id,
       dry_run,
-      prompt_variant: prompt_override || 'baseline',
+      prompt_variant: prompt_variant || 'baseline',
       model_used: model_override || 'default',
     });
 
@@ -279,7 +279,7 @@ export async function processBackfillJob(
       env,
       logger,
       batch_size,
-      prompt_override,
+      prompt_variant,
       model_override,
       quotaManager
     );

@@ -25,6 +25,7 @@ import { getGlobalRegistry } from '../../lib/external-services/provider-registry
 import { BookGenerationOrchestrator } from '../../lib/external-services/orchestrators/book-generation-orchestrator.js';
 import { createServiceContext } from '../../lib/external-services/service-context.js';
 import type { GeneratedBook } from '../../lib/external-services/capabilities.js';
+import { resolvePrompt } from '../../lib/ai/book-generation-prompts.js';
 
 // =================================================================================
 // Module-Level Orchestrator (Cold Start Optimization)
@@ -114,15 +115,19 @@ export interface HybridBackfillResult {
  * - AI Provider: 1 API call (N books @ temperature=0.1)
  * - ISBNdb: N API calls (1 per book, rate-limited to 3 req/sec)
  *
- * FALLBACK:
- * - Primary: Gemini (cheaper, proven track record)
- * - Secondary: Grok (faster, if Gemini quota exhausted or fails)
+ * CONCURRENT MODE:
+ * - Both Gemini and Grok run in parallel for maximum diversity
+ * - Results deduplicated by 60% title similarity threshold
+ * - Succeeds if ANY provider works (resilient to individual failures)
  *
  * @param year - Year to generate list for
  * @param month - Month to generate list for (1-12)
  * @param env - Environment with API keys
  * @param logger - Logger instance
  * @param batchSize - Number of books to generate (default: 20, can test 50)
+ * @param promptVariant - Optional prompt variant name (e.g., "diversity-emphasis", "baseline")
+ * @param modelOverride - Optional model override (for testing)
+ * @param quotaManager - Optional quota tracking manager
  * @returns Hybrid workflow result with ISBNs resolved
  */
 export async function generateHybridBackfillList(
@@ -131,7 +136,7 @@ export async function generateHybridBackfillList(
   env: Env,
   logger: Logger,
   batchSize: number = 20,
-  promptOverride?: string,
+  promptVariant?: string,
   modelOverride?: string,
   quotaManager?: { recordApiCall: (count: number) => Promise<void> }
 ): Promise<HybridBackfillResult> {
@@ -140,7 +145,7 @@ export async function generateHybridBackfillList(
   logger.info('[HybridBackfill] Starting hybrid workflow', {
     year,
     month,
-    prompt_override: promptOverride ? 'custom' : 'default',
+    prompt_variant: promptVariant || 'baseline',
     model_override: modelOverride || 'default',
   });
 
@@ -148,32 +153,8 @@ export async function generateHybridBackfillList(
   // Use module-level orchestrator for cold start optimization
   const context = createServiceContext(env, logger);
 
-  // Build prompt
-  const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
-  const monthName = monthNames[month - 1];
-
-  const prompt = promptOverride || `Generate a curated list of exactly ${batchSize} historically significant books published in ${monthName} ${year}.
-
-SELECTION CRITERIA - Prioritize quality over quantity:
-- NYT Bestsellers (Fiction & Non-fiction)
-- Literary awards: Pulitzer, Booker Prize, Hugo, National Book Award, etc.
-- Critical acclaim or lasting cultural impact
-- Breakthrough debuts that shaped their genre
-- High-selling popular fiction (mystery, romance, sci-fi, fantasy, thriller)
-- Influential non-fiction (memoir, history, science, self-help, politics)
-- Notable international works reaching English-speaking markets
-
-METADATA REQUIREMENTS for each book:
-1. **title**: Full book title (exact as published)
-2. **author**: Primary author's name (full name preferred)
-3. **publisher**: Publishing house name
-4. **publication_year**: ${year}
-5. **significance** (optional): Why this book is historically important (1-2 sentences)
-
-Return ONLY a valid JSON array of exactly ${batchSize} books.`;
+  // Resolve prompt from shared microservice (security: only accepts registered variants)
+  const prompt = resolvePrompt(promptVariant, year, month, batchSize);
 
   const generatedBooks = await bookGenOrchestrator.generateBooks(prompt, batchSize, context);
 

@@ -31,7 +31,7 @@ const BackfillRequestSchema = z.object({
     .describe('If true, runs validation without database updates. Used for A/B testing.'),
   experiment_id: z.string().optional()
     .describe('Experiment identifier for tracking (e.g., "exp-001-baseline"). Logged in results.'),
-  prompt_override: z.string().optional()
+  prompt_variant: z.string().optional()
     .describe('Prompt variant to use (e.g., "enriched-context", "conservative"). Defaults to baseline.'),
   model_override: z.string().optional()
     .describe('Model to use (e.g., "gemini-3-flash-preview", "gemini-3-pro-preview"). Defaults to gemini-2.5-flash.'),
@@ -143,7 +143,7 @@ app.openapi(backfillRoute, async (c) => {
   const batchSize = body.batch_size ?? 20;
   const dryRun = body.dry_run ?? false;
   const experimentId = body.experiment_id;
-  const promptOverride = body.prompt_override;
+  const promptVariant = body.prompt_variant;
   const modelOverride = body.model_override;
   const maxQuota = body.max_quota;
 
@@ -204,7 +204,7 @@ app.openapi(backfillRoute, async (c) => {
     batch_size: batchSize,
     dry_run: dryRun,
     experiment_id: experimentId,
-    prompt_override: promptOverride,
+    prompt_variant: promptVariant,
     model_override: modelOverride,
     max_quota: maxQuota,
   };
