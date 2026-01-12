@@ -210,11 +210,12 @@ export class CoverFetchOrchestrator {
   ): Promise<CoverAttempt> {
     const startTime = Date.now();
     const abortController = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     try {
       // Create timeout promise that rejects
       const timeoutPromise = new Promise<CoverResult | null>((_, reject) => {
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           abortController.abort(); // Abort HTTP requests
           reject(new Error('Provider timeout'));
         }, this.config.providerTimeoutMs);
@@ -262,6 +263,9 @@ export class CoverFetchOrchestrator {
         durationMs: Date.now() - startTime,
         error: error instanceof Error ? error.message : String(error),
       };
+    } finally {
+      // CRITICAL: Always clear timeout to prevent resource leak
+      clearTimeout(timeoutId!);
     }
   }
 
