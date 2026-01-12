@@ -43,13 +43,19 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
     }
 
     const normalizedISBN = isbn.replace(/[-\s]/g, '');
-    console.log(`[CoverProcessor] Processing cover for ISBN ${normalizedISBN} from ${provider_url}`);
+    const logger = c.get('logger');
+    logger.info('Processing cover', {
+      isbn: normalizedISBN,
+      provider_url
+    });
 
     // 2. Download and validate original image
     const { buffer: originalImage, contentType } = await downloadImage(provider_url);
-    console.log(
-      `[CoverProcessor] Downloaded ${originalImage.byteLength} bytes (${contentType})`
-    );
+    c.get('logger').debug('Downloaded image', {
+      isbn: normalizedISBN,
+      size_bytes: originalImage.byteLength,
+      content_type: contentType,
+    });
 
     // 3. Determine file extension from content type
     const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
@@ -73,7 +79,11 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
       },
     });
 
-    console.log(`[CoverProcessor] Uploaded to R2: ${r2Key}`);
+    logger.info('Uploaded cover to R2', {
+      isbn: normalizedISBN,
+      r2_key: r2Key,
+      size_bytes: originalImage.byteLength,
+    });
 
     // 5. Generate CDN URLs (served via /covers/:isbn/:size endpoint)
     const cdnBase = 'https://alexandria.ooheynerds.com/covers';
@@ -97,7 +107,10 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
       },
     });
   } catch (error) {
-    console.error('[CoverProcessor] Error:', error);
+    c.get('logger').error('Cover processing error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
 
     const errorMessage = error instanceof Error ? error.message : String(error);
 

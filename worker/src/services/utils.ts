@@ -8,70 +8,133 @@ import type {
   ValidationResult,
   ISBNValidationResult,
 } from './types.js';
+import {
+  PROVIDER_QUALITY_SCORES,
+  EDITION_FIELD_WEIGHTS,
+  WORK_FIELD_WEIGHTS,
+  EXTERNAL_ID_WEIGHT,
+  QUALITY_SCORE_MAX,
+  DESCRIPTION_MIN_THRESHOLD,
+  DESCRIPTION_LONG_THRESHOLD,
+  COMPLETENESS_PERCENTAGE,
+  MAX_FIELD_LENGTHS,
+  CONFIDENCE_SCORE_MIN,
+  CONFIDENCE_SCORE_MAX,
+  ISBN_LENGTH_10,
+  ISBN_LENGTH_13,
+  PRIORITY_DEFAULT,
+  PRIORITY_MIN,
+  PRIORITY_MAX,
+  PRIORITY_LEVELS,
+} from '../lib/constants.js';
 
 /**
  * Calculate quality score for an edition enrichment
+ *
+ * Scoring breakdown:
+ * - Provider quality: 0-50 points (based on data source reliability)
+ * - Field completeness: 0-50 points (based on available metadata)
+ * - External IDs: 0-15 points (3 IDs × 5 points each)
+ *
+ * Maximum score: 100 points
+ *
+ * @param edition - Edition to score
+ * @returns Quality score (0-100)
+ *
+ * @see {@link PROVIDER_QUALITY_SCORES} for provider weights
+ * @see {@link EDITION_FIELD_WEIGHTS} for field weights
  */
 export function calculateEditionQuality(edition: EnrichEditionRequest): number {
   let score = 0;
 
-  // Provider weights (40 points max)
-  const providerScores: Record<string, number> = {
-    'isbndb': 40,
-    'google-books': 30,
-    'openlibrary': 20,
-    'user-correction': 50, // User corrections are highest quality
-  };
-  score += providerScores[edition.primary_provider] || 0;
+  // Provider weights (0-50 points)
+  // Different providers have different quality levels based on data accuracy
+  score += PROVIDER_QUALITY_SCORES[edition.primary_provider as keyof typeof PROVIDER_QUALITY_SCORES] || 0;
 
-  // Completeness weights (60 points max)
-  if (edition.title) score += 10;
-  if (edition.publisher) score += 5;
-  if (edition.publication_date) score += 5;
-  if (edition.page_count) score += 5;
-  if (edition.cover_urls?.large) score += 10;
-  if (edition.cover_urls?.medium) score += 3;
-  if (edition.cover_urls?.small) score += 2;
-  if (edition.language) score += 5;
-  if (edition.format) score += 5;
+  // Completeness weights (0-50 points total)
+  // Each field contributes based on its importance to edition identification
+  if (edition.title) score += EDITION_FIELD_WEIGHTS.title;
+  if (edition.publisher) score += EDITION_FIELD_WEIGHTS.publisher;
+  if (edition.publication_date) score += EDITION_FIELD_WEIGHTS.publication_date;
+  if (edition.page_count) score += EDITION_FIELD_WEIGHTS.page_count;
+  if (edition.cover_urls?.large) score += EDITION_FIELD_WEIGHTS.cover_large;
+  if (edition.cover_urls?.medium) score += EDITION_FIELD_WEIGHTS.cover_medium;
+  if (edition.cover_urls?.small) score += EDITION_FIELD_WEIGHTS.cover_small;
+  if (edition.language) score += EDITION_FIELD_WEIGHTS.language;
+  if (edition.format) score += EDITION_FIELD_WEIGHTS.format;
 
-  // External ID weights (5 points each)
-  if (edition.openlibrary_edition_id) score += 5;
-  if (edition.google_books_volume_ids?.length) score += 5;
-  if (edition.amazon_asins?.length) score += 5;
+  // External ID weights (5 points each, max 15 points)
+  // These enable cross-referencing with other book databases
+  if (edition.openlibrary_edition_id) score += EXTERNAL_ID_WEIGHT;
+  if (edition.google_books_volume_ids?.length) score += EXTERNAL_ID_WEIGHT;
+  if (edition.amazon_asins?.length) score += EXTERNAL_ID_WEIGHT;
 
-  return Math.min(score, 100);
+  return Math.min(score, QUALITY_SCORE_MAX);
 }
 
 /**
  * Calculate quality score for a work enrichment
+ *
+ * Scoring breakdown:
+ * - Provider quality: 0-50 points (based on data source reliability)
+ * - Field completeness: 0-60 points (based on available metadata)
+ *
+ * Maximum score: 100 points
+ *
+ * Works emphasize description quality more than editions since works
+ * represent the abstract concept of a book, not a specific printing.
+ *
+ * @param work - Work to score
+ * @returns Quality score (0-100)
+ *
+ * @see {@link PROVIDER_QUALITY_SCORES} for provider weights
+ * @see {@link WORK_FIELD_WEIGHTS} for field weights
  */
 export function calculateWorkQuality(work: EnrichWorkRequest): number {
   let score = 0;
 
-  // Provider weights (40 points max)
-  const providerScores: Record<string, number> = {
-    'isbndb': 40,
-    'google-books': 30,
-    'openlibrary': 20,
-    'user-correction': 50,
-  };
-  score += providerScores[work.primary_provider] || 0;
+  // Provider weights (0-50 points)
+  // Different providers have different quality levels based on data accuracy
+  score += PROVIDER_QUALITY_SCORES[work.primary_provider as keyof typeof PROVIDER_QUALITY_SCORES] || 0;
 
-  // Completeness weights
-  if (work.title) score += 10;
-  if (work.description && work.description.length > 50) score += 15;
-  if (work.description && work.description.length > 200) score += 5; // Bonus for long description
-  if (work.original_language) score += 5;
-  if (work.first_publication_year) score += 5;
-  if (work.subject_tags?.length) score += 10;
-  if (work.cover_urls?.large) score += 10;
+  // Completeness weights (0-60 points total)
+  // Works emphasize description and subject tags more than physical attributes
+  if (work.title) score += WORK_FIELD_WEIGHTS.title;
+  if (work.description && work.description.length > DESCRIPTION_MIN_THRESHOLD) {
+    score += WORK_FIELD_WEIGHTS.description;
+  }
+  // Bonus for comprehensive descriptions (>200 chars)
+  if (work.description && work.description.length > DESCRIPTION_LONG_THRESHOLD) {
+    score += WORK_FIELD_WEIGHTS.description_long;
+  }
+  if (work.original_language) score += WORK_FIELD_WEIGHTS.original_language;
+  if (work.first_publication_year) score += WORK_FIELD_WEIGHTS.first_publication_year;
+  if (work.subject_tags?.length) score += WORK_FIELD_WEIGHTS.subject_tags;
+  if (work.cover_urls?.large) score += WORK_FIELD_WEIGHTS.cover_large;
 
-  return Math.min(score, 100);
+  return Math.min(score, QUALITY_SCORE_MAX);
 }
 
 /**
  * Calculate completeness score (percentage of filled fields)
+ *
+ * Evaluates what percentage of expected fields are populated with valid data.
+ * Used to assess metadata completeness for editions, works, and authors.
+ *
+ * Scoring logic:
+ * - Arrays: Must have at least one element
+ * - Objects: Must have at least one non-empty value
+ * - Primitives: Must be non-null and non-empty string
+ *
+ * @param data - Object to evaluate
+ * @param fields - Array of field names to check
+ * @returns Completeness percentage (0-100)
+ *
+ * @example
+ * calculateCompleteness(
+ *   { title: 'Book', publisher: null, page_count: 300 },
+ *   ['title', 'publisher', 'page_count']
+ * ) // Returns 67 (2 of 3 fields filled)
  */
 export function calculateCompleteness(
   data: Record<string, unknown>,
@@ -86,25 +149,41 @@ export function calculateCompleteness(
     return value != null && value !== '';
   });
 
-  return Math.round((filledFields.length / fields.length) * 100);
+  return Math.round((filledFields.length / fields.length) * COMPLETENESS_PERCENTAGE);
 }
 
 /**
  * Validate ISBN format
+ *
+ * Accepts ISBN-10 or ISBN-13 formats with optional hyphens/spaces.
+ * Normalizes by removing separators and uppercasing the check digit.
+ *
+ * Valid formats:
+ * - ISBN-10: 10 digits, last digit can be X (e.g., 043906487X)
+ * - ISBN-13: 13 digits, must start with 978 or 979
+ *
+ * @param isbn - Raw ISBN string
+ * @returns Validation result with normalized ISBN or error message
+ *
+ * @example
+ * validateISBN('978-0-439-06487-3') // { valid: true, normalized: '9780439064873' }
+ * validateISBN('043906487X') // { valid: true, normalized: '043906487X' }
+ * validateISBN('12345') // { valid: false, error: 'Invalid ISBN length: 5...' }
  */
 export function validateISBN(isbn: string | undefined): ISBNValidationResult {
   if (!isbn) {
     return { valid: false, normalized: '', error: 'ISBN is required' };
   }
 
-  // Normalize: remove hyphens, spaces, and uppercase
+  // Normalize: remove hyphens, spaces, and uppercase check digit
   const normalized = isbn.replace(/[^0-9X]/gi, '').toUpperCase();
 
-  if (normalized.length !== 10 && normalized.length !== 13) {
+  // Check length (must be exactly 10 or 13 digits)
+  if (normalized.length !== ISBN_LENGTH_10 && normalized.length !== ISBN_LENGTH_13) {
     return {
       valid: false,
       normalized,
-      error: `Invalid ISBN length: ${normalized.length}. Must be 10 or 13 digits.`,
+      error: `Invalid ISBN length: ${normalized.length}. Must be ${ISBN_LENGTH_10} or ${ISBN_LENGTH_13} digits.`,
     };
   }
 
@@ -113,6 +192,15 @@ export function validateISBN(isbn: string | undefined): ISBNValidationResult {
 
 /**
  * Validate enrichment request
+ *
+ * Validates request body against schema requirements and database constraints.
+ * Checks required fields, data types, and maximum lengths to prevent errors.
+ *
+ * @param body - Request body to validate
+ * @param type - Entity type (edition, work, or author)
+ * @returns Validation result with error messages if invalid
+ *
+ * @see {@link MAX_FIELD_LENGTHS} for field length constraints
  */
 export function validateEnrichmentRequest(
   body: Record<string, unknown> | undefined,
@@ -124,18 +212,7 @@ export function validateEnrichmentRequest(
     return { valid: false, errors: ['Request body is required'] };
   }
 
-  // Maximum field lengths to prevent database errors
-  const maxLengths: Record<string, number> = {
-    title: 500,
-    subtitle: 500,
-    description: 5000,
-    bio: 5000,
-    publisher: 200,
-    format: 50,
-    language: 20,
-  };
-
-  // Validate string field lengths
+  // Validate string field lengths against database constraints
   const validateLength = (field: string, value: unknown, max: number): void => {
     if (value && typeof value === 'string' && value.length > max) {
       errors.push(`${field} exceeds maximum length of ${max} characters`);
@@ -153,19 +230,20 @@ export function validateEnrichmentRequest(
       }
     }
 
+    // Confidence score must be 0-100 percentage
     if (
       body.confidence &&
-      ((body.confidence as number) < 0 || (body.confidence as number) > 100)
+      ((body.confidence as number) < CONFIDENCE_SCORE_MIN || (body.confidence as number) > CONFIDENCE_SCORE_MAX)
     ) {
-      errors.push('confidence must be between 0 and 100');
+      errors.push(`confidence must be between ${CONFIDENCE_SCORE_MIN} and ${CONFIDENCE_SCORE_MAX}`);
     }
 
     // Length validations for edition fields
-    validateLength('title', body.title, maxLengths.title);
-    validateLength('subtitle', body.subtitle, maxLengths.subtitle);
-    validateLength('publisher', body.publisher, maxLengths.publisher);
-    validateLength('format', body.format, maxLengths.format);
-    validateLength('language', body.language, maxLengths.language);
+    validateLength('title', body.title, MAX_FIELD_LENGTHS.title);
+    validateLength('subtitle', body.subtitle, MAX_FIELD_LENGTHS.subtitle);
+    validateLength('publisher', body.publisher, MAX_FIELD_LENGTHS.publisher);
+    validateLength('format', body.format, MAX_FIELD_LENGTHS.format);
+    validateLength('language', body.language, MAX_FIELD_LENGTHS.language);
   }
 
   if (type === 'work') {
@@ -174,10 +252,10 @@ export function validateEnrichmentRequest(
     if (!body.primary_provider) errors.push('primary_provider is required');
 
     // Length validations for work fields
-    validateLength('title', body.title, maxLengths.title);
-    validateLength('subtitle', body.subtitle, maxLengths.subtitle);
-    validateLength('description', body.description, maxLengths.description);
-    validateLength('original_language', body.original_language, maxLengths.language);
+    validateLength('title', body.title, MAX_FIELD_LENGTHS.title);
+    validateLength('subtitle', body.subtitle, MAX_FIELD_LENGTHS.subtitle);
+    validateLength('description', body.description, MAX_FIELD_LENGTHS.description);
+    validateLength('original_language', body.original_language, MAX_FIELD_LENGTHS.language);
   }
 
   if (type === 'author') {
@@ -186,9 +264,9 @@ export function validateEnrichmentRequest(
     if (!body.primary_provider) errors.push('primary_provider is required');
 
     // Length validations for author fields
-    validateLength('name', body.name, maxLengths.title);
-    validateLength('bio', body.bio, maxLengths.bio);
-    validateLength('nationality', body.nationality, maxLengths.publisher);
+    validateLength('name', body.name, MAX_FIELD_LENGTHS.title);
+    validateLength('bio', body.bio, MAX_FIELD_LENGTHS.bio);
+    validateLength('nationality', body.nationality, MAX_FIELD_LENGTHS.publisher);
   }
 
   return { valid: errors.length === 0, errors };
@@ -249,27 +327,39 @@ export function flattenFieldKeys(
 
 /**
  * Convert priority from string or integer to integer (1-10)
+ *
+ * Priority levels (1 = most urgent, 10 = least urgent):
+ * - urgent: 1
+ * - high: 3
+ * - medium/normal: 5 (default)
+ * - low: 7
+ * - background: 9
+ *
+ * Numeric priorities are clamped to 1-10 range.
+ *
+ * @param priority - Priority as string name or numeric value
+ * @returns Normalized priority (1-10)
+ *
+ * @see {@link PRIORITY_LEVELS} for string-to-number mapping
+ * @see {@link PRIORITY_DEFAULT} for default value
+ *
+ * @example
+ * normalizePriority('urgent') // 1
+ * normalizePriority(15) // 10 (clamped to max)
+ * normalizePriority(undefined) // 5 (default)
  */
 export function normalizePriority(priority: string | number | undefined): number {
-  if (!priority) return 5; // Default to medium
+  // Default to medium priority if not specified
+  if (!priority) return PRIORITY_DEFAULT;
 
-  // If already a number, validate range
+  // If already a number, validate range (clamp to 1-10)
   if (typeof priority === 'number') {
-    return Math.max(1, Math.min(10, priority));
+    return Math.max(PRIORITY_MIN, Math.min(PRIORITY_MAX, priority));
   }
 
-  // Convert string to integer
-  const priorityMap: Record<string, number> = {
-    urgent: 1,
-    high: 3,
-    medium: 5,
-    normal: 5,
-    low: 7,
-    background: 9,
-  };
-
-  const normalized = priorityMap[priority.toLowerCase()];
-  return normalized || 5; // Default to medium if unknown string
+  // Convert string to integer using predefined levels
+  const normalized = PRIORITY_LEVELS[priority.toLowerCase() as keyof typeof PRIORITY_LEVELS];
+  return normalized || PRIORITY_DEFAULT; // Default to medium if unknown string
 }
 
 /**

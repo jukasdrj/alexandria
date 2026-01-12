@@ -1,0 +1,357 @@
+# Task: Alexandria Ratings Infrastructure for bendv3 Recommendations
+
+## Goal
+
+Implement ratings infrastructure in Alexandria to unblock bendv3's personalized recommendation system (90% complete, blocked on Alexandria endpoints).
+
+**What we're building:**
+- Database aggregation layer for OpenLibrary ratings (100M+ ratings → composite stats)
+- 4 Worker API endpoints for bendv3 consumption
+- High-performance queries optimized for Hyperdrive connection pooling
+- Zero-downtime deployment with rollback capability
+
+**Why it matters:**
+- bendv3 recommendation system is production-ready but blocked
+- Enables personalized book discovery for 54.8M editions
+- No external API costs (all internal PostgreSQL data)
+- Foundation for future rating-based features
+
+## Context
+
+**Current State:**
+- Alexandria: 54.8M editions, 33.1M works, 19.5M with subjects (59%)
+- OpenLibrary `ratings` table exists (~100M ratings, 1-5 stars)
+- No aggregation layer or composite ratings
+- bendv3 RecommendationService complete (573 lines), waiting for data
+
+**Problem:**
+- bendv3 needs 4 endpoints that don't exist yet:
+  1. `GET /works/top-rated` - Top books by composite rating
+  2. `GET /works/:workKey/ratings` - Rating data for specific work
+  3. `GET /api/recommendations/subjects` - Bulk subject fetch
+  4. `GET /api/recommendations/similar` - Similar books by subject overlap
+
+**Success Criteria:**
+- ✅ Database migration complete without downtime
+- ✅ All 4 endpoints deployed and returning data
+- ✅ Query performance: P50 <100ms, P99 <400ms
+- ✅ bendv3 integration tests passing
+- ✅ Zero regression on existing Alexandria APIs
+- ✅ Production monitoring showing <1% error rate
+
+## Implementation Steps
+
+### Phase 1: Database Schema & Aggregation (4 hours)
+
+**1.1 Schema Design**
+- [ ] Create `enriched_work_stats` table (work_key, rating_avg, rating_count, rating_dist, updated_at)
+- [ ] Design composite index for top-rated queries: `(rating_avg DESC, rating_count DESC, work_key ASC)`
+- [ ] Add table comment documentation
+- [ ] Verify no conflicts with existing tables
+
+**1.2 SQL Development**
+- [ ] Write aggregation query with quality threshold (min 3 ratings)
+- [ ] Test on small dataset (1000 works) in psql
+- [ ] Run EXPLAIN ANALYZE to validate index usage
+- [ ] Verify histogram generation (rating_dist JSONB)
+
+**1.3 Migration Execution**
+- [ ] Create migration file: `migrations/011_add_work_stats.sql`
+- [ ] Run CREATE TABLE in psql (test on staging)
+- [ ] Run CREATE INDEX CONCURRENTLY (no locks)
+- [ ] Execute aggregation query (monitor progress)
+- [ ] VACUUM ANALYZE enriched_work_stats
+- [ ] Verify row count matches expectation (~3M works with >=3 ratings)
+
+**1.4 Data Quality Validation**
+- [ ] Check rating_avg distribution (should be bell curve around 3.5-4.0)
+- [ ] Verify rating_count thresholds eliminate noise
+- [ ] Sample 100 random works, compare to source ratings table
+- [ ] Test edge cases (1 rating, 10000 ratings, all 1-star)
+
+### Phase 2: Worker API Endpoints (6 hours)
+
+**2.1 Zod Schema Design**
+- [ ] Create `worker/src/schemas/ratings.ts`
+- [ ] Define `WorkStatsSchema` for rating response
+- [ ] Define `TopRatedParamsSchema` with pagination
+- [ ] Define `SimilarBooksParamsSchema` with filters
+- [ ] Add OpenAPI annotations for auto-docs
+
+**2.2 Endpoint 1: GET /works/top-rated**
+- [ ] Create route in `worker/src/routes/ratings.ts`
+- [ ] Implement query using idx_stats_top_rated index
+- [ ] Add pagination (limit/offset, max offset 1000)
+- [ ] Add minRatings filter (default: 10)
+- [ ] KV caching: 1 hour TTL
+- [ ] Error handling: empty results, invalid params
+- [ ] Analytics tracking: cache hit/miss rate
+
+**2.3 Endpoint 2: GET /works/:workKey/ratings**
+- [ ] Add route with workKey path param validation
+- [ ] Implement PK lookup query
+- [ ] KV caching: 1 hour TTL
+- [ ] Handle not found (404 vs 200 with null)
+- [ ] Response includes rating histogram
+- [ ] Analytics: track lookup frequency by work
+
+**2.4 Endpoint 3: GET /api/recommendations/subjects**
+- [ ] Add route with bulk keys query param (comma-separated)
+- [ ] Validate max 100 keys per request
+- [ ] Query enriched_works with ANY($1::text[])
+- [ ] Return work_key → subject_tags mapping
+- [ ] KV caching: 24 hour TTL (subjects change rarely)
+- [ ] Handle missing works gracefully (partial results)
+
+**2.5 Endpoint 4: GET /api/recommendations/similar**
+- [ ] Add route with workKey param + filters
+- [ ] Query: GIN overlap (&&) + rating filter
+- [ ] Limit target subjects to top 5 (performance)
+- [ ] Filter by rating_count > 50 (quality)
+- [ ] Sort by overlap count DESC, rating_avg DESC
+- [ ] Limit 20 results
+- [ ] KV caching: 6 hour TTL
+- [ ] Fallback if no overlap found (top-rated from same subject)
+
+**2.6 Integration & Router**
+- [ ] Register routes in `worker/src/index.ts`
+- [ ] Add to OpenAPI spec (auto-generated)
+- [ ] Update `worker/src/env.ts` with types
+- [ ] Add rate limiting (existing multi-tier system)
+- [ ] Test with curl/Postman (all 4 endpoints)
+
+### Phase 3: Testing & Validation (4 hours)
+
+**3.1 Unit Tests**
+- [ ] Schema validation tests (Zod edge cases)
+- [ ] Query builder tests (SQL injection protection)
+- [ ] Caching logic tests (TTL, invalidation)
+- [ ] Error handling tests (500 → graceful degradation)
+- [ ] Pagination tests (offset limits, cursor stability)
+
+**3.2 Integration Tests**
+- [ ] Test with real PostgreSQL data (Hyperdrive connection)
+- [ ] Verify response formats match bendv3 expectation
+- [ ] Test cache hit/miss scenarios
+- [ ] Test concurrent requests (Workers isolate behavior)
+- [ ] Test quota/rate limit enforcement
+
+**3.3 Performance Validation**
+- [ ] Run EXPLAIN ANALYZE on all queries
+- [ ] Measure P50/P95/P99 latency (Wrangler tail)
+- [ ] Load test: 100 concurrent requests
+- [ ] Verify index usage (no sequential scans)
+- [ ] Monitor Worker CPU time (<100ms target)
+
+**3.4 bendv3 Integration**
+- [ ] Share staging endpoint URLs with bendv3 team
+- [ ] Validate JSON schema matches RecommendationService expectation
+- [ ] Test full recommendation flow (preferences → ratings → subjects → similar)
+- [ ] Verify error handling (no ratings/preferences)
+- [ ] Load test full pipeline (bendv3 → Alexandria → response)
+
+### Phase 4: Deployment & Monitoring (1 hour)
+
+**4.1 Pre-Deployment Checklist**
+- [ ] All tests passing (unit + integration)
+- [ ] OpenAPI spec updated
+- [ ] CHANGELOG.md updated with new endpoints
+- [ ] docs/api/ documentation added
+- [ ] Rollback plan documented
+
+**4.2 Production Deployment**
+- [ ] Apply database migration to production
+- [ ] Deploy Worker with feature flag `ENABLE_RATINGS_API=true`
+- [ ] Smoke test all 4 endpoints in production
+- [ ] Monitor error rates (first 30 minutes)
+- [ ] Verify cache hit rates in Analytics
+
+**4.3 Post-Deployment Monitoring**
+- [ ] Track P99 latency (target: <400ms)
+- [ ] Monitor error rate (target: <1%)
+- [ ] Check database CPU usage (no spikes)
+- [ ] Verify no impact on existing endpoints
+- [ ] Alert on query performance degradation
+
+**4.4 bendv3 Notification**
+- [ ] Update GitHub issue #258 with production endpoints
+- [ ] Provide API documentation link
+- [ ] Share performance metrics (P50/P99)
+- [ ] Schedule integration testing window
+- [ ] Coordinate go-live timeline
+
+## Risks & Mitigations
+
+| Risk | Impact | Probability | Mitigation |
+|------|--------|-------------|------------|
+| **Aggregation locks table** | Production outage | Low | New table, no locks on existing reads |
+| **100M ratings processing too slow** | Migration takes days | Medium | Batch by work_key range, monitor WAL growth |
+| **"Similar" query timeout** | 500 errors for users | Medium | Limit subject array to 5, filter by rating_count >50 |
+| **Deep pagination performance cliff** | Slow queries at offset >1000 | High | Hard limit offset to 1000, encourage cursor-based |
+| **Index bloat** | Slow queries over time | Low | VACUUM ANALYZE after aggregation, monitor size |
+| **Cache invalidation bugs** | Stale data served | Medium | Short TTLs (1-6 hours), manual invalidation endpoint |
+| **bendv3 schema mismatch** | Integration fails | Medium | Share Zod schemas, validate with TypeScript types |
+| **Hyperdrive connection exhaustion** | 500 errors | Low | Request-scoped connections, existing pooling |
+
+## Files Modified
+
+**Database:**
+- `migrations/011_add_work_stats.sql` (NEW) - Schema + aggregation
+
+**Worker Code:**
+- `worker/src/routes/ratings.ts` (NEW) - 4 endpoint implementations
+- `worker/src/schemas/ratings.ts` (NEW) - Zod validation
+- `worker/src/index.ts` - Register routes
+- `worker/src/env.ts` - Type definitions
+
+**Documentation:**
+- `docs/api/RATINGS-ENDPOINTS.md` (NEW) - API documentation
+- `CHANGELOG.md` - Release notes
+- `README.md` - Update feature list
+
+**Tests:**
+- `worker/src/routes/__tests__/ratings.test.ts` (NEW) - Unit tests
+- `worker/src/services/__tests__/ratings-integration.test.ts` (NEW)
+
+## Testing Strategy
+
+**Unit Tests:**
+- Zod schema validation (valid/invalid inputs)
+- SQL query builder (parameterization, escaping)
+- Cache key generation (consistency)
+- Pagination logic (offset/limit validation)
+- Error handling (graceful degradation)
+
+**Integration Tests:**
+- Real PostgreSQL queries via Hyperdrive
+- Cache hit/miss scenarios with KV
+- Concurrent request handling
+- Rate limit enforcement
+- Response schema validation
+
+**Performance Tests:**
+- EXPLAIN ANALYZE for all queries
+- P50/P95/P99 latency measurements
+- Load testing: 100 concurrent users
+- Cold start vs warm query comparison
+- Worker CPU time profiling
+
+**bendv3 E2E:**
+- Full recommendation flow
+- Cold start (preferences only)
+- Preference-based (with ratings)
+- Edge cases (no data, single rating)
+- Error scenarios (404, 429, 500)
+
+## Performance Targets
+
+| Endpoint | P50 | P99 | Optimization |
+|----------|-----|-----|--------------|
+| `/works/top-rated` | <15ms | <40ms | Index scan, KV cache |
+| `/works/:workKey/ratings` | <5ms | <15ms | PK lookup, 1h cache |
+| `/api/recommendations/subjects` | <20ms | <60ms | Bulk ANY query |
+| `/api/recommendations/similar` | <150ms | <400ms | GIN overlap + rating filter |
+
+**Worker Resource Limits:**
+- CPU time: <100ms per request (300s limit)
+- Memory: <50MB per request (128MB limit)
+- Hyperdrive connections: <10 per request (50 pool)
+
+**Database Impact:**
+- New table size: ~100MB (3M rows × 30 bytes)
+- Index size: ~50MB
+- Query concurrency: No impact (read-only)
+- Replication lag: <1s (monitoring)
+
+## Dependencies
+
+**External:**
+- None (all internal PostgreSQL data)
+
+**Internal (Alexandria):**
+- `enriched_works.subject_tags` - Must have GIN index
+- Hyperdrive connection pooling - Already configured
+- KV caching infrastructure - Already exists
+- Analytics Engine - Already configured
+
+**bendv3 (Consumer):**
+- Depends on this implementation
+- RecommendationService expects specific JSON schema
+- Will integrate after staging validation
+
+## Rollback Plan
+
+**If deployment fails:**
+1. Set `ENABLE_RATINGS_API=false` (feature flag)
+2. Redeploy previous Worker version
+3. Database rollback NOT needed (new table, zero impact)
+4. Investigate errors in Wrangler logs
+5. Fix issues, redeploy with feature flag
+
+**Monitoring triggers for rollback:**
+- Error rate >5% in first hour
+- P99 latency >1s consistently
+- Database CPU >80% for 10+ minutes
+- Existing endpoints show performance degradation
+
+## Timeline Estimate
+
+**Phase 1: Database** - 4 hours
+- Schema design: 1 hour
+- Aggregation testing: 1 hour
+- Migration execution: 1 hour
+- Validation: 1 hour
+
+**Phase 2: Worker API** - 6 hours
+- Zod schemas: 1 hour
+- Endpoints 1-2: 2 hours
+- Endpoints 3-4: 2 hours
+- Integration: 1 hour
+
+**Phase 3: Testing** - 4 hours
+- Unit tests: 1.5 hours
+- Integration tests: 1 hour
+- Performance validation: 1 hour
+- bendv3 integration: 0.5 hours
+
+**Phase 4: Deployment** - 1 hour
+- Pre-deployment: 15 minutes
+- Production deployment: 15 minutes
+- Monitoring: 30 minutes
+
+**Total: ~15 hours (2 working days)**
+
+**Critical Path:**
+1. Database migration (blocking)
+2. Endpoint 1-2 implementation (blocking bendv3)
+3. Endpoint 3-4 implementation (required for recommendations)
+4. bendv3 integration testing (final gate)
+
+## Success Metrics
+
+**Immediate (Week 1):**
+- [ ] All 4 endpoints return 200 OK
+- [ ] P99 latency <400ms consistently
+- [ ] Error rate <1%
+- [ ] bendv3 integration tests passing
+- [ ] Zero regression on existing APIs
+
+**Short-term (Week 2-4):**
+- [ ] Cache hit rate >80%
+- [ ] Database CPU impact <5%
+- [ ] bendv3 recommendations live in production
+- [ ] User feedback positive (from bendv3 team)
+
+**Long-term (Month 2-3):**
+- [ ] Query performance stable
+- [ ] No index bloat issues
+- [ ] bendv3 using recommendations at scale
+- [ ] Foundation for Phase 2 features (collaborative filtering)
+
+---
+
+**Status:** Planning Phase
+**Priority:** HIGH (blocking bendv3 launch)
+**Owner:** Alexandria Team
+**Stakeholder:** bendv3 Recommendation System
+**GitHub Issue:** bendv3#258

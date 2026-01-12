@@ -12,6 +12,14 @@
  */
 
 import type { Logger } from '../../lib/logger.js';
+import {
+  ISBNDB_DAILY_QUOTA,
+  ISBNDB_QUOTA_BUFFER,
+  BULK_OPERATION_MAX_CALLS,
+  CRON_QUOTA_MULTIPLIER,
+  getEffectiveQuotaLimit,
+  getConservativeBatchSize,
+} from '../lib/constants.js';
 
 export interface QuotaStatus {
   used_today: number;
@@ -32,9 +40,17 @@ export interface QuotaCheckResult {
 export class QuotaManager {
   private kv: KVNamespace;
   private logger: Logger;
-  private readonly DAILY_LIMIT = 15000; // ISBNdb Premium quota
-  private readonly SAFETY_BUFFER = 2000; // Keep 2K calls in reserve (use 13K max)
+
+  /** ISBNdb Premium daily quota limit */
+  private readonly DAILY_LIMIT = ISBNDB_DAILY_QUOTA;
+
+  /** Safety buffer (reserved calls for manual operations) */
+  private readonly SAFETY_BUFFER = ISBNDB_QUOTA_BUFFER;
+
+  /** KV key for daily call counter */
   private readonly QUOTA_KEY = 'isbndb_daily_calls';
+
+  /** KV key for last reset date */
   private readonly RESET_KEY = 'isbndb_quota_last_reset';
 
   constructor(kv: KVNamespace, logger: Logger) {
@@ -107,9 +123,22 @@ export class QuotaManager {
 
   /**
    * Reserve quota for API calls
-   * Note: This uses optimistic concurrency - there's a small race condition window,
-   * but it's mitigated by the 2K safety buffer (13K limit vs 15K actual quota).
-   * @param requestCount Number of API calls to reserve
+   *
+   * Uses optimistic concurrency with safety buffer to mitigate race conditions.
+   * The 2K safety buffer (13K effective limit vs 15K actual quota) ensures we
+   * never exceed the hard ISBNdb limit even with concurrent requests.
+   *
+   * Race condition scenario:
+   * 1. Request A checks quota: 12,900 used, 100 remaining (within buffer)
+   * 2. Request B checks quota: 12,900 used, 100 remaining (within buffer)
+   * 3. Request A reserves 50 calls → 12,950 used
+   * 4. Request B reserves 50 calls → 13,000 used
+   * 5. Total: 13,000 used (still under 13K effective limit)
+   *
+   * Worst case: Multiple concurrent requests could push usage to ~13,100,
+   * but safety buffer prevents exceeding 15K hard limit.
+   *
+   * @param requestCount - Number of API calls to reserve
    * @returns true if successfully reserved, false if quota exhausted or KV error
    */
   async reserveQuota(requestCount: number): Promise<boolean> {
@@ -292,7 +321,24 @@ export class QuotaManager {
 
   /**
    * Get estimated safe batch size based on remaining quota
-   * Useful for dynamic batch sizing in harvesting operations
+   *
+   * Calculates optimal batch size for operations, ensuring we don't
+   * exhaust quota and leave room for other operations.
+   *
+   * Conservative approach: Uses half of remaining quota buffer.
+   * This leaves room for concurrent operations and emergency fixes.
+   *
+   * @param maxBatchSize - Maximum batch size (default: 1000 ISBNs)
+   * @returns Safe batch size (0 if quota exhausted)
+   *
+   * @example
+   * // Quota status: 500 calls remaining in buffer
+   * getSafeBatchSize(1000)
+   * // Returns: 250,000 ISBNs (250 calls × 1000 ISBNs/call)
+   *
+   * // Quota status: 10 calls remaining in buffer
+   * getSafeBatchSize(1000)
+   * // Returns: 5,000 ISBNs (5 calls × 1000 ISBNs/call)
    */
   async getSafeBatchSize(maxBatchSize: number = 1000): Promise<number> {
     const status = await this.getQuotaStatus();
@@ -301,12 +347,8 @@ export class QuotaManager {
       return 0;
     }
 
-    // Conservative approach: use half of remaining quota for this batch
-    const conservativeQuota = Math.floor(status.buffer_remaining / 2);
-
-    // ISBNdb Premium can handle 1000 ISBNs per call
-    // So batch size = min(maxBatchSize, remaining quota * 1000)
-    return Math.min(maxBatchSize, conservativeQuota * 1000);
+    // Use helper function from constants
+    return getConservativeBatchSize(status.buffer_remaining, maxBatchSize);
   }
 
   /**
@@ -320,26 +362,29 @@ export class QuotaManager {
       return result;
     }
 
-    // Additional operational rules
+    // Additional operational rules (operation-specific limits)
     switch (operation) {
       case 'cron':
-        // Cron jobs should be more conservative (leave room for manual operations)
-        if (result.status.buffer_remaining < estimatedCalls * 2) {
+        // Cron jobs require 2x buffer (CRON_QUOTA_MULTIPLIER)
+        // Ensures manual operations always have available quota
+        // Example: Cron needs 50 calls → requires 100 calls buffer remaining
+        if (result.status.buffer_remaining < estimatedCalls * CRON_QUOTA_MULTIPLIER) {
           return {
             allowed: false,
             status: result.status,
-            reason: `Cron operation blocked: need ${estimatedCalls * 2} buffer calls, only ${result.status.buffer_remaining} remaining`
+            reason: `Cron operation blocked: need ${estimatedCalls * CRON_QUOTA_MULTIPLIER} buffer calls, only ${result.status.buffer_remaining} remaining`
           };
         }
         break;
 
       case 'bulk_author':
-        // Bulk operations can use more quota but should check if it's a reasonable batch
-        if (estimatedCalls > 100) {
+        // Bulk operations limited to BULK_OPERATION_MAX_CALLS
+        // Prevents runaway operations from exhausting daily quota
+        if (estimatedCalls > BULK_OPERATION_MAX_CALLS) {
           return {
             allowed: false,
             status: result.status,
-            reason: `Bulk operation too large: ${estimatedCalls} calls requested, max 100 recommended`
+            reason: `Bulk operation too large: ${estimatedCalls} calls requested, max ${BULK_OPERATION_MAX_CALLS} allowed`
           };
         }
         break;

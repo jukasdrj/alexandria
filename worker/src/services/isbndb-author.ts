@@ -79,7 +79,11 @@ export async function fetchAuthorBibliography(
   // Check quota for maximum possible calls (maxPages)
   const quota = await quotaManager.checkQuota(maxPages, true);
   if (!quota.allowed) {
-    console.warn(`[ISBNdbAuthor] ISBNdb quota exhausted (${quota.status.used_today}/${quota.status.limit}). Skipping ${authorName}`);
+    logger.warn('ISBNdb quota exhausted, skipping author', {
+      author: authorName,
+      used_today: quota.status.used_today,
+      limit: quota.status.limit,
+    });
     return {
       author: authorName,
       books_found: 0,

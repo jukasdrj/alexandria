@@ -10,6 +10,7 @@
 
 import type { Env } from '../../env.js';
 import type { Logger } from '../../../lib/logger.js';
+import { ISBN_RESOLUTION_SIMILARITY_THRESHOLD } from '../../lib/constants.js';
 
 /**
  * ISBN resolution result
@@ -152,8 +153,10 @@ export function calculateStringSimilarity(str1: string, str2: string): number {
  *
  * Accept matches with >= 70% similarity (0.7).
  * This allows for minor variations while preventing false positives.
+ *
+ * @see {@link ISBN_RESOLUTION_SIMILARITY_THRESHOLD} in constants.ts
  */
-export const SIMILARITY_THRESHOLD = 0.7;
+export const SIMILARITY_THRESHOLD = ISBN_RESOLUTION_SIMILARITY_THRESHOLD;
 
 /**
  * Validate that fetched metadata matches the original query

@@ -87,6 +87,7 @@ export const registerOpenAPIDoc = (
       };
 
       // Collect OpenAPI specs from all sub-routers
+      const logger = c.get('logger');
       for (let i = 0; i < subRouters.length; i++) {
         const router = subRouters[i];
         try {
@@ -95,7 +96,10 @@ export const registerOpenAPIDoc = (
           // Merge paths
           if (subDoc.paths) {
             const pathCount = Object.keys(subDoc.paths).length;
-            console.log(`[OpenAPI] Router ${i} contributed ${pathCount} paths`);
+            logger.debug('OpenAPI router contributed paths', {
+              router_index: i,
+              path_count: pathCount,
+            });
             Object.assign(mergedDoc.paths || {}, subDoc.paths);
           }
 
@@ -110,13 +114,19 @@ export const registerOpenAPIDoc = (
         } catch (e) {
           // Log which router failed with error details
           const errorMsg = e instanceof Error ? e.message : String(e);
-          console.warn(`[OpenAPI] Router ${i} failed: ${errorMsg}`);
+          logger.warn('OpenAPI router failed', {
+            router_index: i,
+            error: errorMsg,
+          });
         }
       }
 
       return c.json(mergedDoc);
     } catch (error) {
-      console.error('OpenAPI generation error:', error);
+      c.get('logger').error('OpenAPI generation error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       return c.json({
         error: 'Failed to generate OpenAPI spec',
         message: error instanceof Error ? error.message : 'Unknown error',

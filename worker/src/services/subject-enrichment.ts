@@ -93,10 +93,10 @@ export async function updateWorkSubjects(
         provider,
         categories_count: newCategories.length,
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
-    } else {
-      console.error(`[SubjectEnrichment] Failed to update work ${workKey}:`, error);
     }
+    // Note: If logger not provided, error is silently handled (subject enrichment is optional)
   }
 }
 

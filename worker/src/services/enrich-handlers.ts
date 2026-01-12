@@ -65,9 +65,11 @@ export async function handleEnrichEdition(c: Context<AppBindings>): Promise<Resp
     const result = await enrichEdition(sql, body, c.get('logger'), c.env);
 
     // Log successful enrichment
-    console.log(
-      `Enriched edition ${result.isbn} (${result.action}, quality +${result.quality_improvement})`
-    );
+    c.get('logger').info('Enriched edition', {
+      isbn: result.isbn,
+      action: result.action,
+      quality_improvement: result.quality_improvement,
+    });
 
     return c.json(
       {
@@ -77,7 +79,10 @@ export async function handleEnrichEdition(c: Context<AppBindings>): Promise<Resp
       result.action === 'created' ? 201 : 200
     );
   } catch (error) {
-    console.error('handleEnrichEdition error:', error);
+    c.get('logger').error('handleEnrichEdition error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return c.json(
       {
         success: false,
@@ -127,7 +132,10 @@ export async function handleEnrichWork(c: Context<AppBindings>): Promise<Respons
       result.action === 'created' ? 201 : 200
     );
   } catch (error) {
-    console.error('handleEnrichWork error:', error);
+    c.get('logger').error('handleEnrichWork error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return c.json(
       {
         success: false,
@@ -167,7 +175,7 @@ export async function handleEnrichAuthor(c: Context<AppBindings>): Promise<Respo
     const sql = c.get('sql');
 
     // Enrich author
-    const result = await enrichAuthor(sql, body);
+    const result = await enrichAuthor(sql, body, c.get('logger'));
 
     return c.json(
       {
@@ -177,7 +185,10 @@ export async function handleEnrichAuthor(c: Context<AppBindings>): Promise<Respo
       result.action === 'created' ? 201 : 200
     );
   } catch (error) {
-    console.error('handleEnrichAuthor error:', error);
+    c.get('logger').error('handleEnrichAuthor error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return c.json(
       {
         success: false,
@@ -258,11 +269,13 @@ export async function handleQueueEnrichment(c: Context<AppBindings>): Promise<Re
     const sql = c.get('sql');
 
     // Queue enrichment
-    const result = await queueEnrichment(sql, body);
+    const result = await queueEnrichment(sql, body, c.get('logger'));
 
-    console.log(
-      `Queued ${body.entity_type} enrichment for ${body.entity_key} (queue_id: ${result.queue_id})`
-    );
+    c.get('logger').info('Queued enrichment', {
+      entity_type: body.entity_type,
+      entity_key: body.entity_key,
+      queue_id: result.queue_id,
+    });
 
     return c.json(
       {
@@ -272,7 +285,10 @@ export async function handleQueueEnrichment(c: Context<AppBindings>): Promise<Re
       201
     );
   } catch (error) {
-    console.error('handleQueueEnrichment error:', error);
+    c.get('logger').error('handleQueueEnrichment error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return c.json(
       {
         success: false,
@@ -306,7 +322,7 @@ export async function handleGetEnrichmentStatus(c: Context<AppBindings>): Promis
     const sql = c.get('sql');
 
     // Get job status
-    const status = await getEnrichmentStatus(sql, jobId);
+    const status = await getEnrichmentStatus(sql, jobId, c.get('logger'));
 
     return c.json(
       {
@@ -326,7 +342,11 @@ export async function handleGetEnrichmentStatus(c: Context<AppBindings>): Promis
       );
     }
 
-    console.error('handleGetEnrichmentStatus error:', error);
+    c.get('logger').error('handleGetEnrichmentStatus error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      jobId,
+    });
     return c.json(
       {
         success: false,

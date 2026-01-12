@@ -680,6 +680,11 @@ export async function queueEnrichment(
     `;
 
     const position = parseInt(String(positionResult[0].position), 10) + 1;
+
+    // Estimate processing time based on queue position
+    // - Top 10: 1-5 minutes (fast processing)
+    // - Top 50: 5-15 minutes (moderate wait)
+    // - Beyond 50: 15-30 minutes (longer wait)
     const estimatedTime =
       position <= 10 ? '1-5 minutes' : position <= 50 ? '5-15 minutes' : '15-30 minutes';
 

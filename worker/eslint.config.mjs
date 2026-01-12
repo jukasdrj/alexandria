@@ -51,6 +51,9 @@ export default tseslint.config(
       'no-implied-eval': 'error',
       'no-new-func': 'error',
 
+      // Error handling (Issue #128)
+      'no-console': 'error', // Prevent console.* in production code
+
       // Style rules OFF - we don't care about formatting
       '@typescript-eslint/consistent-type-definitions': 'off',
       '@typescript-eslint/prefer-nullish-coalescing': 'off',
@@ -66,5 +69,17 @@ export default tseslint.config(
       '.wrangler/**',
       '**/*.js', // Only lint TypeScript files
     ],
+  },
+  {
+    // Allow console in test files, migration scripts, and development scripts
+    files: [
+      '**/__tests__/**',
+      '**/*.test.ts',
+      '**/routes/migrate.ts',
+      '**/scripts/**',
+    ],
+    rules: {
+      'no-console': 'off',
+    },
   }
 );

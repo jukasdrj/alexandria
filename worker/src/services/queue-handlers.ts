@@ -38,6 +38,7 @@ import {
   GeminiProvider,
   XaiProvider,
 } from '../../lib/external-services/providers/index.js';
+import { COVER_PROVIDER_TIMEOUT_MS } from '../lib/constants.js';
 
 // Cloudflare Queue types
 interface QueueMessage<T = unknown> {
@@ -98,9 +99,10 @@ export async function processCoverQueue(
   const quotaManager = new QuotaManager(env.QUOTA_KV);
 
   // Create cover fetch orchestrator with shared registry (reuses module-level registry)
+  // Timeout per provider prevents slow providers from blocking entire batch
   const coverOrchestrator = new CoverFetchOrchestrator(providerRegistry, {
     enableLogging: true,
-    providerTimeoutMs: 10000, // 10s timeout per provider
+    providerTimeoutMs: COVER_PROVIDER_TIMEOUT_MS, // 10s timeout per provider
   });
 
   // Create postgres connection for updating cover URLs after processing
