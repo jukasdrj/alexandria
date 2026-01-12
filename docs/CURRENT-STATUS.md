@@ -1,6 +1,6 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 12, 2026
+**Last Updated:** January 12, 2026 (Updated: Issue priority review)
 
 ## 🎯 Active Issues
 
@@ -28,13 +28,22 @@
    - **Action**: Deploy with `dry_run: false` to start production backfill
 
 ### P2 - MEDIUM Priority
-3. **#118** - Auto-healing/recovery system for bulk author harvesting
+3. **#153** - Author JIT Enrichment System - Multi-Phase Implementation
+   - Phase 1 (JIT enrichment) ✅ COMPLETE (deployed Jan 7, 2026)
+   - Phase 1 validation period: Jan 7 - Feb 6 (30 days)
+   - Phase 2 (selective background enrichment) planned for early February
+   - Phases 3-5 deferred pending Phase 1 validation
 
-### P3 - LOW Priority (Future Enhancements)
-4. **#117** - Semantic search with Cloudflare Vectorize
-5. **#116** - Search analytics tracking with Analytics Engine
-6. **#113** - Wikipedia + LLM fallback for authors without Wikidata
-7. **#100** - GitHub Actions for automated harvesting
+### P3 - LOW Priority
+4. **#118** - Auto-healing/recovery system for bulk author harvesting
+   - **Priority downgraded** (Jan 12) - JIT enrichment (#153 Phase 1) reduces urgency
+   - Script still lacks auto-retry, but 81.8% success rate acceptable for one-time ops
+   - Defer implementation until bulk harvesting becomes critical again
+
+5. **#117** - Semantic search with Cloudflare Vectorize
+6. **#116** - Search analytics tracking with Analytics Engine
+7. **#113** - Wikipedia + LLM fallback for authors without Wikidata
+8. **#100** - GitHub Actions for automated harvesting
 
 ---
 
@@ -138,7 +147,7 @@
 
 ---
 
-### Author Just-in-Time Enrichment (COMPLETED - Jan 7) 🎉
+### Author Just-in-Time Enrichment - Phase 1 (COMPLETED - Jan 7) 🎉
 **Implemented view-triggered automatic author enrichment system:**
 
 **Overview:**
@@ -161,7 +170,7 @@
 - `needsEnrichment()` logic in `author-service.ts`
 - Circuit breakers at 85% (halt all) and 70% (halt low/medium)
 - Heat score formula: `(view_count * 10) + (book_count * 0.5) + recency_boost`
-- Queue handler in `queue-handlers.ts` with full ISBNdb flow
+- Queue handler in `queue-handlers.ts` with Wikidata integration
 
 **Files Modified:**
 - `worker/src/routes/authors.ts` - JIT trigger on GET endpoint
@@ -174,10 +183,13 @@
 **Documentation:**
 - Full feature docs: `docs/features/AUTHOR-JIT-ENRICHMENT.md`
 - Architecture diagrams, monitoring guide, troubleshooting
-- Phased roadmap (Phase 1 complete, Phase 2-5 planned)
+- Phased roadmap: See issue #153
 
-**Status:** DEPLOYED - awaiting production validation
-**Next Steps:** Phase 2 (selective background enrichment), Phase 3 (auto-bibliography), Phase 4 (search-triggered), Phase 5 (coverage dashboard)
+**Status:** Phase 1 DEPLOYED - validation period Jan 7 - Feb 6 (30 days)
+**Next Steps:**
+- Monitor Phase 1 metrics through Feb 6
+- Phase 2 (selective background enrichment) planned for early February
+- See issue #153 for full roadmap
 
 ### #150: Dry-Run Validation & Baseline Testing (COMPLETED - Jan 7-8) 🎉
 **Successfully validated Gemini backfill system with outstanding results:**
