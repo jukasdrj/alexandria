@@ -1,6 +1,6 @@
 {
   "name": "alexandria-worker",
-  "version": "2.4.0",
+  "version": "2.6.0",
   "type": "module",
   "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types, Zod validation, OpenAPI spec, intelligent search, and external ID resolution",
   "main": "src/index.ts",
