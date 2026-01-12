@@ -18,3 +18,4 @@ export { ISBNdbProvider } from './isbndb-provider.js';
 export { OpenLibraryProvider } from './open-library-provider.js';
 export { WikidataProvider } from './wikidata-provider.js';
 export { WikipediaProvider } from './wikipedia-provider.js';
+export { XaiProvider } from './xai-provider.js';

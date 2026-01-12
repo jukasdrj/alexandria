@@ -137,7 +137,7 @@ Storage: R2 isbn/{isbn}/{size}.webp
 - `HYPERDRIVE` - PostgreSQL connection (ID: 00ff424776f4415d95245c3c4c36e854)
 - `COVER_IMAGES` - R2 bucket (bookstrack-covers-processed)
 - `CACHE`, `QUOTA_KV` - KV namespaces
-- `ISBNDB_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `GEMINI_API_KEY` - API keys
+- `ISBNDB_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` - API keys
 - `ENRICHMENT_QUEUE`, `COVER_QUEUE`, `BACKFILL_QUEUE`, `AUTHOR_QUEUE` - Queues
 - `ANALYTICS`, `QUERY_ANALYTICS`, `COVER_ANALYTICS` - Analytics Engine
 
@@ -327,6 +327,7 @@ Alexandria provides domain-specific skills that auto-load planning-with-files an
 - `POST /api/harvest/backfill` - Historical book backfill (Gemini → Dedup → ISBNdb → Enrich)
 - `GET /api/harvest/backfill/status` - Check backfill progress
 - `GET /api/harvest/gemini/test` - Test Gemini API connection
+- `POST /api/test/ai-comparison` - Compare Gemini vs x.ai Grok for book generation **NEW**
 - `POST /api/authors/enrich-bibliography` - Author expansion
 - `POST /api/authors/resolve-identifier` - VIAF/ISNI → Wikidata crosswalk
 - `GET /api/quota/status` - ISBNdb quota tracking
@@ -459,14 +460,15 @@ Unified framework for all external service integrations. Eliminates 60% code dup
 - **Unified HTTP Client**: Centralized rate limiting, caching, retry logic
 - **3 Orchestrators**: ISBN resolution, cover fetch, metadata enrichment
 
-**Providers** (7 total):
+**Providers** (8 total):
 - `OpenLibraryProvider` - ISBN resolution, metadata
 - `GoogleBooksProvider` - Metadata, covers, subjects
 - `ArchiveOrgProvider` - Covers, metadata (pre-2000 books)
 - `WikidataProvider` - Metadata, covers (SPARQL)
 - `WikipediaProvider` - Author biographies
 - `ISBNdbProvider` - Premium ISBN resolution, metadata, covers (quota-managed)
-- `GeminiProvider` - AI book generation for backfill
+- `GeminiProvider` - AI book generation for backfill (Google Gemini)
+- `XaiProvider` - AI book generation for backfill (x.ai Grok) **[NEW - Jan 2026]**
 
 **Files**:
 - Core: `worker/lib/external-services/` (capabilities, registry, http-client, service-context)

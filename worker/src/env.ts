@@ -28,6 +28,9 @@ export interface Env {
   GEMINI_API_KEY: {
     get(): Promise<string | null>;
   };
+  XAI_API_KEY: {
+    get(): Promise<string | null>;
+  };
 
   // Queue bindings
   ENRICHMENT_QUEUE: Queue;

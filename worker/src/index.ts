@@ -24,6 +24,7 @@ import quotaRoutes from './routes/quota.js';
 import testRoutes from './routes/test.js';
 import migrateRoutes from './routes/migrate.js';
 import harvestRoutes from './routes/harvest.js';
+import aiComparisonRoutes from './routes/ai-comparison.js';
 import { handleScheduledCoverHarvest } from './routes/harvest.js';
 import { handleScheduledWikidataEnrichment } from './routes/authors.js';
 import backfillAsyncRoutes from './routes/backfill-async.js';
@@ -151,6 +152,7 @@ const subRouters = [
   enhancementCronRoutes,
   testRoutes,
   migrateRoutes,
+  aiComparisonRoutes,
 ];
 
 // Register route modules
