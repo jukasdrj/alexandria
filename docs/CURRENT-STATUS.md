@@ -1,11 +1,26 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 10, 2026
+**Last Updated:** January 12, 2026
 
 ## 🎯 Active Issues
 
-### P1 - HIGH Priority (Production Ready!)
-1. **Production Backfill Deployment** - READY NOW
+### P1 - HIGH Priority
+1. **#163** - Subject/Genre Coverage Improvement - **IN PROGRESS** 🔄
+   - **Status**: Phase 2 Investigation COMPLETE, Phase 3 Planning in progress
+   - **Current Coverage**: 59% (19.5M / 33.1M works)
+   - **Target Coverage**: 80% (26.5M works)
+   - **Gap**: 7.5M works need subjects
+   - **Phase 1 COMPLETE**: Fixed 3 INVALID GIN indexes, 0.1ms query performance ✅
+   - **Phase 2 COMPLETE**: Root cause analysis via Grok-4 investigation ✅
+     - CRITICAL FINDING: OpenLibrary source data lacks subjects (0% backfill opportunity)
+     - Evaluated 5 backfill strategies
+     - RECOMMENDATION: Gemini AI Genre Inference ($112-175, 2-3 days)
+   - **Phase 3 PENDING**: Gemini Genre Inference implementation (awaiting approval)
+   - **Timeline**: 3-4 days to implement
+   - **Cost**: $112-175
+   - **Expected Result**: 59% → 80%+ coverage
+
+2. **Production Backfill Deployment** - READY NOW
    - Baseline prompt validated: 90% ISBN resolution rate
    - Dry-run experiments complete and successful
    - Infrastructure fully tested
@@ -13,17 +28,64 @@
    - **Action**: Deploy with `dry_run: false` to start production backfill
 
 ### P2 - MEDIUM Priority
-2. **#118** - Auto-healing/recovery system for bulk author harvesting
+3. **#118** - Auto-healing/recovery system for bulk author harvesting
 
 ### P3 - LOW Priority (Future Enhancements)
-3. **#117** - Semantic search with Cloudflare Vectorize
-4. **#116** - Search analytics tracking with Analytics Engine
-5. **#113** - Wikipedia + LLM fallback for authors without Wikidata
-6. **#100** - GitHub Actions for automated harvesting
+4. **#117** - Semantic search with Cloudflare Vectorize
+5. **#116** - Search analytics tracking with Analytics Engine
+6. **#113** - Wikipedia + LLM fallback for authors without Wikidata
+7. **#100** - GitHub Actions for automated harvesting
 
 ---
 
 ## ✅ Recently Completed
+
+### #163: Subject/Genre Coverage - Phase 1 & 2 (COMPLETED - Jan 12) 🎉
+**Fixed broken indexes and completed root cause investigation:**
+
+**Phase 1: Index Rebuild (COMPLETE ✅)**
+- **Problem**: 3 INVALID GIN indexes on `enriched_works.subject_tags` blocking queries
+- **Root Cause**: Data corruption - subject tags up to 11KB (Thai funeral records, bibliographic records concatenated)
+- **Solution**: Created functional GIN index using `get_short_subjects()` helper function
+  - Filters subjects < 100 characters
+  - Index size: 470MB
+  - Query performance: 0.1ms (excellent!)
+- **Data Quality Issues Found**: ~275 works have 100+ subjects (corrupted OpenLibrary data)
+- **Recommendation**: Clean data in future maintenance cycle
+
+**Phase 2: Root Cause Investigation (COMPLETE ✅)**
+- **Delegated to**: Grok-4 for comprehensive analysis
+- **Database Queries Executed**: 6 SQL queries analyzing 13.6M work gap
+- **CRITICAL DISCOVERY**: OpenLibrary source data genuinely lacks subjects for 41% of works
+  - OpenLibrary backfill opportunity: 0% (NO data available)
+  - External ID availability: minimal (48 Wikidata, 37 Goodreads, 0 Google Books)
+  - These works are isolated with no provider crosswalks
+
+**Provider Coverage Analysis:**
+| Provider | Total Works | With Subjects | Coverage % |
+|----------|-------------|---------------|------------|
+| ISBNdb | 75,296 | 55,383 | 73.55% |
+| OpenLibrary | 33,094,599 | 19,507,564 | 58.94% |
+| Gemini-backfill | 134 | 9 | 6.72% |
+
+**Backfill Strategy Evaluation:**
+- ❌ OpenLibrary backfill: IMPOSSIBLE (0 works with subjects)
+- 🟡 Wikidata/Goodreads: Minimal impact (~85 works)
+- 🔴 ISBNdb batch: Too expensive ($400-500 for 7.5M works)
+- 🟢 **Gemini AI inference: RECOMMENDED** ($112-175, achieves 80% target)
+
+**Recommended Solution: Hybrid 3-Phase Strategy**
+1. **Quick wins**: Enrich 85 works via Wikidata/Goodreads (<1 day, $0)
+2. **AI inference**: Gemini genre inference for 7.5M works (2-3 days, $112-175)
+   - Few-shot prompting with validation pipeline
+   - Confidence scoring (auto-accept >80%)
+   - Expected coverage: 75-80% validated
+3. **Long-tail**: JIT enrichment on work views (ongoing, operational budget)
+
+**Status:** Phase 3 (Implementation) awaiting approval
+**Documentation:** GitHub issue #163, findings.md, progress.md, task_plan.md
+
+---
 
 ### Archive.org Metadata Enrichment - Phase 2 (COMPLETED - Jan 10) 🎉
 **Issue #159 - Extended Archive.org integration beyond covers to full metadata:**
