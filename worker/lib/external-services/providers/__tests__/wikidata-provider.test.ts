@@ -49,6 +49,7 @@ describe('WikidataProvider', () => {
       expect(provider.capabilities).toEqual([
         ServiceCapability.METADATA_ENRICHMENT,
         ServiceCapability.COVER_IMAGES,
+        ServiceCapability.ISBN_RESOLUTION,
       ]);
     });
   });

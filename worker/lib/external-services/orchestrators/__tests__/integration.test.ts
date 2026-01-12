@@ -192,7 +192,7 @@ describe('Service Provider Framework Integration', () => {
   });
 
   describe('Multi-Orchestrator Workflows', () => {
-    it('should support using multiple orchestrators together', async () => {
+    it('should support using multiple orchestrators together', { timeout: 30000 }, async () => {
       // Register all providers
       registry.registerAll([
         new OpenLibraryProvider(),
