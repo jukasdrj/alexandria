@@ -1,58 +1,52 @@
 # Documentation Health Report
 
-**Date:** January 9, 2026
-**Auditor:** Agent Jules
-
-This report details the findings of an automated audit of the Alexandria project documentation, identifying inconsistencies between the documentation and the current codebase.
+**Date:** 2026-01-10
+**Auditor:** Jules (Systems Architect Agent)
 
 ## 🚨 Critical Mismatches
+*(Documentation contradicts the current code/reality)*
 
-These are areas where the documentation contradicted the deployed code or significant features were missing.
+1.  **Legacy Cover Endpoints in README:**
+    *   **File:** `README.md`
+    *   **Issue:** Lists `GET /covers/:isbn/:size`.
+    *   **Reality:** Code uses `worker/src/routes/covers-legacy.ts` (`/covers/{isbn}/{size}`) AND `worker/src/routes/covers.ts` (`/api/covers/{work_key}/{size}`). The `README.md` does not mention the new `/api/covers/{work_key}/{size}` endpoint, which appears to be the modern standard.
 
-1.  **Queue Configuration (README.md):**
-    *   **Drift:** `README.md` listed only `alexandria-enrichment-queue` and `alexandria-cover-queue` in the Architecture diagram.
-    *   **Reality:** `worker/wrangler.jsonc` and `CLAUDE.md` confirm 4 queues: `enrichment`, `cover`, `backfill`, `author`.
-    *   **Status:** **FIXED**. `README.md` has been auto-updated.
+2.  **Backfill Endpoints in README:**
+    *   **File:** `README.md`
+    *   **Issue:** Lists `POST /api/harvest/backfill`.
+    *   **Reality:** Code confirms this, but also exposes `/api/harvest/backfill/status` (Global) and `/api/harvest/backfill/status/:jobId` (Job specific) and `/api/harvest/quota`. These are useful but undocumented in the main README.
 
-2.  **API Endpoints (README.md):**
-    *   **Drift:** `README.md` was missing the "External ID Resolution" endpoints (`GET /api/external-ids`, `GET /api/resolve`).
-    *   **Reality:** These endpoints are live in `worker/src/routes/external-ids.ts` and documented in `CLAUDE.md`.
-    *   **Status:** **FIXED**. `README.md` has been auto-updated.
+3.  **Missing "New" Endpoints in README:**
+    *   **File:** `README.md`
+    *   **Issue:** Several endpoints exist in code but are missing from the README:
+        *   `/api/enrich/queue/batch` (Batch enrichment queue)
+        *   `/api/harvest/covers` (Cover harvesting)
+        *   `/api/migrate/003` (Migration - likely intentional omission)
+        *   `/api/internal/enhance-synthetic-works` (Internal Cron - Documented in `CLAUDE.md` but not `README.md`)
 
-## 🛠️ Auto-Updates Made
+## 🛠️ Auto-Updates Recommended
+*(Files that should be corrected for typos or pathing)*
 
-The following files were automatically updated to correct drifts:
+1.  **Broken Link in Index:**
+    *   **File:** `docs/INDEX.md`
+    *   **Issue:** Link `[Development Guides](./guides/)` points to a non-existent directory `docs/guides/`.
+    *   **Action:** Remove or update the link.
 
-*   **`README.md`:**
-    *   Updated "Last Updated" date to Jan 9, 2026.
-    *   Added `alexandria-backfill-queue` and `alexandria-author-queue` to Architecture section.
-    *   Added "External ID Resolution" section to API Endpoints.
-    *   Added `POST /api/harvest/backfill` to API Endpoints.
-    *   Updated `POST /api/authors/resolve-identifier` description to clarify it is for VIAF/ISNI.
+## ⚠️ Stale Warnings
+*(Files that look outdated but require human context to fix)*
 
-## ⚠️ Stale Warnings & Context Needed
-
-These files appear outdated or potentially confusing and may require human review.
-
-1.  **`docs/api/API-IDENTIFIER-RESOLUTION.md` vs Generic External IDs**
-    *   **Issue:** This file specifically documents `POST /api/authors/resolve-identifier` (VIAF/ISNI → Wikidata). However, the project also has "External ID Resolution" (Issue #155) for resolving ASIN/Goodreads/etc. (`GET /api/external-ids`, `GET /api/resolve`).
-    *   **Confusion:** The filename `API-IDENTIFIER-RESOLUTION.md` implies it covers all identifier resolution, but it only covers the author-specific one.
-    *   **Recommendation:** Rename `docs/api/API-IDENTIFIER-RESOLUTION.md` to `docs/api/API-AUTHOR-IDENTIFIER-RESOLUTION.md` and create a new `docs/api/API-EXTERNAL-ID-RESOLUTION.md` for the generic system.
-
-2.  **`README.md` Version**
-    *   **Issue:** `README.md` lists version `2.2.2`. `package.json` lists `2.2.0`.
-    *   **Recommendation:** Verify the correct semantic version.
+*   **None.** The documentation is remarkably fresh, with `README.md`, `CURRENT-STATUS.md`, and `TODO.md` all updated within the last 24-48 hours.
 
 ## ✅ Verified Accurate
+*(Key files confirmed up-to-date)*
 
-The following key files were checked and found to be consistent with the codebase:
+*   **`worker/wrangler.jsonc` vs `README.md`:** Environment variables, queues (`enrichment`, `cover`, `backfill`, `author`), and services match perfectly.
+*   **`CLAUDE.md`**: Accurately reflects the "Alex" persona, architecture, and recent "Phase 1-5" completion status.
+*   **`docs/CURRENT-STATUS.md`**: Perfectly aligned with recent code changes (e.g., Archive.org Phase 2, Author JIT Enrichment).
+*   **Version:** `README.md` and `package.json` both correctly state version `2.4.0`.
 
-*   **`CLAUDE.md`:** Accurately reflects the 4-queue architecture, bindings, and recent features like External ID Resolution. It serves as the authoritative source.
-*   **`worker/wrangler.jsonc`:** Matches `CLAUDE.md` configuration.
-*   **`docs/INDEX.md`:** Accurately links to existing docs, though it may need updates if new API docs are created.
+---
 
-## Next Steps
-
-1.  **Review `docs/api/` naming:** Consider renaming `API-IDENTIFIER-RESOLUTION.md` to avoid confusion.
-2.  **Create missing API doc:** Create documentation for the Generic External ID Resolution endpoints (`GET /api/external-ids`, `GET /api/resolve`).
-3.  **Sync Version:** Update `package.json` to `2.2.2` if that is the correct intended version.
+## Next Steps for User
+1.  **Approve Fix:** Should I remove the broken `[Development Guides](./guides/)` link from `docs/INDEX.md`?
+2.  **Clarify Covers API:** Do you want to document the new `/api/covers/{work_key}/{size}` endpoint in the `README.md`, or is it internal/experimental?

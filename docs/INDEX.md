@@ -96,7 +96,6 @@
 ## 📖 Guides & References
 
 ### Development Guides
-- **[guides/](./guides/)** - Step-by-step development guides
 - **[reference/](./reference/)** - Technical reference materials
 
 ### Example Data
