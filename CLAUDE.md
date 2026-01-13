@@ -137,7 +137,7 @@ Storage: R2 isbn/{isbn}/{size}.webp
 - `HYPERDRIVE` - PostgreSQL connection (ID: 00ff424776f4415d95245c3c4c36e854)
 - `COVER_IMAGES` - R2 bucket (bookstrack-covers-processed)
 - `CACHE`, `QUOTA_KV` - KV namespaces
-- `ISBNDB_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` - API keys
+- `ISBNDB_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `LIBRARYTHING_API_KEY` - API keys
 - `ENRICHMENT_QUEUE`, `COVER_QUEUE`, `BACKFILL_QUEUE`, `AUTHOR_QUEUE` - Queues
 - `ANALYTICS`, `QUERY_ANALYTICS`, `COVER_ANALYTICS` - Analytics Engine
 
@@ -447,20 +447,21 @@ Alexandria/2.5.0 (nerd@ooheynerds.com; Book metadata enrichment and ISBN resolut
 
 ## Service Provider Framework (Jan 2026 - Phases 1-3 Complete)
 
-**Status**: ✅ Production-ready (8 new capabilities + 3 orchestrators added)
+**Status**: ✅ Production-ready (8 new capabilities + 4 orchestrators added)
 **Architecture**: Capability-based provider registry with dynamic service discovery
 
 ### Overview
 
-Unified framework for all external service integrations. Eliminates 60% code duplication across 8 providers through centralized HTTP client, dynamic discovery, and orchestrated workflows.
+Unified framework for all external service integrations. Eliminates 60% code duplication across 9 providers through centralized HTTP client, dynamic discovery, and orchestrated workflows.
 
-**Expansion (Jan 2026)**: Added 8 new capabilities and 3 orchestrators, expanding Alexandria's metadata enrichment by 75%.
+**Expansion (Jan 2026)**: Added 8 new capabilities and 4 orchestrators, expanding Alexandria's metadata enrichment by 75%.
+**Latest (Jan 13, 2026)**: LibraryThing thingISBN integration for community-validated edition variants.
 
 **Core Components**:
 - **Provider Registry**: Singleton registry for dynamic provider discovery
 - **Capability Interfaces**: **14 interfaces** (6 core + 8 new - see below)
 - **Unified HTTP Client**: Centralized rate limiting, caching, retry logic
-- **6 Orchestrators**: ISBN resolution, cover fetch, metadata enrichment, ratings, public domain, external IDs
+- **7 Orchestrators**: ISBN resolution, cover fetch, metadata enrichment, ratings, public domain, external IDs, edition variants
 
 **Capabilities** (14 total):
 
@@ -484,13 +485,14 @@ Unified framework for all external service integrations. Eliminates 60% code dup
 - TRANSLATIONS - ISBN → Available translations
 - ENHANCED_EXTERNAL_IDS - ISBN → Amazon ASIN, Goodreads, Google Books IDs
 
-**Providers** (8 total):
+**Providers** (9 total):
 - `ISBNdbProvider` - Ratings, edition variants (paid, quota-managed)
 - `GoogleBooksProvider` - Metadata, covers, subjects, public domain, external IDs
 - `OpenLibraryProvider` - ISBN resolution, metadata, ratings, external IDs
 - `ArchiveOrgProvider` - Covers, metadata, public domain (pre-2000 books)
 - `WikidataProvider` - Metadata, covers, ratings, subject browsing, series, awards, translations, external IDs (SPARQL)
 - `WikipediaProvider` - Author biographies
+- `LibraryThingProvider` - Edition variants via thingISBN (free, community-validated, 1000 req/day)
 - `GeminiProvider` - AI book generation for backfill (Google Gemini)
 - `XaiProvider` - AI book generation for backfill (x.ai Grok)
 
@@ -529,6 +531,7 @@ const result = await orchestrator.resolveISBN('The Hobbit', 'J.R.R. Tolkien', co
 - **RatingsOrchestrator** - Multi-provider ratings fallback (ISBNdb → OpenLibrary → Wikidata)
 - **PublicDomainOrchestrator** - Public domain detection (Google Books → Archive.org)
 - **ExternalIdOrchestrator** - External ID aggregation from multiple sources
+- **EditionVariantOrchestrator** - Multi-provider edition discovery (ISBNdb → LibraryThing → Wikidata)
 
 **Existing**:
 - **ISBNResolutionOrchestrator** - Cascading ISBN fallback (ISBNdb → Google Books → OpenLibrary → Archive.org → Wikidata)
