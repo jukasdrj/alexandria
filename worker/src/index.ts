@@ -31,6 +31,7 @@ import backfillAsyncRoutes from './routes/backfill-async.js';
 import externalIdRoutes from './routes/external-ids.js';
 import recommendationsRoutes from './routes/recommendations.js';
 import enhancementCronRoutes, { handleScheduledSyntheticEnhancement } from './routes/enhancement-cron.js';
+import backfillSchedulerRoutes from './routes/backfill-scheduler.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue, processAuthorQueue } from './services/queue-handlers.js';
@@ -150,6 +151,7 @@ const subRouters = [
   externalIdRoutes,
   recommendationsRoutes,
   enhancementCronRoutes,
+  backfillSchedulerRoutes,
   testRoutes,
   migrateRoutes,
   aiComparisonRoutes,

@@ -203,6 +203,13 @@ export async function processBackfillJob(
   const { job_id, year, month, batch_size, dry_run, experiment_id, prompt_variant, model_override } = message;
   const startTime = Date.now();
 
+  // Initialize database connection for backfill_log tracking
+  const sql = postgres(env.HYPERDRIVE.connectionString, {
+    max: 1,
+    fetch_types: false,
+    prepare: false,
+  });
+
   try {
     logger.info('[AsyncBackfill] Processing job', {
       job_id,
@@ -211,6 +218,33 @@ export async function processBackfillJob(
       dry_run,
       experiment_id,
     });
+
+    // Update backfill_log: Set status to 'processing'
+    await sql`
+      INSERT INTO backfill_log (
+        year,
+        month,
+        status,
+        started_at,
+        prompt_variant,
+        batch_size
+      ) VALUES (
+        ${year},
+        ${month},
+        'processing',
+        NOW(),
+        ${prompt_variant || 'baseline'},
+        ${batch_size}
+      )
+      ON CONFLICT (year, month)
+      DO UPDATE SET
+        status = 'processing',
+        started_at = NOW(),
+        completed_at = NULL,
+        prompt_variant = ${prompt_variant || 'baseline'},
+        batch_size = ${batch_size},
+        error_message = NULL
+    `;
 
     // Update status: processing (include experiment metadata)
     await updateJobStatus(env.QUOTA_KV, job_id, {
@@ -293,12 +327,6 @@ export async function processBackfillJob(
 
     // Step 2: SAVE GEMINI RESULTS IMMEDIATELY (preserves expensive AI work)
     // This happens BEFORE enrichment queue, so Gemini data is never lost
-    const sql = postgres(env.HYPERDRIVE.connectionString, {
-      max: 1,
-      fetch_types: false,
-      prepare: false,
-    });
-
     let persistStats = {
       works_created: 0,
       editions_created: 0,
@@ -497,6 +525,23 @@ export async function processBackfillJob(
     // This job's responsibility was: Gemini → ISBN resolution → queue ISBNs
     const duration = Date.now() - startTime;
 
+    // Update backfill_log: Mark as completed with final stats
+    const resolutionRate = hybridResult.stats.isbn_resolution.resolution_rate;
+    await sql`
+      UPDATE backfill_log
+      SET
+        status = 'completed',
+        books_generated = ${hybridResult.stats.total_books},
+        isbns_resolved = ${hybridResult.candidates.length},
+        resolution_rate = ${resolutionRate},
+        isbns_queued = ${totalSent},
+        gemini_calls = ${hybridResult.stats.api_calls.ai_generation || 1},
+        xai_calls = 0,
+        isbndb_calls = ${hybridResult.stats.api_calls.isbndb || 0},
+        completed_at = NOW()
+      WHERE year = ${year} AND month = ${month}
+    `;
+
     await updateJobStatus(env.QUOTA_KV, job_id, {
       status: 'complete',
       progress: `Backfill job complete. ${totalSent} ISBNs queued for async enrichment via ENRICHMENT_QUEUE.`,
@@ -512,21 +557,40 @@ export async function processBackfillJob(
     });
 
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('[AsyncBackfill] Job failed', {
       job_id,
       year,
       month,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
     });
+
+    // Update backfill_log: Mark as retry or failed (based on retry_count)
+    await sql`
+      UPDATE backfill_log
+      SET
+        status = CASE WHEN retry_count + 1 >= 5 THEN 'failed' ELSE 'retry' END,
+        retry_count = retry_count + 1,
+        error_message = ${errorMsg},
+        completed_at = NOW(),
+        last_retry_at = NOW()
+      WHERE year = ${year} AND month = ${month}
+    `;
 
     await updateJobStatus(env.QUOTA_KV, job_id, {
       status: 'failed',
       progress: 'Job failed',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMsg,
       completed_at: new Date().toISOString(),
       duration_ms: Date.now() - startTime,
     });
 
+    // Close DB connection
+    await sql.end().catch(() => {});
+
     throw error; // Re-throw for queue retry logic
+  } finally {
+    // Ensure database connection is closed
+    await sql.end().catch(() => {});
   }
 }
