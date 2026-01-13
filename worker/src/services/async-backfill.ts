@@ -575,7 +575,7 @@ export async function processBackfillJob(
           status = CASE WHEN retry_count + 1 >= 5 THEN 'failed' ELSE 'retry' END,
           retry_count = retry_count + 1,
           error_message = ${errorMsg},
-          completed_at = NOW(),
+          completed_at = CASE WHEN retry_count + 1 >= 5 THEN NOW() ELSE NULL END,
           last_retry_at = NOW()
         WHERE year = ${year} AND month = ${month}
       `;
