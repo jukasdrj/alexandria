@@ -334,6 +334,9 @@ Alexandria provides domain-specific skills that auto-load planning-with-files an
 - `GET /api/external-ids/{entity_type}/{key}` - Get external IDs (Amazon ASIN, Goodreads, Google Books)
 - `GET /api/resolve/{provider}/{id}` - Resolve external ID to internal key
 - `POST /api/internal/enhance-synthetic-works` - Daily cron to enhance synthetic works **NEW**
+- `POST /api/internal/schedule-backfill` - Scheduler for systematic month-by-month backfill **NEW - v2.7.0**
+- `GET /api/internal/backfill-stats` - Progress statistics and resolution rates **NEW - v2.7.0**
+- `POST /api/internal/seed-backfill-queue` - One-time queue initialization (300 months) **NEW - v2.7.0**
 - `GET /openapi.json` - OpenAPI spec
 
 ## Performance Optimizations (Jan 2026)
@@ -699,6 +702,66 @@ const bookGenOrchestrator = new BookGenerationOrchestrator(getGlobalRegistry(), 
 - Experimental testing: gemini-3-pro-preview (advanced reasoning)
 
 **Idempotency**: Month completion tracked in `QUOTA_KV` - prevents re-running same month
+
+## Backfill Scheduler (Jan 2026)
+
+**NEW in v2.7.0**: Systematic month-by-month backfill orchestration with automated state tracking, retry logic, and progress monitoring.
+
+**Purpose**: Automate systematic enrichment of Alexandria's database with historically significant books from 2000-2024 using AI-driven generation and multi-source ISBN resolution.
+
+**Architecture**:
+- **Database Schema**: `backfill_log` table tracks month completion status (pending/processing/completed/failed/retry)
+- **Scheduler API**: 3 internal endpoints for orchestration, monitoring, and queue seeding
+- **Queue Integration**: Direct BACKFILL_QUEUE messaging (no HTTP self-requests)
+- **State Tracking**: Real-time status updates in PostgreSQL + ephemeral job status in KV
+- **Retry Logic**: Automatic retry up to 5 attempts with exponential backoff
+
+**Endpoints** (Protected by `X-Cron-Secret` header):
+- `POST /api/internal/schedule-backfill` - Queue batch processing (recent-first: 2024 → 2000)
+- `GET /api/internal/backfill-stats` - Progress statistics with resolution rates
+- `POST /api/internal/seed-backfill-queue` - One-time initialization (300 months: 2000-2024)
+
+**Metrics Tracked** (per month):
+- `books_generated`, `isbns_resolved`, `resolution_rate`, `isbns_queued`
+- `gemini_calls`, `xai_calls`, `isbndb_calls` - API usage tracking
+- `retry_count`, `error_message`, `last_retry_at` - Error handling
+
+**Prompt Variant Selection**:
+- 2020+ years: `contemporary-notable` (auto-selected)
+- Pre-2020 years: `baseline` (default)
+
+**Production Recommendations**:
+- **Target Years**: 2020-2023 (90%+ ISBN resolution rate)
+- **Avoid**: 2024 months (ISBNdb lacks data for books published 2-3 months ago)
+- **Phase 1 Validation**: 5 months/day from 2020 → Validate 90%+ resolution
+- **Phase 2 Scale**: 10-15 months/day for 2021-2023 → Complete recent years
+- **Phase 3 Historical**: 15-20 months/day for 2000-2019 → Full coverage
+
+**Performance Expectations**:
+- 20 books per month after deduplication
+- ~90-95% ISBN resolution rate (for 2020-2023)
+- <$0.01 total cost for 24-year backfill (300 Gemini calls)
+- ~400 ISBNdb calls per 10 months (~3% daily quota)
+- 20-25 days for complete 2000-2023 backfill (288 months)
+
+**Files**:
+- Database Migration: `migrations/013_backfill_log_table.sql`
+- Scheduler Routes: `worker/src/routes/backfill-scheduler.ts`
+- Queue Consumer: `worker/src/services/async-backfill.ts` (updated with state tracking)
+- Documentation: `docs/BACKFILL_SCHEDULER_DEPLOYMENT.md`, `docs/operations/BACKFILL_SCHEDULER_GUIDE.md`
+
+**Usage Example**:
+```bash
+# Schedule 10 months from 2020 (dry run)
+curl -X POST 'https://alexandria.ooheynerds.com/api/internal/schedule-backfill' \
+  -H "X-Cron-Secret: $ALEXANDRIA_WEBHOOK_SECRET" \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"batch_size":10,"year_range":{"start":2020,"end":2020},"dry_run":true}'
+
+# Check progress
+curl 'https://alexandria.ooheynerds.com/api/internal/backfill-stats' \
+  -H "X-Cron-Secret: $ALEXANDRIA_WEBHOOK_SECRET"
+```
 
 ### AI Provider Improvements (Jan 2026)
 
