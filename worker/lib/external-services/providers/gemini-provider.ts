@@ -144,9 +144,13 @@ export class GeminiProvider implements IBookGenerator {
         return [];
       }
 
-      // Parse JSON response
+      // Parse JSON response (sanitize Markdown code fences)
       const text = response.candidates[0].content.parts[0].text;
-      const books: GeminiGeneratedBook[] = JSON.parse(text);
+      const sanitized = text
+        .replace(/^```json\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      const books: GeminiGeneratedBook[] = JSON.parse(sanitized);
 
       // Convert to GeneratedBook format
       const results: GeneratedBook[] = books.map((book) => ({

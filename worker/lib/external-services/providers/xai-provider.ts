@@ -160,12 +160,16 @@ export class XaiProvider implements IBookGenerator {
         return [];
       }
 
-      // Parse JSON response
+      // Parse JSON response (sanitize Markdown code fences)
       const content = response.choices[0].message.content;
+      const sanitized = content
+        .replace(/^```json\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
 
       // Handle both array and object responses
       let books: XaiGeneratedBook[];
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(sanitized);
 
       if (Array.isArray(parsed)) {
         books = parsed;
