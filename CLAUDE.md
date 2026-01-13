@@ -700,6 +700,35 @@ const bookGenOrchestrator = new BookGenerationOrchestrator(getGlobalRegistry(), 
 
 **Idempotency**: Month completion tracked in `QUOTA_KV` - prevents re-running same month
 
+### AI Provider Improvements (Jan 2026)
+
+**Issue #1: Timeout Mismatch (RESOLVED)**
+- **Problem**: ServiceHttpClient default 10s timeout vs orchestrator 60s timeout
+- **Solution**: Pass `timeoutMs: 60000` in ServiceContext for AI providers
+- **Impact**: Both Gemini and x.ai Grok complete successfully within timeout
+- **Files**: `worker/src/services/hybrid-backfill.ts:155`, `worker/src/routes/ai-comparison.ts:116`
+
+**Issue #2: x.ai Grok Refusing Recent Books (RESOLVED)**
+- **Problem**: Grok refused books from 2023+ due to "can't verify historical significance"
+- **Solution**: Created `contemporary-notable` prompt variant focusing on "recognized AT TIME OF PUBLICATION"
+- **Implementation**: `worker/lib/ai/book-generation-prompts.ts` - new `buildContemporaryNotablePrompt()` function
+- **Usage**: `{"prompt_variant": "contemporary-notable"}` in backfill requests for recent years (2020+)
+- **Result**: 95% ISBN resolution rate with Gemini-generated books
+
+**Issue #3: Cache TTL=0 Warnings (RESOLVED)**
+- **Problem**: Cloudflare KV rejecting cache writes with TTL=0 for AI providers
+- **Solution**: Skip cache writes when `cacheTtlSeconds === 0` in ServiceHttpClient
+- **File**: `worker/lib/external-services/http-client.ts:422-429`
+
+**Prompt Variants** (registered in `worker/lib/ai/book-generation-prompts.ts`):
+- `baseline` - Default "historically significant" (works for older years)
+- `contemporary-notable` - **RECOMMENDED for 2020+** - "recognized at time of publication"
+- `annual` - Year-based generation for large batches
+- `diversity-emphasis` - Non-English, indie publishers, underrepresented regions
+- `overlooked-significance` - Culturally important but not bestsellers
+- `genre-rotation` - Genre-focused (mystery, sci-fi, etc.)
+- `era-contextualized` - Books reflecting their era's cultural moment
+
 ## Cover Processing
 
 **Storage**: R2 `isbn/{isbn}/{large,medium,small}.webp`

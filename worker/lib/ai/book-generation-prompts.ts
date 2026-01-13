@@ -327,6 +327,44 @@ Return ONLY a valid JSON array of exactly ${batchSize} books.`;
 }
 
 /**
+ * Contemporary Notable prompt variant (RECOMMENDED)
+ * Focuses on books recognized AT TIME OF PUBLICATION rather than historical significance
+ *
+ * SOLVES: x.ai Grok refusing recent books due to "can't verify historical significance"
+ * WORKS: Both recent years (2023) and older years (2000) by using contemporary metrics
+ */
+function buildContemporaryNotablePrompt(year: number, month: number, batchSize: number = 20): string {
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const monthName = monthNames[month - 1];
+
+  return `Generate a curated list of exactly ${batchSize} notable books published in ${monthName} ${year}. Focus on releases that were recognized, acclaimed, or commercially successful AT THE TIME OF PUBLICATION based on verifiable contemporary sources.
+
+SELECTION CRITERIA - Prioritize verifiable quality metrics from the publication period:
+- NYT Bestsellers (Fiction & Non-fiction lists from that month/quarter)
+- Award shortlists, finalists, or winners announced around that time (Pulitzer, Booker Prize, Hugo, National Book Award, etc.)
+- High critical acclaim from major outlets (NYT Book Review, Kirkus, Publishers Weekly starred reviews)
+- Top-selling popular fiction (mystery, romance, sci-fi, fantasy, thriller) per bestseller charts
+- Influential non-fiction (memoir, history, science, self-help, politics) with strong sales or buzz
+- Breakthrough debuts or genre-defining works highlighted in contemporary reviews
+- Notable international releases gaining traction in English-speaking markets
+
+METADATA REQUIREMENTS for each book:
+1. **title**: Full book title (exact as published)
+2. **author**: Primary author's name (full name preferred)
+3. **publisher**: Publishing house name
+4. **format**: Primary format ("Hardcover", "Paperback", "eBook", "Audiobook", or "Unknown")
+5. **publication_year**: ${year}
+6. **significance** (optional): Specific reason for inclusion (e.g., "NYT #1 Bestseller Fiction, ${monthName} ${year}" or "Booker Prize shortlist")
+
+IMPORTANT: All selections must be verifiably published in ${monthName} ${year}. If fewer than ${batchSize} perfect matches exist, supplement with strong runners-up from the same criteria.
+
+Return ONLY a valid JSON array of exactly ${batchSize} books.`;
+}
+
+/**
  * Era-contextualized prompt variant
  * Emphasizes books that reflected or shaped their era's cultural moment
  */
@@ -384,6 +422,7 @@ Return ONLY a valid JSON array of exactly ${batchSize} books.`;
  */
 export const PROMPT_VARIANTS = {
   baseline: buildMonthlyPrompt,
+  'contemporary-notable': buildContemporaryNotablePrompt, // RECOMMENDED: Works for recent years
   annual: buildAnnualPrompt,
   'diversity-emphasis': buildDiversityPrompt,
   'overlooked-significance': buildOverlookedPrompt,

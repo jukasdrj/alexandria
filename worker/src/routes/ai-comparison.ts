@@ -112,7 +112,8 @@ app.openapi(compareRoute, async (c) => {
   const logger = c.get('logger');
   const env = c.env;
 
-  const context = createServiceContext(env, logger, { sql });
+  // IMPORTANT: Pass 60s timeout for AI providers (fixes 10s default timeout issue)
+  const context = createServiceContext(env, logger, { sql, timeoutMs: 60000 });
 
   // Initialize providers
   const geminiProvider = new GeminiProvider();

@@ -151,7 +151,8 @@ export async function generateHybridBackfillList(
 
   // Step 1: Generate metadata from AI Provider (Gemini or Grok)
   // Use module-level orchestrator for cold start optimization
-  const context = createServiceContext(env, logger);
+  // IMPORTANT: Pass 60s timeout to match orchestrator configuration (fixes 10s default timeout issue)
+  const context = createServiceContext(env, logger, { timeoutMs: 60000 });
 
   // Resolve prompt from shared microservice (security: only accepts registered variants)
   const prompt = resolvePrompt(promptVariant, year, month, batchSize);

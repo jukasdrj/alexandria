@@ -420,6 +420,10 @@ export class ServiceHttpClient {
   }
 
   private shouldWriteCache(context: ServiceContext): boolean {
+    // Don't cache if TTL is 0 (AI providers, ephemeral data)
+    if (this.config.cacheTtlSeconds === 0) {
+      return false;
+    }
     const strategy = context.cacheStrategy ?? 'read-write';
     return strategy === 'read-write' || strategy === 'write-only';
   }
