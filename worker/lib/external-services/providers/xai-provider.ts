@@ -99,6 +99,7 @@ export class XaiProvider implements IBookGenerator {
     rateLimitMs: 0, // No rate limiting (pay-per-use)
     cacheTtlSeconds: 0, // No caching for AI generation
     purpose: 'Book metadata generation for backfill (comparison testing)',
+    defaultTimeout: 45000, // 45s timeout for AI generation (can take 20-40s for 10+ books)
   });
 
   async isAvailable(env: Env): Promise<boolean> {
@@ -112,6 +113,16 @@ export class XaiProvider implements IBookGenerator {
     context: ServiceContext
   ): Promise<GeneratedBook[]> {
     const { logger, env } = context;
+
+    // Enforce maximum limit of 50 books per request
+    const MAX_BOOKS_PER_REQUEST = 50;
+    if (count > MAX_BOOKS_PER_REQUEST) {
+      logger.warn(`x.ai book count capped`, {
+        requested: count,
+        capped: MAX_BOOKS_PER_REQUEST,
+      });
+      count = MAX_BOOKS_PER_REQUEST;
+    }
 
     try {
       const apiKey = await env.XAI_API_KEY.get();
