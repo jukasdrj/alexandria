@@ -39,6 +39,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:sprint0": "vitest run --config=vitest.sprint0.config.js",
+    "test:ai": "vitest run lib/external-services/__tests__/ai-integration.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
