@@ -26,6 +26,7 @@ import { BookGenerationOrchestrator } from '../../lib/external-services/orchestr
 import { createServiceContext } from '../../lib/external-services/service-context.js';
 import type { GeneratedBook } from '../../lib/external-services/capabilities.js';
 import { resolvePrompt } from '../../lib/ai/book-generation-prompts.js';
+import type { QuotaManager } from './quota-manager.js';
 
 // =================================================================================
 // Module-Level Orchestrator (Cold Start Optimization)
@@ -138,7 +139,7 @@ export async function generateHybridBackfillList(
   batchSize: number = 20,
   promptVariant?: string,
   modelOverride?: string,
-  quotaManager?: { recordApiCall: (count: number) => Promise<void> }
+  quotaManager?: QuotaManager
 ): Promise<HybridBackfillResult> {
   const startTime = Date.now();
 

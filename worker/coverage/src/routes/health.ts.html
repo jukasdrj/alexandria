@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">33.33% </span>
+                <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>5/15</span>
+                <span class='fraction'>0/15</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">33.33% </span>
+                <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>5/15</span>
+                <span class='fraction'>0/15</span>
             </div>
         
             
@@ -171,7 +171,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -179,21 +179,13 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -215,9 +207,17 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -264,7 +264,7 @@ import {
 // Health Data Schema
 // =================================================================================
 &nbsp;
-const HealthDataSchema = z.object({
+const HealthDataSchema = <span class="cstat-no" title="statement not covered" >z.object({</span>
   status: z.enum(['ok', 'degraded']),
   database: z.enum(['connected', 'disconnected']),
   r2_covers: z.enum(['bound', 'not_configured']),
@@ -272,13 +272,13 @@ const HealthDataSchema = z.object({
 }).openapi('HealthData');
 &nbsp;
 // Success response with envelope
-const HealthSuccessSchema = createSuccessSchema(HealthDataSchema, 'HealthSuccess');
+const <span class="cstat-no" title="statement not covered" >HealthSuccessSchema = createSuccessSchema(HealthDataSchema, 'HealthSuccess');</span>
 &nbsp;
 // =================================================================================
 // Health Route Definition
 // =================================================================================
 &nbsp;
-const healthRoute = createRoute({
+const <span class="cstat-no" title="statement not covered" >healthRoute = createRoute({</span>
   method: 'get',
   path: '/health',
   tags: ['System'],
@@ -308,9 +308,9 @@ const healthRoute = createRoute({
 // Route Handler
 // =================================================================================
 &nbsp;
-const app = new OpenAPIHono&lt;AppBindings&gt;();
+const app = <span class="cstat-no" title="statement not covered" >new OpenAPIHono&lt;AppBindings&gt;();</span>
 &nbsp;
-app.openapi(healthRoute, <span class="fstat-no" title="function not covered" >async (c</span>) =&gt; {
+<span class="cstat-no" title="statement not covered" >app.openapi(healthRoute, <span class="fstat-no" title="function not covered" >async (c</span>) =&gt; {</span>
   const r2Status: 'bound' | 'not_configured' = <span class="cstat-no" title="statement not covered" >c.env.COVER_IMAGES ? 'bound' : 'not_configured';</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >  try {</span>
@@ -349,7 +349,7 @@ export default app;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-30T21:27:27.225Z
+                at 2026-01-13T04:09:32.596Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

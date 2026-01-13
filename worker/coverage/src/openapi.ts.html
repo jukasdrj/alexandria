@@ -25,14 +25,14 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/25</span>
+                <span class='fraction'>0/26</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/14</span>
+                <span class='fraction'>0/18</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/24</span>
+                <span class='fraction'>0/25</span>
             </div>
         
             
@@ -189,7 +189,17 @@
 <a name='L124'></a><a href='#L124'>124</a>
 <a name='L125'></a><a href='#L125'>125</a>
 <a name='L126'></a><a href='#L126'>126</a>
-<a name='L127'></a><a href='#L127'>127</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -282,25 +292,15 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -308,6 +308,26 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -404,6 +424,7 @@ export const registerOpenAPIDoc = <span class="cstat-no" title="statement not co
       };
 &nbsp;
       // Collect OpenAPI specs from all sub-routers
+      const logger = <span class="cstat-no" title="statement not covered" >c.get('logger');</span>
 <span class="cstat-no" title="statement not covered" >      for (let i = <span class="cstat-no" title="statement not covered" >0; i</span> &lt; subRouters.length; i++) {</span>
         const router = <span class="cstat-no" title="statement not covered" >subRouters[i];</span>
 <span class="cstat-no" title="statement not covered" >        try {</span>
@@ -412,7 +433,10 @@ export const registerOpenAPIDoc = <span class="cstat-no" title="statement not co
           // Merge paths
 <span class="cstat-no" title="statement not covered" >          if (subDoc.paths) {</span>
             const pathCount = <span class="cstat-no" title="statement not covered" >Object.keys(subDoc.paths).length;</span>
-<span class="cstat-no" title="statement not covered" >            console.log(`[OpenAPI] Router ${i} contributed ${pathCount} paths`);</span>
+<span class="cstat-no" title="statement not covered" >            logger.debug('OpenAPI router contributed paths', {</span>
+              router_index: i,
+              path_count: pathCount,
+            });
 <span class="cstat-no" title="statement not covered" >            Object.assign(mergedDoc.paths || {}, subDoc.paths);</span>
           }
 &nbsp;
@@ -427,13 +451,19 @@ export const registerOpenAPIDoc = <span class="cstat-no" title="statement not co
         } catch (e) {
           // Log which router failed with error details
           const errorMsg = <span class="cstat-no" title="statement not covered" >e instanceof Error ? e.message : String(e);</span>
-<span class="cstat-no" title="statement not covered" >          console.warn(`[OpenAPI] Router ${i} failed: ${errorMsg}`);</span>
+<span class="cstat-no" title="statement not covered" >          logger.warn('OpenAPI router failed', {</span>
+            router_index: i,
+            error: errorMsg,
+          });
         }
       }
 &nbsp;
 <span class="cstat-no" title="statement not covered" >      return c.json(mergedDoc);</span>
     } catch (error) {
-<span class="cstat-no" title="statement not covered" >      console.error('OpenAPI generation error:', error);</span>
+<span class="cstat-no" title="statement not covered" >      c.get('logger').error('OpenAPI generation error', {</span>
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
 <span class="cstat-no" title="statement not covered" >      return c.json({</span>
         error: 'Failed to generate OpenAPI spec',
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -448,7 +478,7 @@ export const registerOpenAPIDoc = <span class="cstat-no" title="statement not co
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-30T21:27:27.225Z
+                at 2026-01-13T04:09:32.596Z
             </div>
         <script src="../prettify.js"></script>
         <script>

@@ -8,7 +8,7 @@ import type { Logger } from '../../lib/logger.js';
 import type { DatabaseRow } from '../types/database.js';
 import { enrichWork, enrichEdition } from './enrichment-service.js';
 import { findOrCreateWork, linkWorkToAuthors } from './work-utils.js';
-import { createQuotaManager } from './quota-manager.js';
+import { getQuotaManager } from './quota-manager.js';
 import { fetchWikidataMultipleBatches } from '../../services/wikidata-client.js';
 import { Semaphore } from '../lib/concurrency.js';
 
@@ -823,7 +823,7 @@ export async function enrichAuthorBibliography(
   }
 
   // Initialize QuotaManager
-  const quotaManager = createQuotaManager(env.QUOTA_KV);
+  const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
   const pageSize = 100;
 
   // Track results (including quota status)

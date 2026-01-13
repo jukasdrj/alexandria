@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { QuotaManager, createQuotaManager, withQuotaGuard } from '../quota-manager.js';
+import { QuotaManager, createQuotaManager, getQuotaManager, withQuotaGuard } from '../quota-manager.js';
 import type { Logger } from '../../../lib/logger.js';
 
 // Mock KV namespace
@@ -247,7 +247,6 @@ describe('QuotaManager', () => {
     });
 
     it('should update last reset date', async () => {
-      const beforeReset = await quotaManager.getQuotaStatus();
       await quotaManager.resetQuota();
       const afterReset = await quotaManager.getQuotaStatus();
 
@@ -366,9 +365,49 @@ describe('QuotaManager', () => {
 
   describe('createQuotaManager factory', () => {
     it('should create QuotaManager instance', () => {
-      const manager = createQuotaManager(mockKV as unknown as KVNamespace);
+      const manager = createQuotaManager(mockKV as unknown as KVNamespace, mockLogger);
 
       expect(manager).toBeInstanceOf(QuotaManager);
+    });
+  });
+
+  describe('getQuotaManager singleton', () => {
+    it('should return same instance across multiple calls', () => {
+      const manager1 = getQuotaManager(mockKV as unknown as KVNamespace, mockLogger);
+      const manager2 = getQuotaManager(mockKV as unknown as KVNamespace, mockLogger);
+
+      expect(manager1).toBe(manager2); // Same instance reference
+      expect(manager1).toBeInstanceOf(QuotaManager);
+    });
+
+    it('should update logger on subsequent calls', () => {
+      const logger1 = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as any;
+      const logger2 = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as any;
+
+      const manager = getQuotaManager(mockKV as unknown as KVNamespace, logger1);
+
+      // First call should use logger1
+      manager['logger'].info('test1');
+      expect(logger1.info).toHaveBeenCalledWith('test1');
+      expect(logger2.info).not.toHaveBeenCalled();
+
+      // Get singleton again with logger2 - should update logger
+      const sameManager = getQuotaManager(mockKV as unknown as KVNamespace, logger2);
+      expect(sameManager).toBe(manager); // Same instance
+
+      // Second call should use logger2
+      sameManager['logger'].info('test2');
+      expect(logger2.info).toHaveBeenCalledWith('test2');
+    });
+
+    it('should maintain state across singleton calls', async () => {
+      const manager1 = getQuotaManager(mockKV as unknown as KVNamespace, mockLogger);
+      await manager1.reserveQuota(100);
+
+      const manager2 = getQuotaManager(mockKV as unknown as KVNamespace, mockLogger);
+      const status = await manager2.getQuotaStatus();
+
+      expect(status.used_today).toBe(100); // State preserved
     });
   });
 

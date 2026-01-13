@@ -10,6 +10,7 @@
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import type { AppBindings } from '../env.js';
 import { createJobStatus } from '../services/async-backfill.js';
+import { acquireMonthLock, releaseMonthLock } from '../services/advisory-locks.js';
 
 // =================================================================================
 // Schemas
@@ -216,31 +217,7 @@ app.openapi(scheduleRoute, async (c) => {
       ? "status IN ('pending', 'retry', 'failed')"
       : "status IN ('pending', 'retry')";
 
-    const candidateMonths = await sql`
-      SELECT
-        id,
-        year,
-        month,
-        status,
-        retry_count,
-        books_generated,
-        isbns_resolved,
-        resolution_rate,
-        error_message
-      FROM backfill_log
-      WHERE ${sql.unsafe(statusFilter)}
-        AND year BETWEEN ${endYear} AND ${startYear}
-        AND (status != 'failed' OR retry_count < 5)
-      ORDER BY year DESC, month DESC
-      LIMIT ${batch_size}
-    `;
-
-    logger.info('Candidate months retrieved', {
-      count: candidateMonths.length,
-      requested: batch_size,
-    });
-
-    // 2. Get overall statistics
+    // 2. Get overall statistics (read-only, no transaction needed)
     const statusCounts = await sql`
       SELECT
         COUNT(*) FILTER (WHERE status = 'pending') AS pending,
@@ -252,98 +229,171 @@ app.openapi(scheduleRoute, async (c) => {
 
     const stats = statusCounts[0];
 
-    // 3. Dry run mode - return candidates without execution
-    if (dry_run) {
-      return c.json({
-        dry_run: true,
-        batch_size,
-        months_selected: candidateMonths.length,
-        months: candidateMonths.map((m: any) => ({
-          year: m.year,
-          month: m.month,
-          status: m.status,
-          books_generated: m.books_generated,
-          isbns_resolved: m.isbns_resolved,
-          resolution_rate: m.resolution_rate ? parseFloat(m.resolution_rate) : undefined,
-          error_message: m.error_message,
-        })),
-        total_pending: parseInt(stats.pending || '0'),
-        total_processing: parseInt(stats.processing || '0'),
-        total_completed: parseInt(stats.completed || '0'),
-        total_failed: parseInt(stats.failed || '0'),
-      });
-    }
-
-    // 4. Execute backfill for each candidate month
+    // Track months that acquired locks (for cleanup in finally block)
+    const lockedMonths: Array<{ year: number; month: number }> = [];
     let triggered = 0;
     let skipped = 0;
     let errors = 0;
 
-    for (const candidate of candidateMonths) {
-      try {
-        // Update status to 'processing' (clear completed_at for retry)
-        await sql`
-          UPDATE backfill_log
-          SET
-            status = 'processing',
-            started_at = NOW(),
-            completed_at = NULL,
-            error_message = NULL,
-            last_retry_at = CASE WHEN ${candidate.status} = 'retry' THEN NOW() ELSE last_retry_at END
-          WHERE id = ${candidate.id}
-        `;
+    // Declare candidateMonths outside transaction scope so it can be referenced in response
+    let candidateMonths: any[] = [];
 
-        // Determine prompt variant based on year
-        const promptVariant = candidate.year >= 2020 ? 'contemporary-notable' : 'baseline';
+    //  3. ATOMIC TRANSACTION: Query + Lock + Status Update
+    // This prevents TOCTOU race condition where multiple schedulers
+    // query the same pending months before locks are acquired.
+    // Transaction provides snapshot isolation for SELECT query.
+    await sql.begin(async (tx) => {
+      // Query candidates INSIDE transaction for consistent snapshot
+      candidateMonths = await tx`
+        SELECT
+          id,
+          year,
+          month,
+          status,
+          retry_count,
+          books_generated,
+          isbns_resolved,
+          resolution_rate,
+          error_message
+        FROM backfill_log
+        WHERE ${tx.unsafe(statusFilter)}
+          AND year BETWEEN ${endYear} AND ${startYear}
+          AND (status != 'failed' OR retry_count < 5)
+        ORDER BY year DESC, month DESC
+        LIMIT ${batch_size}
+      `;
 
-        // Create job status in KV before queuing
-        const jobId = crypto.randomUUID();
-        await createJobStatus(env.QUOTA_KV, jobId, candidate.year, candidate.month);
+      logger.info('Candidate months retrieved (in transaction)', {
+        count: candidateMonths.length,
+        requested: batch_size,
+      });
 
-        // Send job directly to BACKFILL_QUEUE (avoids self-HTTP-request issues)
-        await env.BACKFILL_QUEUE.send({
-          job_id: jobId,
-          year: candidate.year,
-          month: candidate.month,
-          batch_size: 20, // 20 books per provider (40 total after dedup)
-          prompt_variant: promptVariant,
-          dry_run: false,
-        });
-
-        logger.debug('Job sent to BACKFILL_QUEUE', {
-          job_id: jobId,
-          year: candidate.year,
-          month: candidate.month,
-        });
-
-        triggered++;
-        logger.info('Backfill triggered', {
-          year: candidate.year,
-          month: candidate.month,
-          prompt_variant: promptVariant,
-        });
-      } catch (error) {
-        errors++;
-        const errorMsg = error instanceof Error ? error.message : String(error);
-
-        // Mark as failed, increment retry count
-        await sql`
-          UPDATE backfill_log
-          SET
-            status = CASE WHEN retry_count + 1 >= 5 THEN 'failed' ELSE 'retry' END,
-            retry_count = retry_count + 1,
-            error_message = ${errorMsg},
-            completed_at = NOW()
-          WHERE id = ${candidate.id}
-        `;
-
-        logger.error('Backfill execution failed', {
-          year: candidate.year,
-          month: candidate.month,
-          error: errorMsg,
-          retry_count: candidate.retry_count + 1,
+      // Dry run mode - return candidates without execution
+      if (dry_run) {
+        // Early return from transaction - no changes will be committed
+        return c.json({
+          dry_run: true,
+          batch_size,
+          months_selected: candidateMonths.length,
+          months: candidateMonths.map((m: any) => ({
+            year: m.year,
+            month: m.month,
+            status: m.status,
+            books_generated: m.books_generated,
+            isbns_resolved: m.isbns_resolved,
+            resolution_rate: m.resolution_rate ? parseFloat(m.resolution_rate) : undefined,
+            error_message: m.error_message,
+          })),
+          total_pending: parseInt(stats.pending || '0'),
+          total_processing: parseInt(stats.processing || '0'),
+          total_completed: parseInt(stats.completed || '0'),
+          total_failed: parseInt(stats.failed || '0'),
         });
       }
+
+      // Execute backfill for each candidate month (with advisory locks)
+      for (const candidate of candidateMonths) {
+        // Try to acquire lock for this month (10s timeout)
+        // IMPORTANT: Lock acquired INSIDE transaction, but persists after COMMIT
+        // Advisory locks are session-scoped, not transaction-scoped
+        const lockAcquired = await acquireMonthLock(
+          tx, // Use transaction handle
+          candidate.year,
+          candidate.month,
+          10000, // 10 second timeout
+          logger
+        );
+
+        if (!lockAcquired) {
+          // Lock unavailable - another Worker is processing this month
+          skipped++;
+          logger.info('Month lock unavailable - skipping (another process may be running)', {
+            year: candidate.year,
+            month: candidate.month,
+          });
+          continue;
+        }
+
+        // Track locked month for cleanup in finally block
+        lockedMonths.push({ year: candidate.year, month: candidate.month });
+
+        try {
+          // Lock acquired - proceed with processing
+          logger.debug('Month lock acquired - proceeding with backfill', {
+            year: candidate.year,
+            month: candidate.month,
+          });
+
+          // Update status to 'processing' INSIDE transaction
+          // This ensures atomicity: If queue send fails, transaction rollback reverts status
+          await tx`
+            UPDATE backfill_log
+            SET
+              status = 'processing',
+              started_at = NOW(),
+              completed_at = NULL,
+              error_message = NULL,
+              last_retry_at = CASE WHEN ${candidate.status} = 'retry' THEN NOW() ELSE last_retry_at END
+            WHERE id = ${candidate.id}
+              AND status IN ('pending', 'retry')  -- Defense-in-depth: Prevent clobbering
+          `;
+
+          // Determine prompt variant based on year
+          const promptVariant = candidate.year >= 2020 ? 'contemporary-notable' : 'baseline';
+
+          // Create job status in KV before queuing
+          const jobId = crypto.randomUUID();
+          await createJobStatus(env.QUOTA_KV, jobId, candidate.year, candidate.month);
+
+          // Send job directly to BACKFILL_QUEUE
+          // NOTE: If this fails, transaction rollback will revert status update
+          await env.BACKFILL_QUEUE.send({
+            job_id: jobId,
+            year: candidate.year,
+            month: candidate.month,
+            batch_size: 20, // 20 books per provider (40 total after dedup)
+            prompt_variant: promptVariant,
+            dry_run: false,
+          });
+
+          logger.debug('Job sent to BACKFILL_QUEUE', {
+            job_id: jobId,
+            year: candidate.year,
+            month: candidate.month,
+          });
+
+          triggered++;
+          logger.info('Backfill triggered', {
+            year: candidate.year,
+            month: candidate.month,
+            prompt_variant: promptVariant,
+          });
+        } catch (error) {
+          errors++;
+          const errorMsg = error instanceof Error ? error.message : String(error);
+
+          logger.error('Backfill execution failed (will rollback status update)', {
+            year: candidate.year,
+            month: candidate.month,
+            error: errorMsg,
+            retry_count: candidate.retry_count + 1,
+          });
+
+          // Throw error to trigger transaction rollback
+          // Status update will be reverted, month remains pending/retry
+          // Lock will be released in finally block (session-scoped)
+          throw error;
+        }
+      }
+
+      // Transaction COMMIT: All status updates persist atomically
+    });
+
+    // 4. Release all acquired locks (OUTSIDE transaction, uses sql not tx)
+    // Advisory locks are session-scoped, so must be explicitly released
+    // even after transaction commit
+    for (const { year, month } of lockedMonths) {
+      await releaseMonthLock(sql, year, month, logger);
     }
 
     logger.info('Scheduler execution complete', {

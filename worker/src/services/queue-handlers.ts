@@ -15,7 +15,7 @@ import { enrichEdition, enrichWork } from './enrichment-service.js';
 import { findOrCreateWork, linkWorkToAuthors } from './work-utils.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
 import { Logger } from '../../lib/logger.js';
-import { QuotaManager } from './quota-manager.js';
+import { getQuotaManager } from './quota-manager.js';
 import { extractGoogleBooksCategories } from '../../services/google-books.js';
 import { updateWorkSubjects } from './subject-enrichment.js';
 import { fetchBookByISBN } from '../../services/wikidata.js';
@@ -97,8 +97,8 @@ export async function processCoverQueue(
     messageCount: batch.messages.length,
   });
 
-  // Initialize quota manager for ISBNdb quota enforcement (per-batch, needs fresh env)
-  const quotaManager = new QuotaManager(env.QUOTA_KV);
+  // Initialize singleton quota manager for ISBNdb quota enforcement
+  const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
 
   // Create cover fetch orchestrator with shared registry (reuses module-level registry)
   // Timeout per provider prevents slow providers from blocking entire batch
@@ -481,8 +481,8 @@ export async function processEnrichmentQueue(
     // 2. Fetch ALL ISBNs in a single batched API call (100x efficiency!)
     const batchStartTime = Date.now();
 
-    // Initialize quota manager (per-batch, needs fresh env) and create service context
-    const quotaManager = new QuotaManager(env.QUOTA_KV);
+    // Initialize singleton quota manager and create service context
+    const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
     const serviceContext = createServiceContext(env, logger, { quotaManager });
 
     // Get ISBNdb provider from shared registry (avoids repeated instantiation)
@@ -722,7 +722,7 @@ export async function processEnrichmentQueue(
 
             const variants = await editionVariantOrchestrator.fetchEditionVariants(
               isbn,
-              createServiceContext(env, logger, quotaManager)
+              createServiceContext(env, logger, { quotaManager })
             );
             const variantDuration = Date.now() - variantStartTime;
 
@@ -1007,15 +1007,15 @@ export async function processAuthorQueue(
   };
 
   try {
-    // Initialize quota manager
-    const quotaManager = new QuotaManager(env.QUOTA_KV);
+    // Initialize singleton quota manager
+    const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
     const quotaStatus = await quotaManager.getQuotaStatus();
 
     // Circuit breaker: 85% quota - halt ALL author enrichment
     if (quotaStatus.usage_percentage >= 0.85) {
       logger.warn('[AuthorQueue] Circuit breaker at 85% quota - rejecting all author enrichment', {
-        usage: quotaStatus.used,
-        limit: quotaStatus.daily_limit,
+        usage: quotaStatus.used_today,
+        limit: quotaStatus.limit,
         percentage: quotaStatus.usage_percentage
       });
 
@@ -1032,8 +1032,8 @@ export async function processAuthorQueue(
     const isQuotaTight = quotaStatus.usage_percentage >= 0.70;
     if (isQuotaTight) {
       logger.warn('[AuthorQueue] Circuit breaker at 70% quota - prioritizing only high-priority requests', {
-        usage: quotaStatus.used,
-        limit: quotaStatus.daily_limit,
+        usage: quotaStatus.used_today,
+        limit: quotaStatus.limit,
         percentage: quotaStatus.usage_percentage
       });
     }

@@ -26,6 +26,7 @@ import type { Env } from '../env.js';
 import { ISBNResolutionOrchestrator } from '../../lib/external-services/orchestrators/index.js';
 import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
 import type { ServiceContext } from '../../lib/external-services/service-context.js';
+import type { QuotaManager } from './quota-manager.js';
 import {
   OpenLibraryProvider,
   GoogleBooksProvider,
@@ -132,7 +133,7 @@ export async function batchResolveISBNs(
   books: BookMetadata[],
   _apiKey: string, // Unused - kept for backward compatibility
   logger: Logger,
-  quotaManager?: { checkQuota: (count: number, reserve: boolean) => Promise<{ allowed: boolean; status: any }>; recordApiCall: (count: number) => Promise<void> },
+  quotaManager?: QuotaManager,
   env?: Env
 ): Promise<ISBNResolutionResult[]> {
   if (!env) {

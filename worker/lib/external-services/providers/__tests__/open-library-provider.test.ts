@@ -34,6 +34,7 @@ describe('OpenLibraryProvider', () => {
       expect(provider.capabilities).toEqual([
         ServiceCapability.ISBN_RESOLUTION,
         ServiceCapability.METADATA_ENRICHMENT,
+        ServiceCapability.ENHANCED_EXTERNAL_IDS,
       ]);
     });
   });

@@ -22,6 +22,8 @@ import type { Logger } from '../../lib/logger.js';
 import { generateHybridBackfillList } from './hybrid-backfill.js';
 import { persistGeminiResults } from './gemini-persist.js';
 import { splitResolvedCandidates } from './types/backfill.js';
+import { getQuotaManager } from './quota-manager.js';
+import { acquireMonthLock, releaseMonthLock } from './advisory-locks.js';
 import postgres from 'postgres';
 
 // =================================================================================
@@ -219,6 +221,41 @@ export async function processBackfillJob(
       experiment_id,
     });
 
+    // Try to acquire lock for this month (10s timeout)
+    // Prevents duplicate processing if queue delivers duplicate messages
+    const lockAcquired = await acquireMonthLock(
+      sql,
+      year,
+      month,
+      10000, // 10 second timeout
+      logger
+    );
+
+    if (!lockAcquired) {
+      // Lock unavailable - another Worker is processing this month
+      logger.info('[AsyncBackfill] Month lock unavailable - skipping duplicate job', {
+        job_id,
+        year,
+        month,
+      });
+
+      await updateJobStatus(env.QUOTA_KV, job_id, {
+        status: 'failed',
+        progress: 'Skipped - another process is already processing this month',
+        error: 'Lock unavailable (duplicate processing attempt)',
+        completed_at: new Date().toISOString(),
+        duration_ms: Date.now() - startTime,
+      });
+
+      return; // Exit early - no processing needed
+    }
+
+    logger.debug('[AsyncBackfill] Month lock acquired - proceeding with job', {
+      job_id,
+      year,
+      month,
+    });
+
     // Update backfill_log: Set status to 'processing'
     await sql`
       INSERT INTO backfill_log (
@@ -259,53 +296,8 @@ export async function processBackfillJob(
     });
 
     // Step 1: Run hybrid workflow (Gemini + ISBNdb resolution)
-    // Pass quota manager for API call tracking and quota checking
-    const quotaManager = env.QUOTA_KV ? {
-      checkQuota: async (count: number, reserve: boolean) => {
-        // Simple dry-run-friendly quota check
-        try {
-          const currentUsage = await env.QUOTA_KV.get<number>('isbndb_daily_calls', 'json') || 0;
-          const dailyLimit = 13000; // Safety limit
-          const allowed = (currentUsage + count) <= dailyLimit;
-
-          if (reserve && allowed) {
-            // Reserve quota by incrementing counter
-            await env.QUOTA_KV.put('isbndb_daily_calls', JSON.stringify(currentUsage + count));
-          }
-
-          return {
-            allowed,
-            status: {
-              used: currentUsage,
-              limit: dailyLimit,
-              remaining: dailyLimit - currentUsage,
-            },
-          };
-        } catch (error) {
-          logger.error('[QuotaTracking] Failed to check quota', {
-            error: error instanceof Error ? error.message : String(error),
-            count,
-          });
-          // Fail-open: allow the call if quota check fails
-          return {
-            allowed: true,
-            status: { used: 0, limit: 13000, remaining: 13000 },
-          };
-        }
-      },
-      recordApiCall: async (count: number) => {
-        try {
-          const currentUsage = await env.QUOTA_KV.get<number>('isbndb_daily_calls', 'json') || 0;
-          const newUsage = currentUsage + count;
-          await env.QUOTA_KV.put('isbndb_daily_calls', JSON.stringify(newUsage));
-        } catch (error) {
-          logger.error('[QuotaTracking] Failed to record API calls', {
-            error: error instanceof Error ? error.message : String(error),
-            count,
-          });
-        }
-      },
-    } : undefined;
+    // Use singleton QuotaManager for API call tracking and quota checking
+    const quotaManager = env.QUOTA_KV ? getQuotaManager(env.QUOTA_KV, logger) : undefined;
 
     const hybridResult = await generateHybridBackfillList(
       year,
@@ -376,8 +368,6 @@ export async function processBackfillJob(
 
       // Continue anyway - try to enrich even if persistence failed
       // This maintains backward compatibility
-    } finally {
-      await sql.end();
     }
 
     // Step 3: Split candidates into enrichment-ready (with ISBN) and synthetic-only (without ISBN)
@@ -527,20 +517,32 @@ export async function processBackfillJob(
 
     // Update backfill_log: Mark as completed with final stats
     const resolutionRate = hybridResult.stats.isbn_resolution.resolution_rate;
-    await sql`
-      UPDATE backfill_log
-      SET
-        status = 'completed',
-        books_generated = ${hybridResult.stats.total_books},
-        isbns_resolved = ${hybridResult.candidates.length},
-        resolution_rate = ${resolutionRate},
-        isbns_queued = ${totalSent},
-        gemini_calls = ${hybridResult.stats.api_calls.ai_generation || 1},
-        xai_calls = 0,
-        isbndb_calls = ${hybridResult.stats.api_calls.isbndb || 0},
-        completed_at = NOW()
-      WHERE year = ${year} AND month = ${month}
-    `;
+    try {
+      await sql`
+        UPDATE backfill_log
+        SET
+          status = 'completed',
+          books_generated = ${hybridResult.stats.total_books},
+          isbns_resolved = ${hybridResult.candidates.length},
+          resolution_rate = ${resolutionRate},
+          isbns_queued = ${totalSent},
+          gemini_calls = ${hybridResult.stats.api_calls.ai_generation || 1},
+          xai_calls = 0,
+          isbndb_calls = ${hybridResult.stats.api_calls.isbndb || 0},
+          completed_at = NOW()
+        WHERE year = ${year} AND month = ${month}
+      `;
+      logger.debug('[AsyncBackfill] Updated backfill_log status to completed', { job_id, year, month });
+    } catch (dbError) {
+      const dbErrorMsg = dbError instanceof Error ? dbError.message : String(dbError);
+      logger.error('[AsyncBackfill] Failed to update backfill_log completion status', {
+        job_id,
+        year,
+        month,
+        error: dbErrorMsg,
+      });
+      // Continue - KV status update is the primary tracking mechanism
+    }
 
     await updateJobStatus(env.QUOTA_KV, job_id, {
       status: 'complete',
@@ -566,16 +568,28 @@ export async function processBackfillJob(
     });
 
     // Update backfill_log: Mark as retry or failed (based on retry_count)
-    await sql`
-      UPDATE backfill_log
-      SET
-        status = CASE WHEN retry_count + 1 >= 5 THEN 'failed' ELSE 'retry' END,
-        retry_count = retry_count + 1,
-        error_message = ${errorMsg},
-        completed_at = NOW(),
-        last_retry_at = NOW()
-      WHERE year = ${year} AND month = ${month}
-    `;
+    try {
+      await sql`
+        UPDATE backfill_log
+        SET
+          status = CASE WHEN retry_count + 1 >= 5 THEN 'failed' ELSE 'retry' END,
+          retry_count = retry_count + 1,
+          error_message = ${errorMsg},
+          completed_at = NOW(),
+          last_retry_at = NOW()
+        WHERE year = ${year} AND month = ${month}
+      `;
+      logger.debug('[AsyncBackfill] Updated backfill_log status to retry/failed', { job_id, year, month });
+    } catch (dbError) {
+      const dbErrorMsg = dbError instanceof Error ? dbError.message : String(dbError);
+      logger.error('[AsyncBackfill] Failed to update backfill_log in error handler', {
+        job_id,
+        year,
+        month,
+        error: dbErrorMsg,
+      });
+      // Don't throw - we already have a primary error to report
+    }
 
     await updateJobStatus(env.QUOTA_KV, job_id, {
       status: 'failed',
@@ -585,12 +599,34 @@ export async function processBackfillJob(
       duration_ms: Date.now() - startTime,
     });
 
-    // Close DB connection
-    await sql.end().catch(() => {});
-
     throw error; // Re-throw for queue retry logic
   } finally {
-    // Ensure database connection is closed
-    await sql.end().catch(() => {});
+    // Release advisory lock
+    try {
+      await releaseMonthLock(sql, year, month, logger);
+      logger.debug('[AsyncBackfill] Month lock released', { job_id, year, month });
+    } catch (lockError) {
+      const lockErrorMsg = lockError instanceof Error ? lockError.message : String(lockError);
+      logger.warn('[AsyncBackfill] Error releasing month lock', {
+        job_id,
+        year,
+        month,
+        error: lockErrorMsg,
+      });
+      // Don't throw - lock will be released when connection closes anyway
+    }
+
+    // Ensure database connection is closed in ALL paths
+    try {
+      await sql.end();
+      logger.debug('[AsyncBackfill] Database connection closed', { job_id });
+    } catch (closeError) {
+      const closeErrorMsg = closeError instanceof Error ? closeError.message : String(closeError);
+      logger.warn('[AsyncBackfill] Error closing database connection', {
+        job_id,
+        error: closeErrorMsg,
+      });
+      // Don't throw - connection cleanup errors should not fail the job
+    }
   }
 }

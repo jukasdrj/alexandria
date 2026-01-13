@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">21.42% </span>
+                <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>6/28</span>
+                <span class='fraction'>0/28</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">21.42% </span>
+                <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>6/28</span>
+                <span class='fraction'>0/28</span>
             </div>
         
             
@@ -242,19 +242,13 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -264,19 +258,19 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -305,9 +299,15 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -406,13 +406,13 @@ import {
 // Stats Data Schemas
 // =================================================================================
 &nbsp;
-const EnrichedTableStatsSchema = z.object({
+const EnrichedTableStatsSchema = <span class="cstat-no" title="statement not covered" >z.object({</span>
   total: z.number().int().nonnegative(),
   last_1h: z.number().int().nonnegative(),
   last_24h: z.number().int().nonnegative(),
 }).openapi('EnrichedTableStats');
 &nbsp;
-const StatsDataSchema = z.object({
+const StatsDataSchema = <span class="cstat-no" title="statement not covered" >z.object({</span>
   // OpenLibrary core tables
   editions: z.number().int().nonnegative(),
   isbns: z.number().int().nonnegative(),
@@ -428,13 +428,13 @@ const StatsDataSchema = z.object({
 }).openapi('StatsData');
 &nbsp;
 // Success response with envelope
-const StatsSuccessSchema = createSuccessSchema(StatsDataSchema, 'StatsSuccess');
+const <span class="cstat-no" title="statement not covered" >StatsSuccessSchema = createSuccessSchema(StatsDataSchema, 'StatsSuccess');</span>
 &nbsp;
 // =================================================================================
 // Stats Route Definition
 // =================================================================================
 &nbsp;
-const statsRoute = createRoute({
+const <span class="cstat-no" title="statement not covered" >statsRoute = createRoute({</span>
   method: 'get',
   path: '/api/stats',
   tags: ['System'],
@@ -469,9 +469,9 @@ const statsRoute = createRoute({
 // Route Handler
 // =================================================================================
 &nbsp;
-const app = new OpenAPIHono&lt;AppBindings&gt;();
+const app = <span class="cstat-no" title="statement not covered" >new OpenAPIHono&lt;AppBindings&gt;();</span>
 &nbsp;
-app.openapi(statsRoute, <span class="fstat-no" title="function not covered" >async (c</span>) =&gt; {
+<span class="cstat-no" title="statement not covered" >app.openapi(statsRoute, <span class="fstat-no" title="function not covered" >async (c</span>) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  try {</span>
     const sql = <span class="cstat-no" title="statement not covered" >c.get('sql');</span>
 &nbsp;
@@ -562,7 +562,7 @@ export default app;
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-12-30T21:27:27.225Z
+                at 2026-01-13T04:09:32.596Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

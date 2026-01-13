@@ -24,7 +24,7 @@
 import type postgres from 'postgres';
 import type { Env } from '../env.js';
 import type { Logger } from '../../lib/logger.js';
-import { QuotaManager } from './quota-manager.js';
+import { getQuotaManager } from './quota-manager.js';
 import type { ISBNResolutionResult } from './isbn-resolution.js';
 import { ISBNResolutionOrchestrator } from '../../lib/external-services/orchestrators/index.js';
 import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
@@ -251,6 +251,9 @@ export async function enhanceSyntheticWork(
       providerTimeoutMs: 15000,
       enableLogging: true,
     });
+
+    // Create singleton quota manager for ISBNdb tracking
+    const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
 
     // Resolve ISBN via NEW orchestrator
     // Uses Service Provider Framework with ISBNdb
@@ -492,8 +495,8 @@ export async function enhanceSyntheticBatch(
     batch_size: candidates.length,
   });
 
-  // Initialize quota manager with atomic reservation pattern (Issue #173 - Grok Review Fix)
-  const quotaManager = new QuotaManager(env.QUOTA_KV, logger);
+  // Initialize singleton quota manager with atomic reservation pattern (Issue #173 - Grok Review Fix)
+  const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
   let quotaExhausted = false;
 
   // Create quota check lambda with atomic reservation (same pattern as isbn-resolution.ts)

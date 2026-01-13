@@ -51,6 +51,10 @@ describe('WikidataProvider', () => {
         ServiceCapability.COVER_IMAGES,
         ServiceCapability.ISBN_RESOLUTION,
         ServiceCapability.SUBJECT_BROWSING,
+        ServiceCapability.SERIES_INFO,
+        ServiceCapability.AWARDS,
+        ServiceCapability.TRANSLATIONS,
+        ServiceCapability.ENHANCED_EXTERNAL_IDS,
       ]);
     });
   });

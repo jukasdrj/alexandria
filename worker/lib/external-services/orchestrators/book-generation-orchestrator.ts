@@ -192,8 +192,42 @@ export class BookGenerationOrchestrator {
       count_per_provider: count,
     });
 
-    // Run all providers in parallel with individual timeout protection
-    const providerPromises = providers.map(async (provider) => {
+    // Filter to only available providers before attempting generation
+    const availableProviders: IBookGenerator[] = [];
+    for (const provider of providers) {
+      try {
+        const available = await provider.isAvailable(context.env);
+        if (available) {
+          availableProviders.push(provider);
+        } else {
+          logger.warn('[BookGenOrchestrator] Provider unavailable, skipping', {
+            provider: provider.name,
+            reason: 'isAvailable() returned false',
+          });
+        }
+      } catch (error) {
+        logger.error('[BookGenOrchestrator] Error checking provider availability', {
+          provider: provider.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (availableProviders.length === 0) {
+      logger.error('[BookGenOrchestrator] No available providers for concurrent generation', {
+        attempted_providers: providers.map((p) => p.name),
+        total_duration_ms: Date.now() - startTime,
+      });
+      return [];
+    }
+
+    logger.info('[BookGenOrchestrator] Available providers after filtering', {
+      available: availableProviders.map((p) => p.name),
+      filtered_out: providers.length - availableProviders.length,
+    });
+
+    // Run all available providers in parallel with individual timeout protection
+    const providerPromises = availableProviders.map(async (provider) => {
       const providerStart = Date.now();
 
       try {
@@ -256,7 +290,7 @@ export class BookGenerationOrchestrator {
 
     if (allBooks.length === 0) {
       logger.error('[BookGenOrchestrator] All concurrent providers failed', {
-        attempted_providers: providers.map((p) => p.name),
+        attempted_providers: availableProviders.map((p) => p.name),
         total_duration_ms: Date.now() - startTime,
       });
       return [];

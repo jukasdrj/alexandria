@@ -34,7 +34,7 @@ import {
 import { normalizeISBN, validateISBNBatch } from '../../lib/isbn-utils.js';
 import { enrichEdition, enrichWork } from '../services/enrichment-service.js';
 import { fetchISBNdbBatch } from '../../services/batch-isbndb.js';
-import { createQuotaManager } from '../services/quota-manager.js';
+import { getQuotaManager } from '../services/quota-manager.js';
 import { extractGoogleBooksCategories } from '../../services/google-books.js';
 import { updateWorkSubjects } from '../services/subject-enrichment.js';
 import { fetchBookByISBN } from '../../services/wikidata.js';
@@ -494,8 +494,8 @@ enrichRoutes.openapi(batchDirectRoute, async (c) => {
       source,
     });
 
-    // Initialize QuotaManager and check quota availability
-    const quotaManager = createQuotaManager(c.env.QUOTA_KV);
+    // Initialize singleton QuotaManager and check quota availability
+    const quotaManager = getQuotaManager(c.env.QUOTA_KV, c.get('logger'));
     const quotaCheck = await quotaManager.checkQuota(1, true); // 1 call for batch (regardless of ISBN count)
 
     if (!quotaCheck.allowed) {

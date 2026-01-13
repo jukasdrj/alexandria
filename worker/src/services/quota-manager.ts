@@ -17,7 +17,6 @@ import {
   ISBNDB_QUOTA_BUFFER,
   BULK_OPERATION_MAX_CALLS,
   CRON_QUOTA_MULTIPLIER,
-  getEffectiveQuotaLimit,
   getConservativeBatchSize,
 } from '../lib/constants.js';
 
@@ -29,6 +28,7 @@ export interface QuotaStatus {
   next_reset_in_hours: number;
   buffer_remaining: number;
   can_make_calls: boolean;
+  usage_percentage: number; // Percentage of quota used (0-1)
 }
 
 export interface QuotaCheckResult {
@@ -55,6 +55,18 @@ export class QuotaManager {
 
   constructor(kv: KVNamespace, logger: Logger) {
     this.kv = kv;
+    this.logger = logger;
+  }
+
+  /**
+   * Update logger for request-scoped context
+   *
+   * Used by getQuotaManager() singleton to maintain request-scoped logging
+   * when reusing the same QuotaManager instance across multiple requests.
+   *
+   * @param logger - New request-scoped logger
+   */
+  updateLogger(logger: Logger): void {
     this.logger = logger;
   }
 
@@ -217,7 +229,8 @@ export class QuotaManager {
         last_reset: await this.getLastResetDate(),
         next_reset_in_hours: Math.round(hoursToReset * 100) / 100,
         buffer_remaining: bufferRemaining,
-        can_make_calls: bufferRemaining > 0
+        can_make_calls: bufferRemaining > 0,
+        usage_percentage: this.DAILY_LIMIT > 0 ? usedToday / this.DAILY_LIMIT : 0
       };
     } catch (error) {
       this.logger.error('QuotaManager.getQuotaStatus error', {
@@ -315,7 +328,8 @@ export class QuotaManager {
       last_reset: this.getTodayDateString(),
       next_reset_in_hours: Math.round(hoursToReset * 100) / 100,
       buffer_remaining: 0, // Fail closed: report 0 buffer remaining on KV failure
-      can_make_calls: false // Fail closed: deny calls on KV failure
+      can_make_calls: false, // Fail closed: deny calls on KV failure
+      usage_percentage: 0
     };
   }
 
@@ -394,9 +408,57 @@ export class QuotaManager {
   }
 }
 
+// =================================================================================
+// Singleton Pattern (Consistency with ISBNResolutionOrchestrator)
+// =================================================================================
+
+/**
+ * Module-level singleton QuotaManager instance
+ *
+ * Initialized once per Worker instance and reused across requests.
+ * Reduces per-request overhead by eliminating repeated instantiation.
+ *
+ * Logger is updated per-request to maintain request-scoped context.
+ */
+let quotaManagerInstance: QuotaManager | null = null;
+
+/**
+ * Get or create singleton QuotaManager instance
+ *
+ * Uses singleton pattern for consistency with ISBNResolutionOrchestrator
+ * and BookGenerationOrchestrator. Logger is updated per-request via
+ * updateLogger() to maintain request-scoped logging context.
+ *
+ * @param kv - KV namespace binding (required for first call)
+ * @param logger - Request-scoped logger
+ * @returns Singleton QuotaManager instance
+ *
+ * @example
+ * ```typescript
+ * // In queue handler or route handler
+ * const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
+ * const status = await quotaManager.getQuotaStatus();
+ * ```
+ */
+export function getQuotaManager(kv: KVNamespace, logger: Logger): QuotaManager {
+  if (!quotaManagerInstance) {
+    quotaManagerInstance = new QuotaManager(kv, logger);
+  } else {
+    // Update logger for request-scoped context (matches orchestrator pattern)
+    quotaManagerInstance.updateLogger(logger);
+  }
+  return quotaManagerInstance;
+}
+
 /**
  * Factory function to create QuotaManager instance
- * Use this in your Worker handlers to get a properly configured instance
+ *
+ * Use this when you need a dedicated instance (e.g., testing, isolated operations).
+ * For normal Worker operations, prefer getQuotaManager() singleton.
+ *
+ * @param kv - KV namespace binding
+ * @param logger - Request-scoped logger
+ * @returns New QuotaManager instance
  */
 export function createQuotaManager(kv: KVNamespace, logger: Logger): QuotaManager {
   return new QuotaManager(kv, logger);

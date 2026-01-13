@@ -5,6 +5,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./src/__tests__/setup.ts'],
+    // Integration tests will be skipped if HYPERDRIVE_CONNECTION_STRING is not set
+    // To run integration tests: HYPERDRIVE_CONNECTION_STRING="postgresql://..." npm test
     // Exclude integration tests that require full Worker runtime (WASM modules)
     exclude: [
       '**/node_modules/**',

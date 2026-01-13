@@ -17,7 +17,7 @@ import {
 } from '../schemas/response.js';
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
 import { findOrCreateWork, linkWorkToAuthors } from '../services/work-utils.js';
-import { createQuotaManager } from '../services/quota-manager.js';
+import { getQuotaManager } from '../services/quota-manager.js';
 
 // =================================================================================
 // Types
@@ -338,8 +338,8 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
 
     const sql = c.get('sql');
 
-    // Initialize quota manager
-    const quotaManager = createQuotaManager(c.env.QUOTA_KV);
+    // Initialize singleton quota manager
+    const quotaManager = getQuotaManager(c.env.QUOTA_KV, c.get('logger'));
 
     // Generate list of months to process
     const months: string[] = [];

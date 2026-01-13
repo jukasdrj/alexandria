@@ -8,7 +8,7 @@ import {
   createErrorResponse,
   ErrorCode,
 } from '../schemas/response.js';
-import { QuotaManager } from '../services/quota-manager.js';
+import { getQuotaManager } from '../services/quota-manager.js';
 
 // =================================================================================
 // Quota Status Data Schemas
@@ -96,9 +96,10 @@ const app = new OpenAPIHono<AppBindings>();
 app.openapi(quotaRoute, async (c) => {
   try {
     const env = c.env;
+    const logger = c.get('logger');
 
-    // Initialize QuotaManager with QUOTA_KV namespace (NOT CACHE!)
-    const quotaManager = new QuotaManager(env.QUOTA_KV);
+    // Initialize singleton QuotaManager with QUOTA_KV namespace (NOT CACHE!)
+    const quotaManager = getQuotaManager(env.QUOTA_KV, logger);
 
     // Get quota status
     const status = await quotaManager.getQuotaStatus();
