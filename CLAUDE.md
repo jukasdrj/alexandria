@@ -336,9 +336,42 @@ Alexandria provides domain-specific skills that auto-load planning-with-files an
 - `POST /api/internal/enhance-synthetic-works` - Daily cron to enhance synthetic works **NEW**
 - `GET /openapi.json` - OpenAPI spec
 
+## Performance Optimizations (Jan 2026)
+
+**Recent optimization work** (commits 53e79a0, 49bd624):
+
+### ISBN Resolution Singleton Pattern
+- ✅ Module-level singleton orchestrator (eliminates 10-15ms overhead per request)
+- ✅ HTTP Keep-Alive connection reuse enabled
+- ✅ Providers registered once at module load, reused across all requests
+- ✅ Aligns with BookGenerationOrchestrator pattern
+
+**File:** `worker/src/services/isbn-resolution.ts`
+
+### Fuzzy Deduplication Optimization
+- ✅ Parallel query execution via `Promise.all` (20x faster)
+- ✅ 50 books: ~20 seconds → ~1 second
+- ✅ No change to deduplication accuracy (0.6 threshold maintained)
+
+**File:** `worker/src/services/deduplication.ts`
+
+### AI Provider Robustness
+- ✅ Markdown code fence sanitization (handles ````json ... ```` wrapping)
+- ✅ Prevents JSON parsing failures from occasional Markdown responses
+- ✅ Applied to both Gemini and x.ai providers
+
+**Files:** `worker/lib/external-services/providers/{gemini,xai}-provider.ts`
+
+### Code Cleanup
+- ✅ Removed legacy `src/services/book-resolution/resolution-orchestrator.ts`
+- ✅ Single source of truth: `lib/external-services/orchestrators/`
+
+**Documentation:** `docs/BACKFILL_OPTIMIZATION_REPORT.md`
+
 ## ISBN Resolution - Multi-Source Fallback System
 
 **NEW in v2.5.0**: Cascading ISBN fallback when ISBNdb quota exhausted.
+**OPTIMIZED in v2.6.0**: Singleton pattern for 10-15ms improvement per request.
 
 **5-Tier Resolution Chain**:
 1. **ISBNdb** (primary) - Premium API, 3 req/sec, ~15K calls/day
