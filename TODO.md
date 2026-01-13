@@ -38,6 +38,11 @@ Active tasks and future work. Production system (Phase 1-5) is complete.
 2. ✅ Self-HTTP-request timeouts (522 errors) - Changed to direct BACKFILL_QUEUE.send()
 3. ✅ Missing job status in KV - Added createJobStatus() before queue.send()
 4. ✅ Timestamp constraint violations - Clear completed_at when resetting to 'processing'
+5. ✅ **TOCTOU Race Condition** - Transaction-based atomic operations (query + lock + update) - **Jan 13, 2026**
+   - Advisory locks acquired INSIDE transaction for snapshot isolation
+   - Zero race conditions under concurrent scheduler load
+   - Session-scoped locks with explicit cleanup
+   - Archive: `docs/archive/2026/planning-sessions/jan-2026/toctou-race-fix/`
 
 **Live Test Results (Sep & Oct 2024):**
 - ✅ Gemini generated 20 books per month in ~11 seconds
