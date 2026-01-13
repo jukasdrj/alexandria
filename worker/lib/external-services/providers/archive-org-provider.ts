@@ -7,12 +7,14 @@
  * Implements:
  * - ICoverProvider: ISBN → Cover image URL
  * - IMetadataProvider: ISBN → Book metadata
+ * - IPublicDomainProvider: ISBN → Public domain status (date-based heuristic)
  *
  * Features:
  * - Free, respectful rate limiting (1 req/sec)
  * - Response caching (7-day TTL)
  * - Cover quality detection
  * - Metadata enrichment (descriptions, subjects)
+ * - Public domain detection via publication date heuristic
  *
  * @module lib/external-services/providers/archive-org-provider
  */
@@ -21,9 +23,11 @@ import type {
   IMetadataProvider,
   ICoverProvider,
   IISBNResolver,
+  IPublicDomainProvider,
   BookMetadata,
   CoverResult,
   ISBNResolutionResult,
+  PublicDomainResult,
 } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
 import type { Env } from '../../../src/env.js';
@@ -62,13 +66,14 @@ interface ArchiveOrgSearchResponse {
 // Archive.org Provider
 // =================================================================================
 
-export class ArchiveOrgProvider implements ICoverProvider, IMetadataProvider, IISBNResolver {
+export class ArchiveOrgProvider implements ICoverProvider, IMetadataProvider, IISBNResolver, IPublicDomainProvider {
   readonly name = 'archive.org';
   readonly providerType = 'free' as const;
   readonly capabilities = [
     ServiceCapability.COVER_IMAGES,
     ServiceCapability.METADATA_ENRICHMENT,
     ServiceCapability.ISBN_RESOLUTION,
+    ServiceCapability.PUBLIC_DOMAIN,
   ];
 
   private client = new ServiceHttpClient({
@@ -343,6 +348,117 @@ export class ArchiveOrgProvider implements ICoverProvider, IMetadataProvider, II
     }
 
     return Math.min(confidence, 100);
+  }
+
+  /**
+   * Check if a book is in the public domain
+   *
+   * Archive.org does not provide an explicit public domain flag, so we use a
+   * date-based heuristic based on US copyright law:
+   * - Published before 1928: Public domain (high confidence: 90)
+   * - Published 1928-1977: Possibly public domain if copyright not renewed (medium confidence: 60)
+   * - Published after 1977: Not public domain (high confidence: 90)
+   *
+   * This is a FALLBACK to Google Books, which provides explicit API-verified public domain status.
+   * Use Google Books as the primary source and Archive.org as secondary confirmation.
+   *
+   * @param isbn - ISBN-10 or ISBN-13
+   * @param context - Service context with logger and env
+   * @returns PublicDomainResult with heuristic reasoning, or null if publication year unavailable
+   *
+   * @example
+   * ```typescript
+   * const result = await provider.checkPublicDomain('9780451524935', context);
+   * // Result for "1984" (published 1949):
+   * // {
+   * //   isPublicDomain: true,
+   * //   confidence: 60,
+   * //   reason: 'publication-date',
+   * //   downloadUrl: 'https://archive.org/details/...',
+   * //   source: 'archive.org'
+   * // }
+   * ```
+   */
+  async checkPublicDomain(isbn: string, context: ServiceContext): Promise<PublicDomainResult | null> {
+    // Validate ISBN format before making API call
+    const normalizedISBN = normalizeISBN(isbn);
+    if (!normalizedISBN) {
+      context.logger.debug('Invalid ISBN format, skipping Archive.org API call', { isbn });
+      return null;
+    }
+
+    const params = new URLSearchParams({
+      q: `isbn:${normalizedISBN}`,
+      fl: 'identifier,date',
+      output: 'json',
+      rows: '1',
+    });
+
+    const url = `${ARCHIVE_ORG_SEARCH_API}?${params.toString()}`;
+    const response = await this.client.fetch<ArchiveOrgSearchResponse>(url, {}, context);
+
+    if (!response?.response?.docs?.[0]) {
+      return null;
+    }
+
+    const doc = response.response.docs[0];
+
+    // Extract publication year from date field (format: YYYY-MM-DD or YYYY)
+    if (!doc.date) {
+      context.logger.debug('No publication date available for public domain check', {
+        isbn: normalizedISBN,
+        identifier: doc.identifier,
+      });
+      return null;
+    }
+
+    const year = parseInt(doc.date.slice(0, 4), 10);
+    if (isNaN(year)) {
+      context.logger.warn('Invalid publication year format', {
+        isbn: normalizedISBN,
+        date: doc.date,
+      });
+      return null;
+    }
+
+    // Apply US copyright rules (heuristic approach)
+    let isPublicDomain: boolean;
+    let confidence: number;
+
+    if (year < 1928) {
+      // Published before 1928: Definitely public domain in the US
+      isPublicDomain = true;
+      confidence = 90; // High confidence
+    } else if (year >= 1928 && year <= 1977) {
+      // Published 1928-1977: Possibly public domain if copyright not renewed
+      // We cannot determine renewal status without additional data, so confidence is lower
+      isPublicDomain = true;
+      confidence = 60; // Medium confidence (uncertain about renewal)
+    } else {
+      // Published after 1977: Not public domain (95 years from publication)
+      isPublicDomain = false;
+      confidence = 90; // High confidence
+    }
+
+    // Build Archive.org details page URL (download link)
+    const downloadUrl = doc.identifier ? `https://archive.org/details/${doc.identifier}` : undefined;
+
+    context.logger.debug('Public domain status checked (heuristic)', {
+      isbn: normalizedISBN,
+      publicationYear: year,
+      isPublicDomain,
+      confidence,
+      hasDownloadUrl: !!downloadUrl,
+    });
+
+    return {
+      isPublicDomain,
+      confidence,
+      reason: 'publication-date', // Heuristic approach based on date
+      copyrightExpiry: year < 1928 ? year : undefined, // Only set for definite public domain
+      downloadUrl,
+      source: 'archive.org',
+    };
   }
 
   private async findIdentifier(isbn: string, context: ServiceContext): Promise<string | null> {

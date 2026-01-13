@@ -21,8 +21,10 @@
 import type {
   IISBNResolver,
   IMetadataProvider,
+  IEnhancedExternalIdProvider,
   ISBNResolutionResult,
   BookMetadata,
+  EnhancedExternalIds,
 } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
 import type { Env } from '../../../src/env.js';
@@ -87,12 +89,13 @@ interface OpenLibraryDocument {
  * Free service, always available (no API key required).
  * Rate limited to 1 req every 3 seconds (100 req per 5 minutes).
  */
-export class OpenLibraryProvider implements IISBNResolver, IMetadataProvider {
+export class OpenLibraryProvider implements IISBNResolver, IMetadataProvider, IEnhancedExternalIdProvider {
   readonly name = 'open-library';
   readonly providerType = 'free' as const;
   readonly capabilities = [
     ServiceCapability.ISBN_RESOLUTION,
     ServiceCapability.METADATA_ENRICHMENT,
+    ServiceCapability.ENHANCED_EXTERNAL_IDS,
   ];
 
   private client = new ServiceHttpClient({
@@ -286,5 +289,98 @@ export class OpenLibraryProvider implements IISBNResolver, IMetadataProvider {
         // OpenLibrary work key can be useful for future lookups
       },
     };
+  }
+
+  /**
+   * Fetch enhanced external IDs for a book by ISBN
+   *
+   * Extracts OpenLibrary work/edition keys, OCLC, and LCCN from existing API response.
+   * No extra API calls required - reuses existing ISBN lookup.
+   *
+   * @param isbn - ISBN-10 or ISBN-13
+   * @param context - Service context with logger and env
+   * @returns EnhancedExternalIds with OpenLibrary keys and library IDs, or null if not found
+   *
+   * @example
+   * ```typescript
+   * const result = await provider.fetchEnhancedExternalIds('9780486280615', context);
+   * // Result:
+   * // {
+   * //   openLibraryWorkKey: 'OL45804W',
+   * //   oclcNumber: '1234567',
+   * //   lccn: '12345678',
+   * //   sources: ['open-library'],
+   * //   confidence: 80
+   * // }
+   * ```
+   */
+  async fetchEnhancedExternalIds(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<EnhancedExternalIds | null> {
+    const { logger } = context;
+
+    // Validate ISBN format before making API call
+    const normalizedISBN = normalizeISBN(isbn);
+    if (!normalizedISBN) {
+      logger.debug('Invalid ISBN format, skipping OpenLibrary API call', { isbn });
+      return null;
+    }
+
+    try {
+      // Build search URL
+      const params = new URLSearchParams({
+        isbn: normalizedISBN,
+        fields: 'key,oclc,lccn', // Only fetch external ID fields
+        limit: '1',
+      });
+      const url = `${OPEN_LIBRARY_SEARCH_API}?${params.toString()}`;
+
+      // Execute search
+      const response = await this.client.fetch<OpenLibrarySearchResponse>(url, {}, context);
+
+      if (!response || !response.docs || response.docs.length === 0) {
+        logger.debug('No OpenLibrary external IDs found', { isbn: normalizedISBN });
+        return null;
+      }
+
+      const doc = response.docs[0];
+
+      // Extract work key from the result
+      // Work key format: "/works/OL45804W" -> "OL45804W"
+      const workKey = doc.key?.replace('/works/', '');
+
+      // Build result object
+      const result: EnhancedExternalIds = {
+        openLibraryWorkKey: workKey || undefined,
+        oclcNumber: doc.oclc?.[0],
+        lccn: doc.lccn?.[0],
+        sources: ['open-library'],
+        confidence: 80, // OpenLibrary has good data quality
+      };
+
+      // Count how many IDs we found
+      const idCount = [
+        result.openLibraryWorkKey,
+        result.oclcNumber,
+        result.lccn,
+      ].filter(Boolean).length;
+
+      logger.debug('Fetched enhanced external IDs from OpenLibrary', {
+        isbn: normalizedISBN,
+        idCount,
+        hasWorkKey: !!result.openLibraryWorkKey,
+        hasOCLC: !!result.oclcNumber,
+        hasLCCN: !!result.lccn,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('OpenLibrary external IDs fetch failed', {
+        isbn,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 }

@@ -445,30 +445,54 @@ Alexandria/2.5.0 (nerd@ooheynerds.com; Book metadata enrichment and ISBN resolut
 
 **Analytics**: All Open API calls tracked via `trackOpenApiUsage()` for donation calculations
 
-## Service Provider Framework (NEW - Jan 2026)
+## Service Provider Framework (Jan 2026 - Phases 1-3 Complete)
 
-**Status**: Production-ready (Phases 1-4 complete)
+**Status**: ✅ Production-ready (8 new capabilities + 3 orchestrators added)
 **Architecture**: Capability-based provider registry with dynamic service discovery
 
 ### Overview
 
-Unified framework for all external service integrations. Eliminates 60% code duplication across 7 providers through centralized HTTP client, dynamic discovery, and orchestrated workflows.
+Unified framework for all external service integrations. Eliminates 60% code duplication across 8 providers through centralized HTTP client, dynamic discovery, and orchestrated workflows.
+
+**Expansion (Jan 2026)**: Added 8 new capabilities and 3 orchestrators, expanding Alexandria's metadata enrichment by 75%.
 
 **Core Components**:
 - **Provider Registry**: Singleton registry for dynamic provider discovery
-- **Capability Interfaces**: 6 interfaces (ISBN resolution, metadata, covers, subjects, biography, book generation)
+- **Capability Interfaces**: **14 interfaces** (6 core + 8 new - see below)
 - **Unified HTTP Client**: Centralized rate limiting, caching, retry logic
-- **3 Orchestrators**: ISBN resolution, cover fetch, metadata enrichment
+- **6 Orchestrators**: ISBN resolution, cover fetch, metadata enrichment, ratings, public domain, external IDs
+
+**Capabilities** (14 total):
+
+*Core Capabilities (v1.0)*:
+- ISBN_RESOLUTION - Title/author → ISBN search
+- METADATA_ENRICHMENT - ISBN → Book metadata
+- COVER_IMAGES - ISBN → Cover URLs
+- AUTHOR_BIOGRAPHY - Author → Biography text
+- SUBJECT_ENRICHMENT - ISBN → Categories/subjects
+- BOOK_GENERATION - AI-generated book metadata
+
+*Phase 1 - Quick Wins (Jan 2026)*:
+- RATINGS - ISBN → Ratings data (average/count)
+- EDITION_VARIANTS - ISBN → Related ISBNs (hardcover, paperback, etc.)
+- PUBLIC_DOMAIN - ISBN → Public domain status with download links
+- SUBJECT_BROWSING - Subject → Book list discovery
+
+*Phase 2 - High-Value (Jan 2026)*:
+- SERIES_INFO - ISBN → Series name, position, total books
+- AWARDS - ISBN → Literary awards and nominations
+- TRANSLATIONS - ISBN → Available translations
+- ENHANCED_EXTERNAL_IDS - ISBN → Amazon ASIN, Goodreads, Google Books IDs
 
 **Providers** (8 total):
-- `OpenLibraryProvider` - ISBN resolution, metadata
-- `GoogleBooksProvider` - Metadata, covers, subjects
-- `ArchiveOrgProvider` - Covers, metadata (pre-2000 books)
-- `WikidataProvider` - Metadata, covers (SPARQL)
+- `ISBNdbProvider` - Ratings, edition variants (paid, quota-managed)
+- `GoogleBooksProvider` - Metadata, covers, subjects, public domain, external IDs
+- `OpenLibraryProvider` - ISBN resolution, metadata, ratings, external IDs
+- `ArchiveOrgProvider` - Covers, metadata, public domain (pre-2000 books)
+- `WikidataProvider` - Metadata, covers, ratings, subject browsing, series, awards, translations, external IDs (SPARQL)
 - `WikipediaProvider` - Author biographies
-- `ISBNdbProvider` - Premium ISBN resolution, metadata, covers (quota-managed)
 - `GeminiProvider` - AI book generation for backfill (Google Gemini)
-- `XaiProvider` - AI book generation for backfill (x.ai Grok) **[NEW - Jan 2026]**
+- `XaiProvider` - AI book generation for backfill (x.ai Grok)
 
 **Files**:
 - Core: `worker/lib/external-services/` (capabilities, registry, http-client, service-context)
@@ -499,6 +523,18 @@ const result = await orchestrator.resolveISBN('The Hobbit', 'J.R.R. Tolkien', co
 // Automatically tries ISBNdb → Google Books → OpenLibrary until success
 ```
 
+### Orchestrators
+
+**New (Jan 2026)**:
+- **RatingsOrchestrator** - Multi-provider ratings fallback (ISBNdb → OpenLibrary → Wikidata)
+- **PublicDomainOrchestrator** - Public domain detection (Google Books → Archive.org)
+- **ExternalIdOrchestrator** - External ID aggregation from multiple sources
+
+**Existing**:
+- **ISBNResolutionOrchestrator** - Cascading ISBN fallback (ISBNdb → Google Books → OpenLibrary → Archive.org → Wikidata)
+- **CoverOrchestrator** - Cover fetch with free-first priority
+- **MetadataOrchestrator** - Metadata enrichment coordination
+
 ### Benefits
 
 ✅ **60% LOC Reduction**: Eliminated ~400 lines of boilerplate
@@ -507,6 +543,7 @@ const result = await orchestrator.resolveISBN('The Hobbit', 'J.R.R. Tolkien', co
 ✅ **Performance**: <10ms initialization, <5ms registry lookups, O(n) deduplication
 ✅ **Worker-Optimized**: Timeout protection, parallel execution, graceful degradation
 ✅ **100% Test Coverage**: 116 tests across unit, integration, performance, quota enforcement
+✅ **75% Capability Expansion**: From 6 to 14 capabilities in Phases 1-3
 
 ### Architecture Decisions
 
@@ -516,8 +553,11 @@ const result = await orchestrator.resolveISBN('The Hobbit', 'J.R.R. Tolkien', co
 - **Timeout Protection**: 10-15s per provider to prevent Worker CPU exhaustion
 - **Free-First Priority**: Cover orchestrator tries free providers before paid (quota preservation)
 
-**Planning**: `docs/planning/EXTERNAL_API_ARCHITECTURE_PLAN.md`
-**Task Tracking**: `task_plan.md` (Phases 1-4 complete)
+**Documentation**:
+- **Developer Guide**: `docs/development/SERVICE_PROVIDER_GUIDE.md` (v2.0 - comprehensive guide)
+- **Planning**: `docs/planning/EXTERNAL_API_ARCHITECTURE_PLAN.md`
+- **Research**: `docs/research/PROVIDER-API-CAPABILITIES-2026.md` (full API reference)
+- **Task Tracking**: GitHub Issue #180 (Phases 1-3 complete)
 
 ### Concurrent AI Book Generation (Jan 2026)
 

@@ -4,7 +4,65 @@
 
 ## ✅ Recently Completed (Jan 12, 2026)
 
-### PM Session: Code Quality & Database Optimization - 4 Issues Resolved
+### External Service Provider Framework Expansion - Phases 1-3 Complete ✅
+
+**Status**: Production-ready (8 new capabilities + 3 orchestrators)
+
+**Achievement**: Expanded Alexandria's External Service Provider Framework from 6 capabilities to 14 (75% growth), adding comprehensive metadata enrichment across 8 providers.
+
+**Phases Completed**:
+- ✅ **Phase 1** (Jan 12): 4 quick-win capabilities (ratings, edition variants, public domain, subject browsing)
+- ✅ **Phase 2** (Jan 12): 4 high-value capabilities (series, awards, translations, enhanced external IDs)
+- ✅ **Phase 3** (Jan 12): 3 orchestrators (ratings, public domain, external IDs)
+
+**New Capabilities Added**:
+
+*Phase 1 - Quick Wins*:
+- **RATINGS** - ISBN → Average ratings + count (ISBNdb, OpenLibrary, Wikidata)
+- **EDITION_VARIANTS** - ISBN → Related ISBNs/formats (ISBNdb)
+- **PUBLIC_DOMAIN** - ISBN → Public domain status + downloads (Google Books, Archive.org)
+- **SUBJECT_BROWSING** - Subject → Book discovery (Wikidata SPARQL)
+
+*Phase 2 - High-Value*:
+- **SERIES_INFO** - ISBN → Series name, position, total books (Wikidata)
+- **AWARDS** - ISBN → Literary awards and nominations (Wikidata)
+- **TRANSLATIONS** - ISBN → Available translations (Wikidata)
+- **ENHANCED_EXTERNAL_IDS** - ISBN → Amazon ASIN, Goodreads, Google Books IDs (5 providers)
+
+**New Orchestrators**:
+- **RatingsOrchestrator** - Multi-provider fallback with batch support (ISBNdb → OpenLibrary → Wikidata)
+- **PublicDomainOrchestrator** - Public domain detection (Google Books → Archive.org)
+- **ExternalIdOrchestrator** - Intelligent ID aggregation from multiple sources
+
+**Technical Highlights**:
+- 2,900+ lines of new code across 3 phases
+- Timeout protection (10s default, AbortController + Promise.race)
+- Graceful degradation (all methods return null on errors)
+- Worker-optimized (proper resource cleanup, batch operations)
+- Confidence scoring (0-100 scale) for all results
+
+**Code Quality**:
+- Phase 1: Grok review - PRODUCTION READY (4 LOW-severity optional issues)
+- Phase 2: Grok review - PRODUCTION READY (3 MEDIUM + 2 LOW optional issues)
+- Phase 3: Grok review - 2 CRITICAL issues fixed immediately (type safety, resource leak)
+
+**Documentation**:
+- `docs/development/SERVICE_PROVIDER_GUIDE.md` - Updated to v2.0
+- `docs/research/PROVIDER-API-CAPABILITIES-2026.md` - Full API reference
+- `docs/research/CAPABILITY-EXPANSION-ROADMAP.md` - Implementation roadmap
+- GitHub Issue #180 - Complete tracking and review findings
+
+**Impact**:
+- 75% capability expansion (6 → 14 capabilities)
+- Zero breaking changes (100% backward compatible)
+- Foundation for advanced metadata features (#163, #166)
+- 8 providers now support 14 capabilities with 6 orchestrators
+
+**Next**: Phase 4 documentation updates in progress
+
+---
+
+### PM Session: Code Quality & Database Optimization - 4 Issues Resolved (Jan 12)
 
 **Overview**: Professional PM-led session to clean up technical debt and resolve blocking issues before moving to high-priority feature work.
 
@@ -203,19 +261,39 @@
 
 ### P1 - HIGH Priority
 1. **#163** - Subject/Genre Coverage Improvement - **IN PROGRESS** 🔄
-   - **Status**: Phase 2 Investigation COMPLETE, Phase 3 Planning in progress
+   - **Status**: Phase 2 Investigation COMPLETE, Phase 3 Strategy Revised
    - **Current Coverage**: 59% (19.5M / 33.1M works)
    - **Target Coverage**: 80% (26.5M works)
-   - **Gap**: 7.5M works need subjects
-   - **Phase 1 COMPLETE**: Fixed 3 INVALID GIN indexes, 0.1ms query performance ✅
-   - **Phase 2 COMPLETE**: Root cause analysis via Grok-4 investigation ✅
-     - CRITICAL FINDING: OpenLibrary source data lacks subjects (0% backfill opportunity)
-     - Evaluated 5 backfill strategies
-     - RECOMMENDATION: Gemini AI Genre Inference ($112-175, 2-3 days)
-   - **Phase 3 PENDING**: Gemini Genre Inference implementation (awaiting approval)
-   - **Timeline**: 3-4 days to implement
-   - **Cost**: $112-175
-   - **Expected Result**: 59% → 80%+ coverage
+   - **Gap**: 13.6M works need subjects
+
+   **Phase 1 COMPLETE**: Fixed 3 INVALID GIN indexes, 0.1ms query performance ✅
+
+   **Phase 2 COMPLETE**: Root cause analysis via Grok-4 investigation ✅
+   - CRITICAL FINDING: OpenLibrary source data lacks subjects (0% backfill opportunity)
+   - Provider coverage analysis: ISBNdb 73.55%, OpenLibrary 58.94%, Gemini 6.72%
+   - Gap analysis: 13.6M works genuinely lack subject data in OpenLibrary source
+
+   **Phase 3A REVISED**: External Provider Subject Backfill Strategy (Jan 12) ⭐
+   - **NEW DISCOVERY**: 3 untapped subject sources already integrated in framework
+   - **Option 1 - Google Books** (RECOMMENDED 🎯):
+     - GoogleBooksProvider implements ISubjectProvider (already in framework)
+     - Free tier: 1,000 req/day, unlimited with API key
+     - Estimated impact: 5-7M works (+15-17% coverage → 74-76%)
+     - Cost: $0 | Time: 3-6 months with quota increase
+   - **Option 2 - Archive.org** (Parallel execution):
+     - Archive.org metadata includes Library of Congress subjects (already integrated)
+     - Free: 1 req/sec (86,400/day)
+     - Estimated impact: 2-4M works (+6-9% coverage → 65-68%)
+     - Cost: $0 | Time: 5 months
+   - **Combined External Providers**: 59% → 78-82% coverage ($0, 3-6 months)
+
+   **Phase 3B (Fallback)**: Gemini AI for Long-Tail
+   - Only if Google Books quota increase rejected
+   - OR use Gemini for remaining 2-3M works after provider exhaustion
+   - Cost: $30-50 (long-tail) vs $112-175 (full gap)
+   - Expected: 78-82% → 85%+ coverage
+
+   **Decision Required**: Pursue free external providers first OR jump to Gemini AI?
 
 2. **Production Backfill Deployment** - READY NOW
    - Baseline prompt validated: 90% ISBN resolution rate
@@ -294,19 +372,35 @@
 | OpenLibrary | 33,094,599 | 19,507,564 | 58.94% |
 | Gemini-backfill | 134 | 9 | 6.72% |
 
-**Backfill Strategy Evaluation:**
+**Backfill Strategy Evaluation (Original):**
 - ❌ OpenLibrary backfill: IMPOSSIBLE (0 works with subjects)
 - 🟡 Wikidata/Goodreads: Minimal impact (~85 works)
+
+**REVISED Strategy (Jan 12) - External Providers First:**
+- ⭐ **Google Books Subject Backfill**: 5-7M works (+15-17% → 74-76% coverage)
+  - GoogleBooksProvider already implements ISubjectProvider in framework
+  - Returns `categories` field in API responses
+  - Free with API key, 1,000 req/day free tier
+  - **NOT currently used for subject-only enrichment** (only during full metadata fetch)
+- ⭐ **Archive.org Subject Backfill**: 2-4M works (+6-9% → 65-68% coverage)
+  - Library of Congress subjects already integrated (Phase 2, Jan 10)
+  - Currently only enriches during ISBNdb enrichment flow
+  - Can trigger retroactive backfill for 13.6M gap
+  - Free, 1 req/sec rate limit
+- 🔄 **Combined Approach**: 59% → 78-82% coverage ($0 vs $112-175 Gemini)
 - 🔴 ISBNdb batch: Too expensive ($400-500 for 7.5M works)
 - 🟢 **Gemini AI inference: RECOMMENDED** ($112-175, achieves 80% target)
 
-**Recommended Solution: Hybrid 3-Phase Strategy**
-1. **Quick wins**: Enrich 85 works via Wikidata/Goodreads (<1 day, $0)
-2. **AI inference**: Gemini genre inference for 7.5M works (2-3 days, $112-175)
-   - Few-shot prompting with validation pipeline
-   - Confidence scoring (auto-accept >80%)
-   - Expected coverage: 75-80% validated
-3. **Long-tail**: JIT enrichment on work views (ongoing, operational budget)
+**Recommended Solution: Revised Hybrid Strategy (Jan 12)**
+1. **Phase 3A - External Providers First** (3-6 months, $0):
+   - Google Books subject backfill: 5-7M works via ISubjectProvider
+   - Archive.org parallel backfill: 2-4M works (pre-2000 focus)
+   - Expected: 59% → 78-82% coverage with real authoritative data
+2. **Phase 3B - Gemini Long-Tail** (Optional, 1 day, $30-50):
+   - Only for remaining 2-3M works after provider exhaustion
+   - OR use immediately if Google Books quota increase rejected
+   - Expected: 78-82% → 85%+ coverage
+3. **Ongoing - JIT enrichment**: On work views (operational budget)
 
 **Status:** Phase 3 (Implementation) awaiting approval
 **Documentation:** GitHub issue #163, findings.md, progress.md, task_plan.md

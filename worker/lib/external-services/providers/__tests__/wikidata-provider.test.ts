@@ -50,6 +50,7 @@ describe('WikidataProvider', () => {
         ServiceCapability.METADATA_ENRICHMENT,
         ServiceCapability.COVER_IMAGES,
         ServiceCapability.ISBN_RESOLUTION,
+        ServiceCapability.SUBJECT_BROWSING,
       ]);
     });
   });

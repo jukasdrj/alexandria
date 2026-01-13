@@ -1,18 +1,21 @@
 /**
  * Google Books Service Provider
  *
- * Provides book metadata, covers, and subject/category enrichment via Google Books API.
+ * Provides book metadata, covers, subject/category enrichment, and public domain detection
+ * via Google Books API.
  *
  * Implements:
  * - IMetadataProvider: ISBN → Book metadata lookup
  * - ICoverProvider: ISBN → Cover image URL
  * - ISubjectProvider: ISBN → Categories/subjects
+ * - IPublicDomainProvider: ISBN → Public domain status with download links
  *
  * Features:
  * - Free tier: 1000 requests/day
  * - KV-backed rate limiting (1 req/sec)
  * - Response caching (30-day TTL for stable metadata)
  * - Category extraction and normalization
+ * - Public domain detection with downloadable full-text links
  *
  * @module lib/external-services/providers/google-books-provider
  */
@@ -22,9 +25,13 @@ import type {
   ICoverProvider,
   ISubjectProvider,
   IISBNResolver,
+  IPublicDomainProvider,
+  IEnhancedExternalIdProvider,
   BookMetadata,
   CoverResult,
   ISBNResolutionResult,
+  PublicDomainResult,
+  EnhancedExternalIds,
 } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
 import type { Env } from '../../../src/env.js';
@@ -64,6 +71,15 @@ interface GoogleBooksVolumeResponse {
         identifier: string;
       }>;
     };
+    accessInfo?: {
+      accessViewStatus?: string;
+      pdf?: {
+        downloadLink?: string;
+      };
+      epub?: {
+        downloadLink?: string;
+      };
+    };
   }>;
 }
 
@@ -71,7 +87,7 @@ interface GoogleBooksVolumeResponse {
 // Google Books Provider
 // =================================================================================
 
-export class GoogleBooksProvider implements IMetadataProvider, ICoverProvider, ISubjectProvider, IISBNResolver {
+export class GoogleBooksProvider implements IMetadataProvider, ICoverProvider, ISubjectProvider, IISBNResolver, IPublicDomainProvider, IEnhancedExternalIdProvider {
   readonly name = 'google-books';
   readonly providerType = 'free' as const;
   readonly capabilities = [
@@ -79,6 +95,8 @@ export class GoogleBooksProvider implements IMetadataProvider, ICoverProvider, I
     ServiceCapability.COVER_IMAGES,
     ServiceCapability.SUBJECT_ENRICHMENT,
     ServiceCapability.ISBN_RESOLUTION,
+    ServiceCapability.PUBLIC_DOMAIN,
+    ServiceCapability.ENHANCED_EXTERNAL_IDS,
   ];
 
   private client = new ServiceHttpClient({
@@ -317,5 +335,135 @@ export class GoogleBooksProvider implements IMetadataProvider, ICoverProvider, I
     if (volumeInfo.categories && volumeInfo.categories.length > 0) confidence += 5;
 
     return Math.min(confidence, 100);
+  }
+
+  /**
+   * Check if a book is in the public domain
+   *
+   * Google Books provides explicit public domain status via accessInfo.accessViewStatus.
+   * When a book is marked as "FULL_PUBLIC_DOMAIN", Google offers free full-text downloads
+   * in PDF and EPUB formats.
+   *
+   * @param isbn - ISBN-10 or ISBN-13
+   * @param context - Service context with logger and env
+   * @returns PublicDomainResult with download links, or null if data unavailable
+   *
+   * @example
+   * ```typescript
+   * const result = await provider.checkPublicDomain('9780486280615', context);
+   * // Result for "Pride and Prejudice":
+   * // {
+   * //   isPublicDomain: true,
+   * //   confidence: 95,
+   * //   reason: 'api-verified',
+   * //   downloadUrl: 'https://www.googleapis.com/download/...',
+   * //   source: 'google-books'
+   * // }
+   * ```
+   */
+  async checkPublicDomain(isbn: string, context: ServiceContext): Promise<PublicDomainResult | null> {
+    // Validate ISBN format before making API call
+    const normalizedISBN = normalizeISBN(isbn);
+    if (!normalizedISBN) {
+      context.logger.debug('Invalid ISBN format, skipping Google Books API call', { isbn });
+      return null;
+    }
+
+    const url = `${GOOGLE_BOOKS_API_BASE}?q=isbn:${normalizedISBN}`;
+    const response = await this.client.fetch<GoogleBooksVolumeResponse>(url, {}, context);
+
+    if (!response?.items?.[0]) {
+      return null;
+    }
+
+    const accessInfo = response.items[0].accessInfo;
+    if (!accessInfo) {
+      // No access info available - unable to determine public domain status
+      return null;
+    }
+
+    // Check if Google Books explicitly marks this as public domain
+    const isPublicDomain = accessInfo.accessViewStatus === 'FULL_PUBLIC_DOMAIN';
+
+    // Extract download URL (prefer PDF over EPUB)
+    let downloadUrl: string | undefined;
+    if (accessInfo.pdf?.downloadLink) {
+      downloadUrl = accessInfo.pdf.downloadLink;
+    } else if (accessInfo.epub?.downloadLink) {
+      downloadUrl = accessInfo.epub.downloadLink;
+    }
+
+    context.logger.debug('Public domain status checked', {
+      isbn: normalizedISBN,
+      isPublicDomain,
+      accessViewStatus: accessInfo.accessViewStatus,
+      hasDownloadUrl: !!downloadUrl,
+    });
+
+    return {
+      isPublicDomain,
+      confidence: 95, // Google Books is highly reliable for US public domain status
+      reason: 'api-verified', // Explicit verification from Google
+      downloadUrl,
+      source: 'google-books',
+    };
+  }
+
+  /**
+   * Fetch enhanced external IDs for a book by ISBN
+   *
+   * Extracts Google Books ID from the existing API response (no extra API call required).
+   * This method reuses the existing ISBN lookup to avoid extra quota usage.
+   *
+   * @param isbn - ISBN-10 or ISBN-13
+   * @param context - Service context with logger and env
+   * @returns EnhancedExternalIds with Google Books ID, or null if not found
+   *
+   * @example
+   * ```typescript
+   * const result = await provider.fetchEnhancedExternalIds('9780486280615', context);
+   * // Result:
+   * // {
+   * //   googleBooksId: 'XfFGPgAACAAJ',
+   * //   sources: ['google-books'],
+   * //   confidence: 85
+   * // }
+   * ```
+   */
+  async fetchEnhancedExternalIds(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<EnhancedExternalIds | null> {
+    // Validate ISBN format before making API call
+    const normalizedISBN = normalizeISBN(isbn);
+    if (!normalizedISBN) {
+      context.logger.debug('Invalid ISBN format, skipping Google Books API call', { isbn });
+      return null;
+    }
+
+    const url = `${GOOGLE_BOOKS_API_BASE}?q=isbn:${normalizedISBN}`;
+    const response = await this.client.fetch<GoogleBooksVolumeResponse>(url, {}, context);
+
+    if (!response?.items?.[0]) {
+      context.logger.debug('No Google Books external IDs found', { isbn });
+      return null;
+    }
+
+    const googleBooksId = response.items[0].id;
+    if (!googleBooksId) {
+      context.logger.debug('Google Books response missing volume ID', { isbn });
+      return null;
+    }
+
+    context.logger.debug('Fetched enhanced external IDs', {
+      isbn: normalizedISBN,
+      googleBooksId,
+    });
+
+    return {
+      googleBooksId,
+      sources: ['google-books'],
+      confidence: 85, // Google Books has good data quality
+    };
   }
 }

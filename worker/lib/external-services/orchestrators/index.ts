@@ -25,3 +25,9 @@ export type {
 
 export { BookGenerationOrchestrator } from './book-generation-orchestrator.js';
 export type { BookGenerationConfig } from './book-generation-orchestrator.js';
+
+export { PublicDomainOrchestrator } from './public-domain-orchestrator.js';
+export type { PublicDomainConfig } from './public-domain-orchestrator.js';
+
+export { ExternalIdOrchestrator } from './external-id-orchestrator.js';
+export type { ExternalIdOrchestratorConfig } from './external-id-orchestrator.js';

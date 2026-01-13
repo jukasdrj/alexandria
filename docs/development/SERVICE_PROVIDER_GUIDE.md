@@ -1,8 +1,9 @@
 # Service Provider Developer Guide
 
-**Version**: 1.0
+**Version**: 2.0
 **Last Updated**: January 2026
 **Framework**: External Services Provider Framework
+**Note**: Expanded with 8 new capabilities + 3 orchestrators (Phases 1-3)
 
 ## Table of Contents
 
@@ -32,10 +33,12 @@ Alexandria's Service Provider Framework provides a unified, capability-based arc
 
 ### Benefits
 
-- **60% LOC Reduction**: Eliminates boilerplate across 7 providers
+- **60% LOC Reduction**: Eliminates boilerplate across 8 providers
 - **Easy Extensibility**: Adding a new service requires ≤2 file changes
 - **Performance Optimized**: Sub-10ms initialization, <5ms registry lookups
 - **Worker-Safe**: Designed for Cloudflare Workers constraints
+- **14 Capabilities**: Comprehensive metadata enrichment (was 6 in v1.0)
+- **6 Orchestrators**: Coordinated multi-provider workflows (was 3 in v1.0)
 
 ---
 
@@ -173,7 +176,7 @@ describe('LibraryThingProvider', () => {
 │                                                               │
 │  ┌──────────────┐      ┌──────────────┐      ┌───────────┐  │
 │  │ Capabilities │◄─────┤  Providers   │─────►│ Registry  │  │
-│  │  (Interfaces)│      │   (7 total)  │      │ (Singleton)│ │
+│  │ (14 total)   │      │   (8 total)  │      │ (Singleton)│ │
 │  └──────────────┘      └──────────────┘      └───────────┘  │
 │         │                      │                     │       │
 │         │                      ▼                     │       │
@@ -183,8 +186,9 @@ describe('LibraryThingProvider', () => {
 │                        └──────────────┘                      │
 │                                                               │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │               Orchestrators (3 total)                 │   │
+│  │               Orchestrators (6 total)                 │   │
 │  │  - ISBN Resolution   - Cover Fetch   - Metadata       │   │
+│  │  - Ratings           - Public Domain - External IDs   │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -208,12 +212,25 @@ export interface IServiceProvider {
 
 Extend `IServiceProvider` with specific methods:
 
+**Core Capabilities (v1.0)**:
 - `IISBNResolver`: `resolveISBN(title, author, context)` → ISBN
 - `IMetadataProvider`: `fetchMetadata(isbn, context)` → BookMetadata
 - `ICoverProvider`: `fetchCover(isbn, context)` → CoverResult
 - `ISubjectProvider`: `fetchSubjects(isbn, context)` → string[]
 - `IAuthorBiographyProvider`: `fetchBiography(authorKey, context)` → AuthorBiography
 - `IBookGenerator`: `generateBooks(prompt, count, context)` → GeneratedBook[]
+
+**Phase 1 - Quick Wins (Jan 2026)**:
+- `IRatingsProvider`: `fetchRatings(isbn, context)` → RatingsResult (average rating, count)
+- `IEditionVariantProvider`: `fetchEditionVariants(isbn, context)` → EditionVariant[] (formats: hardcover, paperback, ebook, audiobook)
+- `IPublicDomainProvider`: `checkPublicDomain(isbn, context)` → PublicDomainResult (detection + download links)
+- `ISubjectBrowsingProvider`: `fetchSubjectHierarchy(subjectId, depth, context)` → SubjectNode[] (hierarchical genres)
+
+**Phase 2 - High-Value (Jan 2026)**:
+- `ISeriesProvider`: `fetchSeriesInfo(isbn, context)` → SeriesInfo (series name, position, related ISBNs)
+- `IAwardsProvider`: `fetchAwards(isbn, context)` → AwardInfo[] (literary awards, nominations)
+- `ITranslationProvider`: `fetchTranslations(isbn, context)` → TranslationInfo[] (editions in other languages)
+- `IEnhancedExternalIdProvider`: `fetchEnhancedExternalIds(isbn, context)` → EnhancedExternalIds (comprehensive cross-provider IDs)
 
 #### ServiceContext
 
@@ -227,6 +244,33 @@ interface ServiceContext {
 }
 ```
 
+### Provider Capabilities Matrix
+
+This table shows which providers support which capabilities:
+
+| Provider | Type | Core Capabilities | Phase 1 Capabilities | Phase 2 Capabilities |
+|----------|------|-------------------|----------------------|----------------------|
+| **ISBNdb** | Paid | ISBN Resolution, Metadata, Covers, Subjects | **Ratings**, **Edition Variants** | - |
+| **Google Books** | Free | ISBN Resolution, Metadata, Covers, Subjects | **Public Domain** | **Enhanced External IDs** |
+| **Archive.org** | Free | ISBN Resolution, Metadata, Covers | **Public Domain** | - |
+| **Wikidata** | Free | ISBN Resolution, Metadata, Covers | **Subject Browsing** | **Series Info**, **Awards**, **Translations**, **Enhanced External IDs** |
+| **OpenLibrary** | Free | ISBN Resolution, Metadata | - | **Enhanced External IDs** |
+| **Wikipedia** | Free | Author Biography | - | - |
+| **Gemini** | AI | Book Generation | - | - |
+| **Xai (Grok)** | AI | Book Generation | - | - |
+
+**Legend**:
+- **Core Capabilities**: v1.0 capabilities (6 total)
+- **Phase 1**: Quick wins (4 new capabilities)
+- **Phase 2**: High-value (4 new capabilities)
+- Total: **14 capabilities** across **8 providers**
+
+**Key Observations**:
+- Wikidata is the most feature-rich free provider (8 capabilities)
+- ISBNdb offers premium features (ratings, edition variants) with quota management
+- AI providers (Gemini, Xai) specialize in book generation for backfill
+- Google Books + Archive.org provide free public domain detection with downloads
+
 ---
 
 ## Creating a Provider
@@ -235,15 +279,29 @@ interface ServiceContext {
 
 #### 1. Choose Capabilities
 
-Decide which interfaces your provider implements:
+Decide which interfaces your provider implements. You can mix core capabilities with new Phase 1/2 capabilities:
 
 ```typescript
 // Single capability
 class MyProvider implements IMetadataProvider { ... }
 
-// Multiple capabilities
+// Multiple capabilities (common pattern)
 class MyProvider implements IMetadataProvider, ICoverProvider { ... }
+
+// Phase 1 capabilities
+class MyProvider implements IRatingsProvider, IEditionVariantProvider { ... }
+
+// Phase 2 capabilities
+class MyProvider implements ISeriesProvider, IAwardsProvider { ... }
+
+// Mix old and new capabilities
+class MyProvider implements IMetadataProvider, IRatingsProvider, IEnhancedExternalIdProvider { ... }
 ```
+
+**Available Capability Interfaces** (14 total):
+- **Core (v1.0)**: IISBNResolver, IMetadataProvider, ICoverProvider, ISubjectProvider, IAuthorBiographyProvider, IBookGenerator
+- **Phase 1**: IRatingsProvider, IEditionVariantProvider, IPublicDomainProvider, ISubjectBrowsingProvider
+- **Phase 2**: ISeriesProvider, IAwardsProvider, ITranslationProvider, IEnhancedExternalIdProvider
 
 #### 2. Implement Required Methods
 
@@ -439,6 +497,94 @@ const result = await orchestrator.enrichMetadata('9780547928227', context);
 // }
 ```
 
+### Ratings Orchestrator (NEW - Phase 1)
+
+Cascading fallback for user ratings with quota-aware provider selection:
+
+```typescript
+import { RatingsOrchestrator } from './lib/external-services/orchestrators/index.js';
+
+const orchestrator = new RatingsOrchestrator(registry, {
+  stopOnFirstSuccess: true,  // Stop after first success (default)
+  providerPriority: ['isbndb', 'google-books', 'open-library', 'wikidata'],
+  providerTimeoutMs: 10000,  // 10s timeout per provider
+});
+
+const ratings = await orchestrator.fetchRatings('9780385544153', context);
+// {
+//   averageRating: 4.3,
+//   ratingsCount: 1523,
+//   source: 'isbndb',
+//   confidence: 90
+// }
+```
+
+**Batch Operations**:
+```typescript
+const results = await orchestrator.batchFetchRatings(
+  ['9780385544153', '9780547928227'],
+  context
+);
+// Map<string, RatingsResult>
+```
+
+### Public Domain Orchestrator (NEW - Phase 1)
+
+Detects public domain status with download links:
+
+```typescript
+import { PublicDomainOrchestrator } from './lib/external-services/orchestrators/index.js';
+
+const orchestrator = new PublicDomainOrchestrator(registry, {
+  providerPriority: ['google-books', 'archive.org', 'wikidata'],
+  stopOnFirstSuccess: true,
+  requireDownloadUrl: false,  // Return results even without download URL
+});
+
+const result = await orchestrator.checkPublicDomain('9780141439518', context);
+// {
+//   isPublicDomain: true,
+//   confidence: 95,
+//   reason: 'publication-date',
+//   copyrightExpiry: 1941,
+//   downloadUrl: 'https://archive.org/download/...',
+//   source: 'archive.org'
+// }
+```
+
+### External ID Orchestrator (NEW - Phase 2)
+
+Aggregates external identifiers from multiple providers:
+
+```typescript
+import { ExternalIdOrchestrator } from './lib/external-services/orchestrators/index.js';
+
+const orchestrator = new ExternalIdOrchestrator(registry, {
+  enableParallelFetch: true,  // Fetch from all providers in parallel
+  minConfidence: 70,          // Only return IDs with 70%+ confidence
+});
+
+const result = await orchestrator.fetchExternalIds('9780385544153', context);
+// {
+//   amazonAsin: 'B00ICN066A',
+//   goodreadsId: '18405684',
+//   googleBooksId: 'x-h1AwAAQBAJ',
+//   wikidataQid: 'Q13591359',
+//   openLibraryWorkKey: '/works/OL17165W',
+//   sources: ['isbndb', 'google-books', 'wikidata', 'open-library'],
+//   confidence: 85
+// }
+```
+
+**Batch Operations**:
+```typescript
+const results = await orchestrator.batchFetchExternalIds(
+  ['9780385544153', '9780547928227'],
+  context
+);
+// Map<string, EnhancedExternalIds>
+```
+
 ---
 
 ## Testing
@@ -602,20 +748,25 @@ it('should initialize in <5ms', () => {
   - `provider-registry.ts` - Dynamic discovery
   - `http-client.ts` - Unified HTTP client
 
-- **Providers**: `worker/lib/external-services/providers/`
-  - `open-library-provider.ts`
-  - `google-books-provider.ts`
-  - `archive-org-provider.ts`
-  - `wikidata-provider.ts`
-  - `wikipedia-provider.ts`
-  - `isbndb-provider.ts`
-  - `gemini-provider.ts`
+- **Providers**: `worker/lib/external-services/providers/` (8 total)
+  - `open-library-provider.ts` - Free, ISBN resolution, metadata, external IDs
+  - `google-books-provider.ts` - Free, metadata, covers, subjects, public domain, external IDs
+  - `archive-org-provider.ts` - Free, covers, metadata, public domain
+  - `wikidata-provider.ts` - Free, metadata, covers, subject browsing, series, awards, translations, external IDs
+  - `wikipedia-provider.ts` - Free, author biographies
+  - `isbndb-provider.ts` - Paid, ISBN resolution, metadata, covers, ratings, edition variants
+  - `gemini-provider.ts` - AI, book generation (Google Gemini)
+  - `xai-provider.ts` - AI, book generation (x.ai Grok)
   - `index.ts` - Centralized exports
 
-- **Orchestrators**: `worker/lib/external-services/orchestrators/`
-  - `isbn-resolution-orchestrator.ts`
-  - `cover-fetch-orchestrator.ts`
-  - `metadata-enrichment-orchestrator.ts`
+- **Orchestrators**: `worker/lib/external-services/orchestrators/` (6 total)
+  - `isbn-resolution-orchestrator.ts` - Cascading ISBN resolution
+  - `cover-fetch-orchestrator.ts` - Free-first cover fetching
+  - `metadata-enrichment-orchestrator.ts` - Multi-provider aggregation
+  - `book-generation-orchestrator.ts` - Concurrent AI book generation (Gemini + Grok)
+  - `ratings-orchestrator.ts` - **NEW** User ratings with quota management
+  - `public-domain-orchestrator.ts` - **NEW** Public domain detection + download links
+  - `external-id-orchestrator.ts` - **NEW** Cross-provider ID aggregation
   - `index.ts` - Centralized exports
 
 - **Tests**: `worker/lib/external-services/__tests__/`

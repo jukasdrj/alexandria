@@ -11,22 +11,51 @@ Active tasks and future work. Production system (Phase 1-5) is complete.
 
 **Status:** PRODUCTION DEPLOYED ✅
 
+**Phases 1-3 Complete (Jan 12, 2026):**
+- ✅ **Phase 1**: 4 quick-win capabilities (ratings, edition variants, public domain, subject browsing)
+- ✅ **Phase 2**: 4 high-value capabilities (series, awards, translations, enhanced external IDs)
+- ✅ **Phase 3**: 3 orchestrators (ratings, public domain, external IDs)
+
 **Problem Solved:**
-- 60% code duplication across 7 external service providers
+- 60% code duplication across 8 external service providers
 - Hard-coded provider chains with no dynamic discovery
 - Manual rate limiting, caching, retry logic in each service
 - No quota-aware provider selection
 - Difficult to add new services (required changes across multiple files)
+- Limited metadata enrichment (only 6 capabilities)
 
 **Solution Delivered:**
 - ✅ **Capability-based provider registry** - Dynamic service discovery
 - ✅ **Unified HTTP client** - Centralized rate limiting, caching, retry logic
-- ✅ **3 orchestrators** - ISBN resolution, cover fetch, metadata enrichment
-- ✅ **7 providers migrated** - ISBNdb, GoogleBooks, OpenLibrary, ArchiveOrg, Wikidata, Wikipedia, Gemini
+- ✅ **6 orchestrators** - ISBN resolution, cover fetch, metadata enrichment, ratings, public domain, external IDs
+- ✅ **8 providers** - ISBNdb, GoogleBooks, OpenLibrary, ArchiveOrg, Wikidata, Wikipedia, Gemini, x.ai
+- ✅ **14 capabilities** - From 6 to 14 (75% expansion)
 - ✅ **5-tier ISBN cascading fallback** - ISBNdb → GoogleBooks → OpenLibrary → ArchiveOrg → Wikidata
 - ✅ **Quota-aware provider filtering** - Registry automatically excludes exhausted providers
 - ✅ **Worker-optimized** - Timeout protection, parallel execution, graceful degradation
 - ✅ **Comprehensive testing** - 116 tests (unit, integration, performance, quota enforcement)
+
+**Capability Expansion (Jan 2026):**
+
+*Core Capabilities (v1.0)*:
+- ISBN_RESOLUTION - Title/author → ISBN search
+- METADATA_ENRICHMENT - ISBN → Book metadata
+- COVER_IMAGES - ISBN → Cover URLs
+- AUTHOR_BIOGRAPHY - Author → Biography text
+- SUBJECT_ENRICHMENT - ISBN → Categories/subjects
+- BOOK_GENERATION - AI-generated book metadata
+
+*Phase 1 - Quick Wins*:
+- RATINGS - ISBN → Ratings data (ISBNdb, OpenLibrary, Wikidata)
+- EDITION_VARIANTS - ISBN → Related ISBNs (ISBNdb)
+- PUBLIC_DOMAIN - ISBN → Public domain status (Google Books, Archive.org)
+- SUBJECT_BROWSING - Subject → Book list discovery (Wikidata)
+
+*Phase 2 - High-Value*:
+- SERIES_INFO - ISBN → Series name, position (Wikidata)
+- AWARDS - ISBN → Literary awards (Wikidata)
+- TRANSLATIONS - ISBN → Available translations (Wikidata)
+- ENHANCED_EXTERNAL_IDS - ISBN → Amazon ASIN, Goodreads, Google Books IDs (5 providers)
 
 **Impact:**
 - 60% code reduction (~400 lines eliminated)
@@ -35,15 +64,16 @@ Active tasks and future work. Production system (Phase 1-5) is complete.
 - Stop-word filtering reduces false positives in title matching
 - <10ms initialization, <5ms registry lookups
 - All 860 tests passing
+- 75% capability expansion (6 → 14 capabilities)
 
 **Architecture:**
 - `worker/lib/external-services/` - Core framework
-  - `capabilities.ts` - 6 capability interfaces (ISBN, metadata, covers, subjects, biography, generation)
+  - `capabilities.ts` - **14 capability interfaces** (6 core + 8 new)
   - `provider-registry.ts` - Dynamic provider discovery and registration
   - `http-client.ts` - Unified HTTP client with rate limiting, caching, retry
   - `service-context.ts` - Unified context for all providers
-- `worker/lib/external-services/providers/` - 7 providers implementing capability interfaces
-- `worker/lib/external-services/orchestrators/` - 3 orchestrators for workflow management
+- `worker/lib/external-services/providers/` - 8 providers implementing capability interfaces
+- `worker/lib/external-services/orchestrators/` - **6 orchestrators** (3 existing + 3 new)
 - `worker/src/services/isbn-resolution.ts` - Migrated to NEW orchestrator
 - `worker/src/services/synthetic-enhancement.ts` - Migrated to NEW orchestrator
 
@@ -52,20 +82,42 @@ Active tasks and future work. Production system (Phase 1-5) is complete.
 - ✅ Added stop-word filtering to GoogleBooksProvider and ArchiveOrgProvider
 - ✅ Implemented parallel batch processing with concurrency limit of 5
 - ✅ Net reduction: ~275 lines (~15% reduction in isbn-resolution.ts)
+- ✅ Fixed 2 CRITICAL issues from Phase 3 review (type safety, resource leak)
 
 **Documentation:**
-- `docs/development/SERVICE_PROVIDER_GUIDE.md` - Comprehensive developer guide
+- `docs/development/SERVICE_PROVIDER_GUIDE.md` - Comprehensive developer guide (v2.0)
 - `docs/planning/EXTERNAL_API_ARCHITECTURE_PLAN.md` - Architecture plan
+- `docs/research/PROVIDER-API-CAPABILITIES-2026.md` - Full API capability reference
+- `docs/research/CAPABILITY-EXPANSION-ROADMAP.md` - Implementation roadmap
 - Planning files: `task_plan.md`, `findings.md`, `progress.md`
 
 **Deployment History:**
 - Phase 1-2: 946dc0c, 3eb8574, dd413da (Jan 11)
 - Phase 3: 6fe21813-1b6d-42c4-a2e5-5e90977e51fb (Jan 11)
 - Cleanup: 25fd4ec, 228090dd-18fd-4a15-84fd-92d27c2117c6 (Jan 12)
+- Phases 1-3: [Pending deployment] (Jan 12)
 
 **Related Issues:**
+- GitHub Issue #180 (Framework Expansion - Phases 1-3)
 - Closes #173 (Multi-Source ISBN Resolution EPIC)
 - Foundation for #163 (Subject/Genre Coverage), #166 (Advanced Features)
+
+---
+
+## 🔥 DISCOVERY: Issue #163 Strategy Revision (Jan 12, 2026)
+
+**NEW FINDING**: Before jumping to Gemini AI ($112-175), we have untapped free providers!
+
+### Subject/Genre Coverage - Phase 3A Revised Strategy
+- **Discovery**: GoogleBooksProvider implements ISubjectProvider (already in framework!)
+- **Option 1 - Google Books**: 5-7M works, +15-17% coverage, $0 cost
+- **Option 2 - Archive.org**: 2-4M works, +6-9% coverage, $0 cost
+- **Combined**: 59% → 78-82% coverage vs 80% target
+- **Fallback - Gemini AI**: Use for remaining 2-3M works ($30-50 vs $112-175)
+
+**Documentation**: `docs/planning/ISSUE-163-PROVIDER-ANALYSIS.md`
+
+**Decision Required**: Pursue free providers first (3-6 months) OR use Gemini AI now (2-3 days)?
 
 ---
 

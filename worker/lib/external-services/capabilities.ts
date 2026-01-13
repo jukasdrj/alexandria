@@ -26,6 +26,16 @@ export enum ServiceCapability {
   AUTHOR_BIOGRAPHY = 'author-biography',
   SUBJECT_ENRICHMENT = 'subject-enrichment',
   BOOK_GENERATION = 'book-generation',
+  // Phase 1 - Quick Wins (Jan 2026)
+  RATINGS = 'ratings',
+  EDITION_VARIANTS = 'edition-variants',
+  PUBLIC_DOMAIN = 'public-domain',
+  SUBJECT_BROWSING = 'subject-browsing',
+  // Phase 2 - High-Value (Jan 2026)
+  SERIES_INFO = 'series-info',
+  AWARDS = 'awards',
+  TRANSLATIONS = 'translations',
+  ENHANCED_EXTERNAL_IDS = 'enhanced-external-ids',
 }
 
 /**
@@ -205,4 +215,250 @@ export interface IBookGenerator extends IServiceProvider {
     count: number,
     context: ServiceContext
   ): Promise<GeneratedBook[]>;
+}
+
+// =============================================================================
+// Phase 1 - Quick Wins (Jan 2026)
+// =============================================================================
+
+/**
+ * Ratings Result
+ */
+export interface RatingsResult {
+  averageRating: number; // 0.0 - 5.0 scale
+  ratingsCount: number;
+  source: string;
+  confidence: number; // 0-100
+}
+
+/**
+ * Ratings capability
+ * Fetches user ratings and review counts
+ */
+export interface IRatingsProvider extends IServiceProvider {
+  fetchRatings(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<RatingsResult | null>;
+
+  /**
+   * Batch fetch ratings for multiple ISBNs
+   * Optional - not all providers support batching
+   */
+  batchFetchRatings?(
+    isbns: string[],
+    context: ServiceContext
+  ): Promise<Map<string, RatingsResult>>;
+}
+
+/**
+ * Edition Variant (format variant)
+ */
+export interface EditionVariant {
+  isbn: string;
+  format: 'hardcover' | 'paperback' | 'ebook' | 'audiobook' | 'mass-market' | 'library-binding' | 'other';
+  formatDescription?: string;
+  publisher?: string;
+  publishDate?: string;
+  price?: number;
+  currency?: string;
+  availability?: 'in-print' | 'out-of-print' | 'pre-order' | 'unknown';
+  source: string;
+}
+
+/**
+ * Edition Variants capability
+ * Fetches different format editions of the same work
+ */
+export interface IEditionVariantProvider extends IServiceProvider {
+  fetchEditionVariants(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<EditionVariant[]>;
+}
+
+/**
+ * Public Domain Result
+ */
+export interface PublicDomainResult {
+  isPublicDomain: boolean;
+  confidence: number; // 0-100
+  reason: 'publication-date' | 'copyright-expiration' | 'explicit-license' | 'api-verified' | 'unknown';
+  copyrightExpiry?: number; // Year
+  downloadUrl?: string;
+  source: string;
+}
+
+/**
+ * Public Domain capability
+ * Detects if a book is in the public domain
+ */
+export interface IPublicDomainProvider extends IServiceProvider {
+  checkPublicDomain(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<PublicDomainResult | null>;
+}
+
+/**
+ * Subject Node (hierarchical subject/genre)
+ */
+export interface SubjectNode {
+  id: string;
+  label: string;
+  parentId: string | null;
+  childIds: string[];
+  bookCount?: number;
+  source: string;
+}
+
+/**
+ * Subject Browsing capability
+ * Fetches hierarchical subject/genre taxonomies
+ */
+export interface ISubjectBrowsingProvider extends IServiceProvider {
+  fetchSubjectHierarchy(
+    subjectId: string,
+    depth: number,
+    context: ServiceContext
+  ): Promise<SubjectNode[]>;
+
+  searchSubjects(
+    query: string,
+    context: ServiceContext
+  ): Promise<SubjectNode[]>;
+}
+
+// =============================================================================
+// Phase 2 - High-Value (Jan 2026)
+// =============================================================================
+
+/**
+ * Series Information
+ */
+export interface SeriesInfo {
+  seriesName: string;
+  seriesPosition?: number;
+  totalBooks?: number;
+  seriesId?: string;
+  relatedIsbns?: string[];
+  confidence: number; // 0-100
+  source: string;
+}
+
+/**
+ * Series Information capability
+ * Fetches book series metadata
+ */
+export interface ISeriesProvider extends IServiceProvider {
+  fetchSeriesInfo(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<SeriesInfo | null>;
+
+  /**
+   * Fetch all books in a series
+   * Optional - not all providers support this
+   */
+  fetchSeriesBooks?(
+    seriesId: string,
+    context: ServiceContext
+  ): Promise<string[]>;
+}
+
+/**
+ * Award Information
+ */
+export interface AwardInfo {
+  awardName: string;
+  year: number;
+  category?: string;
+  isWinner: boolean; // false = nominee
+  awardId?: string;
+  source: string;
+}
+
+/**
+ * Awards capability
+ * Fetches literary awards and nominations
+ */
+export interface IAwardsProvider extends IServiceProvider {
+  fetchAwards(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<AwardInfo[]>;
+}
+
+/**
+ * Translation Information
+ */
+export interface TranslationInfo {
+  isbn: string;
+  languageCode: string; // ISO 639-1
+  languageName: string;
+  translatedTitle: string;
+  translators?: string[];
+  publisher?: string;
+  publishDate?: string;
+  source: string;
+}
+
+/**
+ * Translations capability
+ * Fetches translated editions in other languages
+ */
+export interface ITranslationProvider extends IServiceProvider {
+  fetchTranslations(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<TranslationInfo[]>;
+
+  /**
+   * Fetch translation in a specific language
+   * Optional - not all providers support targeted lookup
+   */
+  fetchTranslationByLanguage?(
+    isbn: string,
+    languageCode: string,
+    context: ServiceContext
+  ): Promise<TranslationInfo | null>;
+}
+
+/**
+ * Enhanced External IDs
+ * Comprehensive cross-provider identifier mapping
+ */
+export interface EnhancedExternalIds {
+  amazonAsin?: string;
+  goodreadsId?: string;
+  googleBooksId?: string;
+  librarythingId?: string;
+  wikidataQid?: string;
+  openLibraryWorkKey?: string;
+  openLibraryEditionKey?: string;
+  archiveOrgId?: string;
+  oclcNumber?: string;
+  lccn?: string;
+  sources: string[]; // Which providers contributed IDs
+  confidence: number; // 0-100
+}
+
+/**
+ * Enhanced External IDs capability
+ * Fetches comprehensive external identifiers for cross-provider linking
+ */
+export interface IEnhancedExternalIdProvider extends IServiceProvider {
+  fetchEnhancedExternalIds(
+    isbn: string,
+    context: ServiceContext
+  ): Promise<EnhancedExternalIds | null>;
+
+  /**
+   * Batch fetch external IDs for multiple ISBNs
+   * Optional - not all providers support batching
+   */
+  batchFetchEnhancedExternalIds?(
+    isbns: string[],
+    context: ServiceContext
+  ): Promise<Map<string, EnhancedExternalIds>>;
 }
