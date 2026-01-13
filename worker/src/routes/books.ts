@@ -515,6 +515,10 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
         const localAuthorKeyCache = new Map<string, string>();
         const localWorkKeyCache = new Map<string, string>();
 
+        // Cover queue batching
+        const coverBatch: any[] = [];
+        const BATCH_SIZE = 50; // Cloudflare Queue batch size
+
         // Enrich new books
         for (const book of booksToEnrich) {
           const isbn = book.isbn13 || book.isbn;
@@ -565,21 +569,36 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
             results.newly_enriched++;
 
             if (hasCover) {
-              try {
-                await c.env.COVER_QUEUE.send({
-                  isbn,
-                  work_key: workKey,
-                  provider_url: book.image_original || book.image,
-                  priority: 'normal',
-                  source: 'new_releases',
-                });
-                results.covers_queued++;
-              } catch {
-                // Cover queue failure is non-fatal
+              coverBatch.push({
+                isbn,
+                work_key: workKey,
+                provider_url: book.image_original || book.image,
+                priority: 'normal',
+                source: 'new_releases',
+              });
+
+              // Flush batch if full
+              if (coverBatch.length >= BATCH_SIZE) {
+                try {
+                  await c.env.COVER_QUEUE.sendBatch(coverBatch.splice(0, coverBatch.length));
+                  results.covers_queued += BATCH_SIZE;
+                } catch (err) {
+                  logger.error('[EnrichNewReleases] Failed to send cover batch', { error: err });
+                }
               }
             }
           } catch {
             results.failed++;
+          }
+        }
+
+        // Flush remaining covers
+        if (coverBatch.length > 0) {
+          try {
+            await c.env.COVER_QUEUE.sendBatch(coverBatch);
+            results.covers_queued += coverBatch.length;
+          } catch (err) {
+            logger.error('[EnrichNewReleases] Failed to send final cover batch', { error: err });
           }
         }
 
