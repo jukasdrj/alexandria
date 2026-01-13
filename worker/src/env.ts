@@ -31,6 +31,9 @@ export interface Env {
   XAI_API_KEY: {
     get(): Promise<string | null>;
   };
+  LIBRARYTHING_API_KEY: {
+    get(): Promise<string | null>;
+  };
 
   // Queue bindings
   ENRICHMENT_QUEUE: Queue;

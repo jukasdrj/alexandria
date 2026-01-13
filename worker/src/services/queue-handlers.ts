@@ -28,12 +28,14 @@ import type {
   CoverProcessingResult,
 } from './types.js';
 import { CoverFetchOrchestrator } from '../../lib/external-services/orchestrators/cover-fetch-orchestrator.js';
+import { EditionVariantOrchestrator } from '../../lib/external-services/orchestrators/edition-variant-orchestrator.js';
 import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
 import {
   GoogleBooksProvider,
   OpenLibraryProvider,
   ArchiveOrgProvider,
   WikidataProvider,
+  LibraryThingProvider,
   GeminiProvider,
   XaiProvider,
 } from '../../lib/external-services/providers/index.js';
@@ -72,6 +74,7 @@ providerRegistry.registerAll([
   new ArchiveOrgProvider(),
   new WikidataProvider(),
   new ISBNdbProvider(),
+  new LibraryThingProvider(),
   // AI providers for book generation (backfill)
   new GeminiProvider(),
   new XaiProvider(),
@@ -699,6 +702,87 @@ export async function processEnrichmentQueue(
         } else if (env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true') {
           // Time budget exceeded - skip remaining ISBNs
           logger.debug('Skipping Google Books enrichment due to time budget', {
+            isbn,
+            elapsed_ms: Date.now() - startTime,
+            budget_ms: TIME_BUDGET_MS,
+          });
+        }
+
+        // Phase 3: Enrich edition variants (opportunistic, non-blocking)
+        // Aggregates related ISBNs from multiple providers (ISBNdb, LibraryThing, Wikidata)
+        // Protected by time budget to prevent Worker timeouts
+        if (Date.now() - startTime < TIME_BUDGET_MS) {
+          try {
+            const variantStartTime = Date.now();
+            const editionVariantOrchestrator = new EditionVariantOrchestrator(providerRegistry, {
+              enableLogging: true,
+              stopOnFirstSuccess: false, // Aggregate from all providers
+              providerTimeoutMs: 5000, // 5s per provider
+            });
+
+            const variants = await editionVariantOrchestrator.fetchEditionVariants(
+              isbn,
+              createServiceContext(env, logger, quotaManager)
+            );
+            const variantDuration = Date.now() - variantStartTime;
+
+            if (variants.length > 0) {
+              // Merge variants from all providers into related_isbns JSONB
+              const mergedRelatedIsbns: Record<string, string> = {};
+
+              // Keep existing ISBNdb variants if any
+              if (externalData.relatedISBNs) {
+                Object.assign(mergedRelatedIsbns, externalData.relatedISBNs);
+              }
+
+              // Add variants from orchestrator (LibraryThing + Wikidata)
+              for (const variant of variants) {
+                const key = variant.formatDescription || variant.format;
+                if (!mergedRelatedIsbns[key]) {
+                  mergedRelatedIsbns[key] = variant.isbn;
+                }
+              }
+
+              // Update enriched_editions with merged variants
+              await sql`
+                UPDATE enriched_editions
+                SET related_isbns = ${JSON.stringify(mergedRelatedIsbns)},
+                    updated_at = NOW()
+                WHERE isbn = ${isbn}
+              `;
+
+              logger.info('Edition variant enrichment complete', {
+                isbn,
+                variants_count: variants.length,
+                sources: [...new Set(variants.map(v => v.source))],
+                duration_ms: variantDuration,
+              });
+
+              // Track analytics
+              if (env.ANALYTICS) {
+                await env.ANALYTICS.writeDataPoint({
+                  indexes: ['edition_variant_enrichment'],
+                  blobs: [
+                    `isbn_${isbn}`,
+                    `variants_${variants.length}`,
+                    `sources_${[...new Set(variants.map(v => v.source))].join(',')}`
+                  ],
+                  doubles: [variants.length, variantDuration]
+                });
+              }
+            } else {
+              logger.debug('No edition variants found', { isbn });
+            }
+          } catch (variantError) {
+            // Log but don't fail enrichment if edition variant fetch fails
+            logger.warn('Edition variant enrichment failed (non-blocking)', {
+              isbn,
+              error: variantError instanceof Error ? variantError.message : String(variantError),
+            });
+          }
+        } else {
+          // Time budget exceeded - skip remaining ISBNs
+          logger.debug('Skipping edition variant enrichment due to time budget', {
             isbn,
             elapsed_ms: Date.now() - startTime,
             budget_ms: TIME_BUDGET_MS,

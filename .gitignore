@@ -1,5 +1,6 @@
 # Credentials & Secrets
 docs/CREDENTIALS.md
+docs/REPO_SECRETS.md
 .env
 .env.local
 .dev.vars

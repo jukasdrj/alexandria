@@ -46,72 +46,107 @@ Alexandria's Service Provider Framework provides a unified, capability-based arc
 
 ### Adding a New Provider (5 Steps)
 
-**Example**: Integrating LibraryThing API
+**Example**: Integrating LibraryThing thingISBN API for Edition Variants
+
+**Real Implementation**: See `worker/lib/external-services/providers/librarything-provider.ts`
 
 #### 1. Create Provider File
 
 ```typescript
 // worker/lib/external-services/providers/librarything-provider.ts
 
-import type { IMetadataProvider, BookMetadata } from '../capabilities.js';
+import type { IEditionVariantProvider, EditionVariant } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
 import type { Env } from '../../../src/env.js';
 import { ServiceHttpClient } from '../http-client.js';
 import { ServiceCapability } from '../capabilities.js';
 import { normalizeISBN } from '../../isbn-utils.js';
 
-export class LibraryThingProvider implements IMetadataProvider {
+export class LibraryThingProvider implements IEditionVariantProvider {
   readonly name = 'librarything';
   readonly providerType = 'free' as const;
-  readonly capabilities = [ServiceCapability.METADATA_ENRICHMENT];
+  readonly capabilities = [ServiceCapability.EDITION_VARIANTS];
 
   private client = new ServiceHttpClient({
     providerName: 'librarything',
-    rateLimitMs: 1000, // 1 req/sec
-    cacheTtlSeconds: 604800, // 7 days
-    purpose: 'Book metadata enrichment',
+    rateLimitMs: 1000, // 1 req/sec (1,000 req/day limit)
+    cacheTtlSeconds: 2592000, // 30 days (edition data is stable)
+    purpose: 'Edition disambiguation and variant discovery',
   });
 
-  async isAvailable(_env: Env): Promise<boolean> {
-    return true; // Free service, no API key required
+  async isAvailable(env: Env): Promise<boolean> {
+    const apiKey = await env.LIBRARYTHING_API_KEY?.get();
+    return !!apiKey;
   }
 
-  async fetchMetadata(isbn: string, context: ServiceContext): Promise<BookMetadata | null> {
-    const { logger } = context;
+  async fetchEditionVariants(isbn: string, context: ServiceContext): Promise<EditionVariant[]> {
+    const { logger, env } = context;
 
     // Validate ISBN before API call
     const normalizedISBN = normalizeISBN(isbn);
     if (!normalizedISBN) {
       logger.debug('Invalid ISBN format, skipping LibraryThing', { isbn });
-      return null;
+      return [];
     }
 
     try {
-      const url = `https://www.librarything.com/api/thingISBN/${normalizedISBN}`;
-      const data = await this.client.fetch<LibraryThingResponse>(url, {}, context);
+      const apiKey = await env.LIBRARYTHING_API_KEY?.get();
+      if (!apiKey) {
+        logger.error('LibraryThing API key not configured');
+        return [];
+      }
 
-      if (!data) return null;
+      const url = `https://www.librarything.com/api/${apiKey}/thingISBN/${normalizedISBN}`;
 
-      // Transform to BookMetadata format
-      return {
-        title: data.title,
-        authors: data.authors,
-        isbn13: normalizedISBN,
-        subjects: data.subjects,
-      };
+      // Fetch XML response
+      const xmlResponse = await this.client.fetch<string>(
+        url,
+        { headers: { 'Accept': 'application/xml, text/xml' } },
+        context,
+        'text' // Request text response instead of JSON
+      );
+
+      if (!xmlResponse) return [];
+
+      // Parse XML to extract related ISBNs
+      const relatedISBNs = this.parseThingISBNResponse(xmlResponse);
+
+      // Convert to EditionVariant objects
+      return relatedISBNs
+        .filter((relatedIsbn) => relatedIsbn !== normalizedISBN)
+        .map((relatedIsbn) => ({
+          isbn: relatedIsbn,
+          format: 'other' as const,
+          formatDescription: 'Related edition from LibraryThing',
+          source: 'librarything',
+        }));
     } catch (error) {
       logger.error('LibraryThing API error', { isbn, error });
-      return null; // Graceful degradation
+      return []; // Graceful degradation
     }
   }
-}
 
-interface LibraryThingResponse {
-  title: string;
-  authors: string[];
-  subjects?: string[];
+  private parseThingISBNResponse(xml: string): string[] {
+    const isbns: string[] = [];
+    const isbnRegex = /<isbn>([^<]+)<\/isbn>/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = isbnRegex.exec(xml)) !== null) {
+      const isbn = match[1].trim();
+      if (isbn) isbns.push(isbn);
+    }
+
+    return isbns;
+  }
 }
 ```
+
+**Key Points**:
+- Implements `IEditionVariantProvider` for edition discovery
+- Uses thingISBN API to find related ISBNs (formats, translations)
+- Parses XML response (LibraryThing uses XML, not JSON)
+- Rate limited to 1 req/sec (1,000/day free tier)
+- Community-validated data from 2M+ LibraryThing users
 
 #### 2. Register Provider
 

@@ -31,3 +31,9 @@ export type { PublicDomainConfig } from './public-domain-orchestrator.js';
 
 export { ExternalIdOrchestrator } from './external-id-orchestrator.js';
 export type { ExternalIdOrchestratorConfig } from './external-id-orchestrator.js';
+
+export { RatingsOrchestrator } from './ratings-orchestrator.js';
+export type { RatingsOrchestratorConfig } from './ratings-orchestrator.js';
+
+export { EditionVariantOrchestrator } from './edition-variant-orchestrator.js';
+export type { EditionVariantOrchestratorConfig } from './edition-variant-orchestrator.js';
