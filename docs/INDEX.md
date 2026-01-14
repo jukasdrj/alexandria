@@ -1,6 +1,6 @@
 # Alexandria Documentation Index
 
-**Last Updated:** January 11, 2026
+**Last Updated:** January 14, 2026
 
 > **Quick Start:** New to Alexandria? Start with [README.md](../README.md) → [CURRENT-STATUS.md](./CURRENT-STATUS.md) → [CLAUDE.md](../CLAUDE.md)
 
@@ -10,7 +10,7 @@
 
 ### Essential Reading
 - **[../README.md](../README.md)** - Project overview and quick start
-- **[../CLAUDE.md](../CLAUDE.md)** - Complete development guide (42KB, authoritative)
+- **[../CLAUDE.md](../CLAUDE.md)** - **⭐ Quick reference guide** (617 lines, 39% reduction, links to comprehensive docs)
 - **[../TODO.md](../TODO.md)** - Development roadmap and active tasks
 - **[CURRENT-STATUS.md](./CURRENT-STATUS.md)** - Active issues and priorities (P1/P2/P3)
 - **[../CHANGELOG.md](../CHANGELOG.md)** - Version history
@@ -21,6 +21,7 @@
 
 ### Endpoints & Integration
 - **[api/API-SEARCH-ENDPOINTS.md](./api/API-SEARCH-ENDPOINTS.md)** - Search API documentation (combined search with auto-detection)
+- **[api/OPEN-API-INTEGRATIONS.md](./api/OPEN-API-INTEGRATIONS.md)** - **⭐ Comprehensive guide** (Archive.org, Wikipedia, Wikidata, OpenLibrary - rate limits, caching, priority chains)
 - **[api/API-IDENTIFIER-RESOLUTION.md](./api/API-IDENTIFIER-RESOLUTION.md)** - VIAF/ISNI → Wikidata crosswalk endpoint
 - **[api/ISBNDB-ENDPOINTS.md](./api/ISBNDB-ENDPOINTS.md)** - ISBNdb Premium API integration
 - **[api/ISBNDB-ENRICHMENT.md](./api/ISBNDB-ENRICHMENT.md)** - Smart resolution pipeline
@@ -54,7 +55,10 @@
 - **[infrastructure/INFRASTRUCTURE.md](./infrastructure/INFRASTRUCTURE.md)** - System architecture overview
 - **[infrastructure/CLOUDFLARE-API-VS-WRANGLER.md](./infrastructure/CLOUDFLARE-API-VS-WRANGLER.md)** - API vs CLI management guide
 
-### Monitoring & Logging
+### Monitoring & Performance
+- **[operations/PROVIDER-ANALYTICS.md](./operations/PROVIDER-ANALYTICS.md)** - **⭐ Provider analytics dashboard** (health checks, troubleshooting, alerts)
+- **[operations/PERFORMANCE_OPTIMIZATIONS.md](./operations/PERFORMANCE_OPTIMIZATIONS.md)** - **⭐ NEW** Performance improvements (ISBN resolution, deduplication, AI robustness)
+- **[operations/RATE-LIMITS.md](./operations/RATE-LIMITS.md)** - Central reference for all API rate limits
 - **[operations/LOGPUSH-SETUP.md](./operations/LOGPUSH-SETUP.md)** - R2 log storage configuration
 - **[operations/LOGPUSH-QUICKSTART.md](./operations/LOGPUSH-QUICKSTART.md)** - Quick reference
 - **[operations/ISSUE-73-LOGPUSH-SUMMARY.md](./operations/ISSUE-73-LOGPUSH-SUMMARY.md)** - Logpush implementation details
@@ -68,7 +72,9 @@
 ## 🎯 Feature Documentation
 
 ### Active Features
+- **[features/SYNTHETIC_WORKS_ENRICHMENT_FLOW.md](./features/SYNTHETIC_WORKS_ENRICHMENT_FLOW.md)** - **⭐ Synthetic works enhancement pipeline** (3-stage flow, quota management, cron config)
 - **[features/AUTHOR-JIT-ENRICHMENT.md](./features/AUTHOR-JIT-ENRICHMENT.md)** - **⭐ Just-in-Time author enrichment system** (view-triggered, quota-protected, Jan 2026)
+- **[features/MULTI-SOURCE-ISBN-RESOLUTION.md](./features/MULTI-SOURCE-ISBN-RESOLUTION.md)** - **⭐ 5-tier cascading ISBN resolution** (v2.5.0, Jan 11, 2026)
 
 **Purpose:** In-depth documentation for major system features with architecture diagrams, usage examples, and operational guides.
 
@@ -77,7 +83,9 @@
 ## 📚 Harvesting & Enrichment
 
 ### System Documentation
-- **[QUEUE-ENRICHMENT-SYSTEM.md](./QUEUE-ENRICHMENT-SYSTEM.md)** - **⭐ Complete guide to queues, enrichment workflows, triggers, and monitoring** (NEW!)
+- **[QUEUE-ENRICHMENT-SYSTEM.md](./QUEUE-ENRICHMENT-SYSTEM.md)** - **⭐ Complete guide to queues, enrichment workflows, triggers, and monitoring**
+- **[BACKFILL_SCHEDULER_DEPLOYMENT.md](./BACKFILL_SCHEDULER_DEPLOYMENT.md)** - **⭐ Systematic month-by-month backfill** (scheduler config, prompt variants, operational guide)
+- **[operations/BACKFILL_SCHEDULER_GUIDE.md](./operations/BACKFILL_SCHEDULER_GUIDE.md)** - Operational guide for backfill scheduler
 
 ### Active Systems
 - **[harvesting/AUTHOR-DIVERSITY-ENRICHMENT-PLAN.md](./harvesting/AUTHOR-DIVERSITY-ENRICHMENT-PLAN.md)** - Wikidata enrichment strategy
@@ -96,6 +104,9 @@
 ## 📖 Guides & References
 
 ### Development Guides
+- **[development/SERVICE_PROVIDER_GUIDE.md](./development/SERVICE_PROVIDER_GUIDE.md)** - **⭐ Comprehensive guide** (adding providers, capability interfaces, orchestrator patterns)
+- **[development/XAI_COMPARISON_RESULTS.md](./development/XAI_COMPARISON_RESULTS.md)** - Gemini vs Grok comparison analysis
+- **[BACKFILL_OPTIMIZATION_REPORT.md](./BACKFILL_OPTIMIZATION_REPORT.md)** - Performance optimization report
 - **[reference/](./reference/)** - Technical reference materials
 
 ### Example Data
@@ -112,15 +123,6 @@
 - **[planning/DOCUMENTATION_HEALTH_REPORT.md](./planning/DOCUMENTATION_HEALTH_REPORT.md)** - Documentation audit (Jan 4, 2026)
 - **[planning/AUTHOR-NORMALIZATION.md](./planning/AUTHOR-NORMALIZATION.md)** - Author deduplication strategy (Issue #114 - ⚠️ Pending DB Migration)
 - **[planning/PLAN-CONTRACT-TESTING.md](./planning/PLAN-CONTRACT-TESTING.md)** - Cross-repo type safety plan
-
----
-
-## 🔄 ISBN Resolution
-
-### Multi-Source Fallback System
-- **[features/MULTI-SOURCE-ISBN-RESOLUTION.md](./features/MULTI-SOURCE-ISBN-RESOLUTION.md)** - **⭐ 5-tier cascading ISBN resolution** (v2.5.0, Jan 11, 2026)
-
-**Purpose:** Resolves ISBNdb quota exhaustion blocking backfill. Implements cascading fallback chain (ISBNdb → Google Books → OpenLibrary → Archive.org → Wikidata) with Search → Validate pattern to ensure data quality.
 
 ---
 
