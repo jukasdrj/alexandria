@@ -31,8 +31,8 @@ import {
   HTTPError,
   JSONParseError,
   TimeoutError,
-  type RetryConfig,
 } from '../fetch-utils.js';
+import { trackProviderRequest } from './analytics.js';
 
 /**
  * HTTP Client Configuration
@@ -165,15 +165,18 @@ export class ServiceHttpClient {
       if (cached) {
         const latencyMs = Date.now() - startTime;
 
-        // Track cache hit metrics
-        await this.trackMetrics(context, {
-          provider: this.config.providerName,
-          url,
-          success: true,
-          cached: true,
-          latencyMs,
-          timestamp: Date.now(),
-        });
+        // Track cache hit analytics
+        trackProviderRequest(
+          {
+            provider: this.config.providerName,
+            operation: this.extractOperation(url),
+            status: 'cache_hit',
+            latencyMs,
+            cacheHit: 1,
+          },
+          context.env,
+          context.ctx
+        );
 
         logger.debug('Cache hit', { provider: this.config.providerName, url, latencyMs });
         return cached;
@@ -212,17 +215,19 @@ export class ServiceHttpClient {
       if (!response.ok) {
         const latencyMs = Date.now() - startTime;
 
-        // Track failed request metrics
-        await this.trackMetrics(context, {
-          provider: this.config.providerName,
-          url,
-          success: false,
-          cached: false,
-          latencyMs,
-          status: response.status,
-          error: `HTTP ${response.status}: ${response.statusText}`,
-          timestamp: Date.now(),
-        });
+        // Track failed request analytics
+        trackProviderRequest(
+          {
+            provider: this.config.providerName,
+            operation: this.extractOperation(url),
+            status: 'error',
+            errorType: `HTTP_${response.status}`,
+            latencyMs,
+            cacheHit: 0,
+          },
+          context.env,
+          context.ctx
+        );
 
         logger.warn('HTTP request failed', {
           provider: this.config.providerName,
@@ -242,17 +247,19 @@ export class ServiceHttpClient {
         const latencyMs = Date.now() - startTime;
         const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
 
-        // Track JSON parse error metrics
-        await this.trackMetrics(context, {
-          provider: this.config.providerName,
-          url,
-          success: false,
-          cached: false,
-          latencyMs,
-          status: response.status,
-          error: `JSON parse error: ${errorMsg}`,
-          timestamp: Date.now(),
-        });
+        // Track JSON parse error analytics
+        trackProviderRequest(
+          {
+            provider: this.config.providerName,
+            operation: this.extractOperation(url),
+            status: 'error',
+            errorType: 'JSON_PARSE_ERROR',
+            latencyMs,
+            cacheHit: 0,
+          },
+          context.env,
+          context.ctx
+        );
 
         logger.error('JSON parse error', {
           provider: this.config.providerName,
@@ -284,16 +291,18 @@ export class ServiceHttpClient {
         }
       }
 
-      // Track successful request metrics
-      await this.trackMetrics(context, {
-        provider: this.config.providerName,
-        url,
-        success: true,
-        cached: false,
-        latencyMs,
-        status: response.status,
-        timestamp: Date.now(),
-      });
+      // Track successful request analytics
+      trackProviderRequest(
+        {
+          provider: this.config.providerName,
+          operation: this.extractOperation(url),
+          status: 'success',
+          latencyMs,
+          cacheHit: 0,
+        },
+        context.env,
+        context.ctx
+      );
 
       logger.debug('HTTP request success', {
         provider: this.config.providerName,
@@ -305,18 +314,25 @@ export class ServiceHttpClient {
       return data;
     } catch (error) {
       const latencyMs = Date.now() - startTime;
-      const errorMsg = error instanceof Error ? error.message : String(error);
 
-      // Track fetch error metrics
-      await this.trackMetrics(context, {
-        provider: this.config.providerName,
-        url,
-        success: false,
-        cached: false,
-        latencyMs,
-        error: errorMsg,
-        timestamp: Date.now(),
-      });
+      // Track fetch error analytics
+      const errorType = error instanceof TimeoutError ? 'TIMEOUT' :
+                        error instanceof HTTPError ? `HTTP_${error.status}` :
+                        error instanceof JSONParseError ? 'JSON_PARSE_ERROR' :
+                        'FETCH_ERROR';
+
+      trackProviderRequest(
+        {
+          provider: this.config.providerName,
+          operation: this.extractOperation(url),
+          status: errorType === 'TIMEOUT' ? 'timeout' : 'error',
+          errorType,
+          latencyMs,
+          cacheHit: 0,
+        },
+        context.env,
+        context.ctx
+      );
 
       this.handleFetchError(error, url, logger);
       return null;
@@ -512,45 +528,27 @@ export class ServiceHttpClient {
   }
 
   /**
-   * Track request metrics to Cloudflare Analytics Engine
+   * Extract operation name from URL for analytics
    *
-   * Sends metrics for:
-   * - Success/failure rates per provider
-   * - Request latency (for cold start monitoring)
-   * - Cache hit rates
-   * - Error types and frequencies
+   * Attempts to extract a meaningful operation name from the URL path.
+   * Falls back to 'fetch' if extraction fails.
    *
-   * @param context - Service context with env.QUERY_ANALYTICS binding
-   * @param metrics - Request metrics to track
+   * @param url - Request URL
+   * @returns Operation name (e.g., 'search', 'metadata', 'cover')
    */
-  private async trackMetrics(
-    context: ServiceContext,
-    metrics: RequestMetrics
-  ): Promise<void> {
+  private extractOperation(url: string): string {
     try {
-      // Check if Analytics Engine binding exists
-      if (!context.env.QUERY_ANALYTICS) {
-        return; // Gracefully skip if analytics not configured
+      const urlObj = new URL(url);
+      const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+
+      // For API endpoints, use last segment (e.g., /api/search → 'search')
+      if (pathSegments.length > 0) {
+        return pathSegments[pathSegments.length - 1].toLowerCase();
       }
 
-      // Write to Analytics Engine
-      context.env.QUERY_ANALYTICS.writeDataPoint({
-        blobs: [
-          metrics.provider,
-          metrics.url,
-          metrics.success ? 'success' : 'failure',
-          metrics.cached ? 'cached' : 'fresh',
-          metrics.error || '',
-        ],
-        doubles: [metrics.latencyMs, metrics.status || 0],
-        indexes: [metrics.provider], // Index by provider for querying
-      });
-    } catch (error) {
-      // Graceful degradation: don't fail requests if analytics fails
-      context.logger.debug('Analytics tracking failed', {
-        provider: this.config.providerName,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      return 'fetch';
+    } catch {
+      return 'fetch';
     }
   }
 

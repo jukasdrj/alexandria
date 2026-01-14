@@ -28,6 +28,7 @@ import type { BookMetadata, IMetadataProvider, ISubjectProvider } from '../capab
 import type { ServiceContext } from '../service-context.js';
 import { ServiceProviderRegistry } from '../provider-registry.js';
 import { ServiceCapability } from '../capabilities.js';
+import { trackOrchestratorFallback } from '../analytics.js';
 
 // =================================================================================
 // Types
@@ -194,6 +195,22 @@ export class MetadataEnrichmentOrchestrator {
           durationMs: result.durationMs,
         });
       }
+
+      // Track orchestrator fallback analytics
+      const allProviders = [...result.providers.metadata, ...result.providers.subjects];
+      trackOrchestratorFallback(
+        {
+          orchestrator: 'metadata_enrichment',
+          providerChain: allProviders.join('→'),
+          successfulProvider: result.providers.metadata.length > 0 ? result.providers.metadata[0] : null,
+          operation: `enrichMetadata("${isbn}")`,
+          attemptsCount: allProviders.length,
+          totalLatencyMs: result.durationMs,
+          success: merged !== null ? 1 : 0,
+        },
+        context.env,
+        context.ctx
+      );
 
       return result;
     } catch (error) {

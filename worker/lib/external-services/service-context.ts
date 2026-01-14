@@ -78,6 +78,12 @@ export interface ServiceContext {
    * Request-specific metadata for tracing/debugging
    */
   metadata?: Record<string, unknown>;
+
+  /**
+   * Execution context for non-blocking analytics via ctx.waitUntil()
+   * Optional - if not provided, analytics will fire-and-forget
+   */
+  ctx?: ExecutionContext;
 }
 
 /**
@@ -93,6 +99,7 @@ export function createServiceContext(
     rateLimitStrategy?: RateLimitStrategy;
     timeoutMs?: number;
     metadata?: Record<string, unknown>;
+    ctx?: ExecutionContext;
   }
 ): ServiceContext {
   return {
@@ -104,5 +111,6 @@ export function createServiceContext(
     rateLimitStrategy: options?.rateLimitStrategy ?? 'enforce',
     timeoutMs: options?.timeoutMs,
     metadata: options?.metadata,
+    ctx: options?.ctx,
   };
 }

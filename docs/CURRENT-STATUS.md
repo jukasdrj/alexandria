@@ -1,12 +1,30 @@
 # Alexandria Current Status & Open Issues
 
-**Last Updated:** January 14, 2026 (Author Backfill System: Ready for Production)
+**Last Updated:** January 14, 2026 (Priorities Updated: 5 Issues Closed, 2 Promoted to P1)
 
 ## ✅ Recently Completed (Jan 14, 2026)
 
-### Issue #186: Author Works Backfill System ✅ COMPLETE & PRODUCTION READY
+### Issue Tracker Cleanup & Priority Updates 🎉
 
-**Status**: Fully operational, 100% test success rate, ready for 75,508-work production backfill
+**Issues Closed (5 total)**:
+- #188 - ISBNdb quota tracking (100% coverage achieved)
+- #187 - Wikidata cache key length (SHA-256 hashing implemented)
+- #186 - Author works backfill (implementation complete, rollout paused)
+- #180 - External Service Provider Framework Phases 1-3 (production-deployed)
+- #166 - Open API Advanced Features (deferred as optional enhancements)
+
+**Issues Paused**:
+- **Author JIT Enrichment (#153)**: Phase 1 deployed, monitoring paused (needs organic traffic for validation)
+- **Author Backfill (#186)**: Implementation complete, rollout paused until need arises
+- **Production Backfill (#183)**: System validated, rollout paused until needed
+
+**Priority Promotions**:
+- **#178** - Deprecate Legacy Cover API Routes → **P1** (Top priority - start Phase 1 now)
+- **#177** - External Service Provider Analytics → **P1** (High priority - after #178 Phase 1)
+
+### Issue #186: Author Works Backfill System ✅ COMPLETE (Rollout Paused)
+
+**Status**: Fully operational, 100% test success rate, ready for 75,508-work production backfill when needed
 
 **Problem**: 75,508 ISBNdb works (2.28% of enriched works) created before January 6, 2026 missing `author_works` mappings, causing empty `authors: []` arrays in search results despite valid book data.
 
@@ -84,17 +102,59 @@
 - API calls: ~150,000-225,000 OpenLibrary (distributed over rollout period)
 
 **Next Steps**:
-- Execute production backfill with chosen strategy (awaiting user approval)
-- Monitor success rates and API quotas
-- Validate Harry Potter example returns authors array
+- **PAUSED** - Rollout deferred per user request until need arises
+- System ready for immediate execution when needed (1,000 works/day recommended)
+- Issue #186 closed as complete
+
+---
+
+## 🎯 Current Priorities (Updated Jan 14, 2026)
+
+### P1 - High Priority
+
+**#178 - Deprecate Legacy Cover API Routes** ⭐ **TOP PRIORITY**
+- **Action**: Start Phase 1 (Usage Analytics) immediately
+- **Effort**: 4-6 hours
+- **Goal**: Determine if legacy routes have external consumers
+- **Timeline**: 2-4 weeks analytics collection
+- **Why Now**: Perfect timing post-framework-migration, clean codebase, fresh context
+
+**#177 - External Service Provider Analytics & Monitoring** ⭐ **NEXT**
+- **Action**: Start after #178 Phase 1 completes
+- **Effort**: 30-40 hours (1 week focused work)
+- **Goal**: Data-driven optimization, proactive monitoring
+- **Timeline**: Q1 2026 (February)
+- **Why Now**: Framework deployed, zero visibility into provider performance
+
+**#183 - Backfill Scheduler: Scaled Production Rollout**
+- **Status**: Validated and ready, **paused** per user request
+- **Action**: Execute when user decides it's needed
+- **Effort**: 20 days for complete 2000-2023 backfill
+- **Why Paused**: User decision to defer until need arises
+
+### P2 - Medium Priority
+
+**#153 - Author JIT Enrichment System**
+- **Status**: Phase 1 deployed, **monitoring paused**
+- **Action**: Resume validation when organic traffic increases
+- **Timeline**: Feb 8, 2026 (30-day validation window)
+- **Why Paused**: Insufficient traffic (1 author viewed in 7 days)
+
+### P3 - Low Priority
+
+**#160 - [EPIC] Book Recommendation System**
+- **Status**: Planning phase, multi-repo coordination required
+- **Action**: Defer to Q2+ 2026
+- **Timeline**: 4 weeks MVP (when ready)
+- **Blockers**: Requires bendv3 coordination
 
 ---
 
 ### Issue #188 & #187: ISBNdb Quota Tracking + Wikidata Cache Keys ✅ COMPLETE
 
-### Issue #188 & #187: ISBNdb Quota Tracking + Wikidata Cache Keys ✅ COMPLETE
+### Issue #188 & #187: ISBNdb Quota Tracking + Wikidata Cache Keys ✅ CLOSED
 
-**Status**: Production-ready and deployed with 100% quota tracking accuracy
+**Status**: Production-deployed with 100% quota tracking accuracy, issues closed Jan 14
 
 **Critical Bug Fixed - Issue #188**:
 - **Problem**: 82% of ISBNdb API calls invisible to monitoring (only successful 200 OK responses recorded)

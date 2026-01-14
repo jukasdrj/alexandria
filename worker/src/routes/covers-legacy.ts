@@ -405,6 +405,7 @@ app.openapi(coverServeRoute, async (c) => {
 
 // POST /covers/:isbn/process
 app.openapi(coverProcessRoute, async (c) => {
+  const requestStart = Date.now();
   const { isbn } = c.req.valid('param');
   const { force } = c.req.valid('query');
   const logger = c.get('logger');
@@ -430,6 +431,32 @@ app.openapi(coverProcessRoute, async (c) => {
       statusCode,
     });
 
+    // Add deprecation warning headers
+    c.header('X-Deprecated', 'true');
+    c.header('Warning', '299 - "This endpoint is deprecated. Use queue-based cover processing instead."');
+
+    // Track legacy route usage
+    if (c.env.COVER_ANALYTICS) {
+      c.executionCtx.waitUntil(
+        Promise.resolve(
+          c.env.COVER_ANALYTICS.writeDataPoint({
+            indexes: ['legacy_route_access'],
+            blobs: [
+              '/covers/:isbn/process',
+              'POST',
+              c.req.header('user-agent') || 'unknown',
+              c.req.header('referer') || 'unknown',
+            ],
+            doubles: [
+              statusCode,
+              Date.now() - requestStart, // response_time_ms
+              normalizedISBN.length, // isbn_count (1 for single)
+            ],
+          })
+        )
+      );
+    }
+
     return c.json(result, statusCode);
   } catch (error) {
     logger.error('Cover processing failed', {
@@ -437,6 +464,33 @@ app.openapi(coverProcessRoute, async (c) => {
       error: error instanceof Error ? error.message : String(error),
     });
     const message = error instanceof Error ? error.message : 'Unknown error';
+
+    // Add deprecation warning headers even on error
+    c.header('X-Deprecated', 'true');
+    c.header('Warning', '299 - "This endpoint is deprecated. Use queue-based cover processing instead."');
+
+    // Track legacy route usage (error case)
+    if (c.env.COVER_ANALYTICS) {
+      c.executionCtx.waitUntil(
+        Promise.resolve(
+          c.env.COVER_ANALYTICS.writeDataPoint({
+            indexes: ['legacy_route_access'],
+            blobs: [
+              '/covers/:isbn/process',
+              'POST',
+              c.req.header('user-agent') || 'unknown',
+              c.req.header('referer') || 'unknown',
+            ],
+            doubles: [
+              500,
+              Date.now() - requestStart, // response_time_ms
+              normalizedISBN.length, // isbn_count (1 for single)
+            ],
+          })
+        )
+      );
+    }
+
     return c.json(
       {
         status: 'error' as const,
@@ -451,6 +505,7 @@ app.openapi(coverProcessRoute, async (c) => {
 // POST /covers/batch
 // @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(coverBatchRoute, async (c) => {
+  const requestStart = Date.now();
   const { isbns } = c.req.valid('json');
   const logger = c.get('logger');
 
@@ -465,6 +520,32 @@ app.openapi(coverBatchRoute, async (c) => {
       cached: result.cached,
       failed: result.failed,
     });
+
+    // Add deprecation warning headers
+    c.header('X-Deprecated', 'true');
+    c.header('Warning', '299 - "This endpoint is deprecated. Use queue-based cover processing instead."');
+
+    // Track legacy route usage
+    if (c.env.COVER_ANALYTICS) {
+      c.executionCtx.waitUntil(
+        Promise.resolve(
+          c.env.COVER_ANALYTICS.writeDataPoint({
+            indexes: ['legacy_route_access'],
+            blobs: [
+              '/covers/batch',
+              'POST',
+              c.req.header('user-agent') || 'unknown',
+              c.req.header('referer') || 'unknown',
+            ],
+            doubles: [
+              200, // status code (batch always returns 200)
+              Date.now() - requestStart, // response_time_ms
+              isbns.length, // isbn_count
+            ],
+          })
+        )
+      );
+    }
 
     // Transform the flat structure to match schema with summary
     return c.json({
@@ -482,6 +563,33 @@ app.openapi(coverBatchRoute, async (c) => {
       error: error instanceof Error ? error.message : String(error),
     });
     const message = error instanceof Error ? error.message : 'Unknown error';
+
+    // Add deprecation warning headers even on error
+    c.header('X-Deprecated', 'true');
+    c.header('Warning', '299 - "This endpoint is deprecated. Use queue-based cover processing instead."');
+
+    // Track legacy route usage (error case)
+    if (c.env.COVER_ANALYTICS) {
+      c.executionCtx.waitUntil(
+        Promise.resolve(
+          c.env.COVER_ANALYTICS.writeDataPoint({
+            indexes: ['legacy_route_access'],
+            blobs: [
+              '/covers/batch',
+              'POST',
+              c.req.header('user-agent') || 'unknown',
+              c.req.header('referer') || 'unknown',
+            ],
+            doubles: [
+              500,
+              Date.now() - requestStart, // response_time_ms
+              isbns.length, // isbn_count
+            ],
+          })
+        )
+      );
+    }
+
     return c.json(
       {
         error: 'Batch processing failed',

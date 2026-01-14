@@ -24,6 +24,7 @@ import type { ISBNResolutionResult, IISBNResolver } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
 import { ServiceProviderRegistry } from '../provider-registry.js';
 import { ServiceCapability } from '../capabilities.js';
+import { trackOrchestratorFallback } from '../analytics.js';
 
 // =================================================================================
 // Types
@@ -147,6 +148,8 @@ export class ISBNResolutionOrchestrator {
 
         if (attempt.success && attempt.isbn) {
           // Success! Log and return
+          const totalDurationMs = Date.now() - startTime;
+
           if (this.config.enableLogging) {
             logger.info('ISBN resolved successfully', {
               title,
@@ -155,10 +158,25 @@ export class ISBNResolutionOrchestrator {
               provider: attempt.provider,
               confidence: attempt.confidence,
               durationMs: attempt.durationMs,
-              totalDurationMs: Date.now() - startTime,
+              totalDurationMs,
               attemptedProviders: attempts.length,
             });
           }
+
+          // Track orchestrator fallback analytics
+          trackOrchestratorFallback(
+            {
+              orchestrator: 'isbn_resolution',
+              providerChain: attempts.map(a => a.provider).join('→'),
+              successfulProvider: attempt.provider,
+              operation: `resolveISBN("${title}", "${author}")`,
+              attemptsCount: attempts.length,
+              totalLatencyMs: totalDurationMs,
+              success: 1,
+            },
+            context.env,
+            context.ctx
+          );
 
           return {
             isbn: attempt.isbn,
@@ -178,15 +196,32 @@ export class ISBNResolutionOrchestrator {
       }
 
       // All resolvers failed
+      const totalDurationMs = Date.now() - startTime;
+
       if (this.config.enableLogging) {
         logger.warn('All ISBN resolvers failed', {
           title,
           author,
           attemptedProviders: attempts.length,
-          totalDurationMs: Date.now() - startTime,
+          totalDurationMs,
           attempts: attempts.map(a => ({ provider: a.provider, error: a.error })),
         });
       }
+
+      // Track orchestrator fallback analytics (failure case)
+      trackOrchestratorFallback(
+        {
+          orchestrator: 'isbn_resolution',
+          providerChain: attempts.map(a => a.provider).join('→'),
+          successfulProvider: null,
+          operation: `resolveISBN("${title}", "${author}")`,
+          attemptsCount: attempts.length,
+          totalLatencyMs: totalDurationMs,
+          success: 0,
+        },
+        context.env,
+        context.ctx
+      );
 
       return { isbn: null, confidence: 0, source: 'all-failed' };
     } catch (error) {

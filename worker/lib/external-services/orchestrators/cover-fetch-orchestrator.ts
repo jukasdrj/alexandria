@@ -24,6 +24,7 @@ import type { CoverResult, ICoverProvider } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
 import { ServiceProviderRegistry } from '../provider-registry.js';
 import { ServiceCapability } from '../capabilities.js';
+import { trackOrchestratorFallback } from '../analytics.js';
 
 // =================================================================================
 // Types
@@ -147,16 +148,33 @@ export class CoverFetchOrchestrator {
 
         if (attempt.success && attempt.url) {
           // Success! Log and return
+          const totalDurationMs = Date.now() - startTime;
+
           if (this.config.enableLogging) {
             logger.info('Cover fetched successfully', {
               isbn,
               provider: attempt.provider,
               size: attempt.size,
               durationMs: attempt.durationMs,
-              totalDurationMs: Date.now() - startTime,
+              totalDurationMs,
               attemptedProviders: attempts.length,
             });
           }
+
+          // Track orchestrator fallback analytics
+          trackOrchestratorFallback(
+            {
+              orchestrator: 'cover_fetch',
+              providerChain: attempts.map(a => a.provider).join('→'),
+              successfulProvider: attempt.provider,
+              operation: `fetchCover("${isbn}")`,
+              attemptsCount: attempts.length,
+              totalLatencyMs: totalDurationMs,
+              success: 1,
+            },
+            context.env,
+            context.ctx
+          );
 
           return {
             url: attempt.url,
@@ -176,13 +194,30 @@ export class CoverFetchOrchestrator {
       }
 
       // All providers failed
+      const totalDurationMs = Date.now() - startTime;
+
       if (this.config.enableLogging) {
         logger.warn('All cover providers failed', {
           isbn,
           attemptedProviders: attempts.length,
-          totalDurationMs: Date.now() - startTime,
+          totalDurationMs,
         });
       }
+
+      // Track orchestrator fallback analytics (failure case)
+      trackOrchestratorFallback(
+        {
+          orchestrator: 'cover_fetch',
+          providerChain: attempts.map(a => a.provider).join('→'),
+          successfulProvider: null,
+          operation: `fetchCover("${isbn}")`,
+          attemptsCount: attempts.length,
+          totalLatencyMs: totalDurationMs,
+          success: 0,
+        },
+        context.env,
+        context.ctx
+      );
 
       return null;
     } catch (error) {

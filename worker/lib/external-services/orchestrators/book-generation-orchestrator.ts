@@ -17,12 +17,13 @@ import type { ServiceProviderRegistry } from '../provider-registry.js';
 import type { IBookGenerator, GeneratedBook } from '../capabilities.js';
 import { ServiceCapability } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
-import type { Logger } from '../../../src/env.js';
+import type { Logger } from '../../logger.js';
 import {
   normalizeTitle,
   calculateSimilarity,
   FUZZY_SIMILARITY_THRESHOLD,
 } from '../../utils/string-similarity.js';
+import { trackOrchestratorFallback } from '../analytics.js';
 
 // =================================================================================
 // Configuration
@@ -214,10 +215,27 @@ export class BookGenerationOrchestrator {
     }
 
     if (availableProviders.length === 0) {
+      const totalDurationMs = Date.now() - startTime;
       logger.error('[BookGenOrchestrator] No available providers for concurrent generation', {
         attempted_providers: providers.map((p) => p.name),
-        total_duration_ms: Date.now() - startTime,
+        total_duration_ms: totalDurationMs,
       });
+
+      // Track orchestrator fallback analytics (no providers available)
+      trackOrchestratorFallback(
+        {
+          orchestrator: 'book_generation',
+          providerChain: providers.map((p) => p.name).join('→'),
+          successfulProvider: null,
+          operation: `generateBooks("${prompt.substring(0, 50)}...", ${count})`,
+          attemptsCount: 0,
+          totalLatencyMs: totalDurationMs,
+          success: 0,
+        },
+        context.env,
+        context.ctx
+      );
+
       return [];
     }
 
@@ -289,22 +307,56 @@ export class BookGenerationOrchestrator {
     const allBooks = allResults.flat();
 
     if (allBooks.length === 0) {
+      const totalDurationMs = Date.now() - startTime;
       logger.error('[BookGenOrchestrator] All concurrent providers failed', {
         attempted_providers: availableProviders.map((p) => p.name),
-        total_duration_ms: Date.now() - startTime,
+        total_duration_ms: totalDurationMs,
       });
+
+      // Track orchestrator fallback analytics (all providers failed)
+      trackOrchestratorFallback(
+        {
+          orchestrator: 'book_generation',
+          providerChain: availableProviders.map((p) => p.name).join('→'),
+          successfulProvider: null,
+          operation: `generateBooks("${prompt.substring(0, 50)}...", ${count})`,
+          attemptsCount: availableProviders.length,
+          totalLatencyMs: totalDurationMs,
+          success: 0,
+        },
+        context.env,
+        context.ctx
+      );
+
       return [];
     }
 
     // Deduplicate by title similarity
     const deduplicated = this.deduplicateBooks(allBooks, logger);
 
+    const totalDurationMs = Date.now() - startTime;
+
     logger.info('[BookGenOrchestrator] Concurrent generation complete', {
       total_generated: allBooks.length,
       after_deduplication: deduplicated.length,
       duplicates_removed: allBooks.length - deduplicated.length,
-      total_duration_ms: Date.now() - startTime,
+      total_duration_ms: totalDurationMs,
     });
+
+    // Track orchestrator fallback analytics
+    trackOrchestratorFallback(
+      {
+        orchestrator: 'book_generation',
+        providerChain: availableProviders.map((p) => p.name).join('→'),
+        successfulProvider: deduplicated.length > 0 ? 'multiple' : null,
+        operation: `generateBooks("${prompt.substring(0, 50)}...", ${count})`,
+        attemptsCount: availableProviders.length,
+        totalLatencyMs: totalDurationMs,
+        success: deduplicated.length > 0 ? 1 : 0,
+      },
+      context.env,
+      context.ctx
+    );
 
     return deduplicated;
   }
@@ -353,12 +405,29 @@ export class BookGenerationOrchestrator {
           const duration = Date.now() - providerStart;
 
           if (books.length > 0) {
+            const totalDurationMs = Date.now() - startTime;
+
             logger.info('[BookGenOrchestrator] Provider succeeded', {
               provider: provider.name,
               books_generated: books.length,
               duration_ms: duration,
-              total_duration_ms: Date.now() - startTime,
+              total_duration_ms: totalDurationMs,
             });
+
+            // Track orchestrator fallback analytics
+            trackOrchestratorFallback(
+              {
+                orchestrator: 'book_generation',
+                providerChain: sortedProviders.slice(0, sortedProviders.indexOf(provider) + 1).map((p) => p.name).join('→'),
+                successfulProvider: provider.name,
+                operation: `generateBooks("${prompt.substring(0, 50)}...", ${count})`,
+                attemptsCount: sortedProviders.indexOf(provider) + 1,
+                totalLatencyMs: totalDurationMs,
+                success: 1,
+              },
+              context.env,
+              context.ctx
+            );
 
             if (this.config.stopOnFirstSuccess) {
               return books;
@@ -392,10 +461,27 @@ export class BookGenerationOrchestrator {
     }
 
     // All providers failed
+    const totalDurationMs = Date.now() - startTime;
+
     logger.error('[BookGenOrchestrator] All providers failed', {
       attempted_providers: sortedProviders.map((p) => p.name),
-      total_duration_ms: Date.now() - startTime,
+      total_duration_ms: totalDurationMs,
     });
+
+    // Track orchestrator fallback analytics (failure case)
+    trackOrchestratorFallback(
+      {
+        orchestrator: 'book_generation',
+        providerChain: sortedProviders.map((p) => p.name).join('→'),
+        successfulProvider: null,
+        operation: `generateBooks("${prompt.substring(0, 50)}...", ${count})`,
+        attemptsCount: sortedProviders.length,
+        totalLatencyMs: totalDurationMs,
+        success: 0,
+      },
+      context.env,
+      context.ctx
+    );
 
     return [];
   }
