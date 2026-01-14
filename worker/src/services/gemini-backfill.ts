@@ -542,24 +542,6 @@ interface GeminiApiResponse {
   };
 }
 
-/**
- * Gemini API request structure matching bendv3 patterns
- */
-interface GeminiContentRequest {
-  system_instruction: {
-    parts: Array<{ text: string }>;
-  };
-  contents: Array<{
-    parts: Array<{ text: string }>;
-  }>;
-  generationConfig: {
-    temperature: number;
-    topP: number;
-    maxOutputTokens: number;
-    responseMimeType: string;
-    responseSchema: typeof GEMINI_RESPONSE_SCHEMA;
-  };
-}
 
 /**
  * System instruction for bibliographic metadata extraction (Hybrid Workflow)

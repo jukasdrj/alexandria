@@ -27,13 +27,6 @@ import { ISBNResolutionOrchestrator } from '../../lib/external-services/orchestr
 import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
 import type { ServiceContext } from '../../lib/external-services/service-context.js';
 import type { QuotaManager } from './quota-manager.js';
-import {
-  OpenLibraryProvider,
-  GoogleBooksProvider,
-  ArchiveOrgProvider,
-  WikidataProvider,
-  ISBNdbProvider,
-} from '../../lib/external-services/providers/index.js';
 
 // =================================================================================
 // Module-Level Singleton (Cold Start Optimization)
@@ -161,9 +154,7 @@ export async function batchResolveISBNs(
   for (let i = 0; i < books.length; i += CONCURRENCY) {
     const chunk = books.slice(i, i + CONCURRENCY);
     const chunkResults = await Promise.all(
-      chunk.map(async (book, chunkIndex) => {
-        const globalIndex = i + chunkIndex;
-
+      chunk.map(async (book) => {
         try {
           // Use module-level singleton orchestrator - handles all provider selection, fallback, and quota
           const result = await isbnOrchestrator.resolveISBN(book.title, book.author, context);

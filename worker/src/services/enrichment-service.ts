@@ -379,8 +379,8 @@ export async function enrichWork(
 
   // Subject Tags: Merge all sources with normalization (lowercase + trim)
   let mergedSubjectTags = work.subject_tags || [];
-  if (wikidataData?.genres) {
-    mergedSubjectTags = [...mergedSubjectTags, ...wikidataData.genres];
+  if (wikidataData?.genre_names) {
+    mergedSubjectTags = [...mergedSubjectTags, ...wikidataData.genre_names];
   }
   if (archiveOrgData?.subject) {
     mergedSubjectTags = [...mergedSubjectTags, ...archiveOrgData.subject];

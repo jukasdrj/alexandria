@@ -305,9 +305,9 @@ export async function handleQueueEnrichment(c: Context<AppBindings>): Promise<Re
  * Check enrichment job status
  */
 export async function handleGetEnrichmentStatus(c: Context<AppBindings>): Promise<Response> {
-  try {
-    const jobId = c.req.param('id');
+  const jobId = c.req.param('id');
 
+  try {
     if (!jobId) {
       return c.json(
         {
@@ -345,7 +345,7 @@ export async function handleGetEnrichmentStatus(c: Context<AppBindings>): Promis
     c.get('logger').error('handleGetEnrichmentStatus error', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      jobId,
+      job_id: jobId,
     });
     return c.json(
       {

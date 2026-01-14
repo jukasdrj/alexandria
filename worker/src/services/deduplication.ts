@@ -183,7 +183,7 @@ async function deduplicateExactMatch(
       WHERE isbn = ANY(${sql.array(isbns)})
     `;
 
-    const existingSet = new Set(existing.map((row: { isbn: string }) => row.isbn));
+    const existingSet = new Set(existing.map((row) => (row as { isbn: string }).isbn));
 
     const remaining = candidates.filter((c) => !existingSet.has(c.isbn));
     const found = Array.from(existingSet);

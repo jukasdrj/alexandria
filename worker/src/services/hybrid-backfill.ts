@@ -24,7 +24,6 @@ import type { ResolvedCandidate } from './types/backfill.js';
 import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
 import { BookGenerationOrchestrator } from '../../lib/external-services/orchestrators/book-generation-orchestrator.js';
 import { createServiceContext } from '../../lib/external-services/service-context.js';
-import type { GeneratedBook } from '../../lib/external-services/capabilities.js';
 import { resolvePrompt } from '../../lib/ai/book-generation-prompts.js';
 import type { QuotaManager } from './quota-manager.js';
 
@@ -208,7 +207,7 @@ export async function generateHybridBackfillList(
       author: book.author,
       authors: [book.author],
       publisher: book.publisher,
-      format: book.format,
+      format: 'Unknown', // Not available from GeneratedBook interface
       year: validYear,
       significance: book.description,
     };
