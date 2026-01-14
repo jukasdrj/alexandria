@@ -361,11 +361,11 @@ app.openapi(coverServeRoute, async (c) => {
           prefix: 'covers/',
           cursor,
           limit: 1000,
+          include: ['customMetadata'],
         });
 
         for (const obj of list.objects) {
-          const head = await c.env.COVER_IMAGES.head(obj.key);
-          if (head?.customMetadata?.isbn === normalizedISBN) {
+          if (obj.customMetadata?.isbn === normalizedISBN) {
             logger.info('Cover served - work-based', { isbn: normalizedISBN, key: obj.key });
             object = await c.env.COVER_IMAGES.get(obj.key);
             r2Key = obj.key;
