@@ -1,6 +1,6 @@
 {
   "name": "alexandria-worker",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "type": "module",
   "description": "Cloudflare Worker for Alexandria OpenLibrary database with TypeScript types, Zod validation, OpenAPI spec, intelligent search, and external ID resolution",
   "main": "src/index.ts",
@@ -44,7 +44,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "echo 'Publishing alexandria-worker v2.7.0 - Added Backfill Scheduler, State Tracking, and Queue Integration'"
+    "prepublishOnly": "echo 'Publishing alexandria-worker v2.8.0 - Added Provider Analytics & Monitoring (Issue #177)'"
   },
   "keywords": [
     "cloudflare",

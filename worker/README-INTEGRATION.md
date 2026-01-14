@@ -665,7 +665,27 @@ GET https://alexandria.ooheynerds.com/openapi.json
 - **Worker Domain**: alexandria.ooheynerds.com
 - **Database**: 54M+ editions, 49M+ ISBNs, 40M+ works, 14M+ authors
 
+## Analytics & Monitoring (New in v2.8.0)
+
+Alexandria now includes comprehensive provider analytics. Import analytics utilities:
+
+```typescript
+import { trackProviderRequest, trackOrchestratorFallback } from 'alexandria-worker/lib/external-services/analytics';
+```
+
+See `docs/operations/PROVIDER-ANALYTICS.md` for dashboard queries and monitoring setup.
+
+---
+
 ## Change Log
+
+### v2.8.0 - Provider Analytics & Monitoring (January 14, 2026)
+- ✅ **Provider Analytics System** - Comprehensive tracking for all 8 external service providers
+- ✅ **Non-blocking instrumentation** - Analytics use `ctx.waitUntil()` pattern (zero user impact)
+- ✅ **ServiceHttpClient integration** - Automatic latency, success rate, and cache hit tracking
+- ✅ **Orchestrator fallback tracking** - Complete success/failure chain analysis
+- ✅ **Operational dashboard** - 15+ ready-to-use GraphQL queries for monitoring
+- ✅ **Cost management** - Provider cost tracking and alert configuration
 
 ### v2.1.0 - Combined Search & Pagination (December 3, 2025)
 - ✅ **New `/api/search/combined` endpoint** - Intelligent ISBN vs text search

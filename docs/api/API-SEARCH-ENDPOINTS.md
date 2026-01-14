@@ -1,6 +1,7 @@
 # Alexandria Search API Endpoints Documentation
 
-Last Updated: 2026-01-14
+**Version**: v2.8.0
+**Last Updated**: 2026-01-14
 
 ## Overview
 

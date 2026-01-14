@@ -642,6 +642,60 @@ const bookGenOrchestrator = new BookGenerationOrchestrator(getGlobalRegistry(), 
 
 **Documentation**: `docs/development/XAI_COMPARISON_RESULTS.md` - Full comparison analysis
 
+## Analytics & Monitoring (v2.8.0)
+
+**NEW in v2.8.0**: Comprehensive provider analytics via Cloudflare Analytics Engine
+
+**Location**: `worker/lib/external-services/analytics.ts`
+
+**Events Tracked**:
+- **Provider Request**: Latency, success rate, cache hits, error rate (8 providers)
+- **Orchestrator Fallback**: Provider chains, attempts, success/failure, fallback reasons
+- **Provider Cost**: API usage, estimated costs per provider
+
+**Dashboard**: See `docs/operations/PROVIDER-ANALYTICS.md`
+- 5-minute health check queries
+- Troubleshooting decision trees
+- Multi-repo aggregation design (Alexandria + bendv3)
+- Alert configuration templates
+- Cost management strategies
+
+**Implementation**:
+- ServiceHttpClient automatically tracks all provider requests (centralized instrumentation)
+- All 4 orchestrators emit fallback events with complete chain analysis
+- Non-blocking pattern via `ctx.waitUntil()` - zero user impact
+- No manual tracking needed for new providers (automatic via ServiceHttpClient)
+
+**Usage**:
+```typescript
+// Automatic tracking (no code changes needed for basic monitoring)
+const provider = new GoogleBooksProvider();
+await provider.resolveISBN(title, author, context); // Tracked automatically
+
+// Optional: Custom orchestrator tracking
+trackOrchestratorFallback(context, {
+  orchestratorType: 'ISBN_RESOLUTION',
+  providers: ['isbndb', 'google-books'],
+  success: true,
+  attempts: 2
+});
+```
+
+**Queries Available**:
+- Provider success rate by provider
+- Average latency per provider
+- Cache hit rate analysis
+- Fallback chain analysis (which provider in chain succeeded)
+- Cost tracking and projections
+- Error rate and failure patterns
+
+**Benefits**:
+- Real-time operational visibility into all 8 providers
+- Identify slow/failing providers before they impact users
+- Optimize fallback chains based on success patterns
+- Track API costs and usage across providers
+- Multi-repo dashboard aggregation (Alexandria + bendv3)
+
 ## Queue Architecture
 
 **Config**: `worker/wrangler.jsonc`

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-01-14
+
+### Added
+- **Provider Analytics & Monitoring System (Issue #177)**
+  - Comprehensive analytics tracking for all 8 external service providers
+  - Non-blocking analytics via `ctx.waitUntil()` pattern (zero user impact)
+  - ServiceHttpClient centralized instrumentation (automatic for all providers)
+  - 4 orchestrators with complete success/failure tracking
+  - 3 event types: Provider Request, Orchestrator Fallback, Provider Cost
+  - Operational dashboard documentation with 5-minute health checks
+  - 15+ ready-to-use Analytics Engine GraphQL queries
+  - Multi-repo dashboard design (Alexandria + bendv3 aggregation)
+  - Alert configuration and cost management strategies
+
+### Changed
+- ServiceHttpClient now tracks latency, success rate, and cache hits automatically
+- All orchestrators now emit analytics events for fallback chain analysis
+- ServiceContext interface extended with optional `ctx?: ExecutionContext` field
+
+### Technical Details
+- New module: `lib/external-services/analytics.ts` (237 lines)
+- Modified: ServiceHttpClient, ServiceContext, all 4 orchestrators
+- Zero breaking changes - fully backward compatible
+- Grok code review validated (all findings resolved)
+- Production deployed: Version 0a697203-aae3-437c-910f-2e32e9b43aee
+
 ## [2.3.0] - 2026-01-07
 
 ### Added

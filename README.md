@@ -253,7 +253,7 @@ alexandria/
 │   ├── services/              # External API services
 │   ├── lib/                   # Utilities (logger, cache, ISBN)
 │   ├── wrangler.jsonc         # Cloudflare configuration
-│   └── package.json           # v2.2.0
+│   └── package.json           # v2.8.0
 ├── scripts/                   # Deployment & harvesting scripts
 │   ├── bulk-author-harvest.js
 │   ├── expand-author-bibliographies.js
@@ -431,6 +431,6 @@ MIT
 
 ---
 
-**Last Updated:** January 12, 2026
-**Version:** 2.6.0
+**Last Updated:** January 14, 2026
+**Version:** 2.8.0
 **Database:** 54.8M editions | 49.3M ISBNs | 40.1M works | 14.7M authors
