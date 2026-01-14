@@ -14,6 +14,7 @@ import type {
   QueueEnrichmentResponse,
   EnrichmentJobStatus,
   EnrichmentLogEntry,
+  CoverQueueMessage,
 } from './types.js';
 import {
   calculateEditionQuality,
@@ -36,7 +37,8 @@ export async function enrichEdition(
   edition: EnrichEditionRequest,
   logger: Logger,
   env?: Env,
-  archiveOrgData?: ArchiveOrgMetadata | null
+  archiveOrgData?: ArchiveOrgMetadata | null,
+  coverMessageCollector?: CoverQueueMessage[]
 ): Promise<EnrichmentData & { isbn: string; quality_improvement: number }> {
   const startTime = Date.now();
   const qualityScore = calculateEditionQuality(edition);
@@ -247,25 +249,35 @@ export async function enrichEdition(
         edition.cover_urls.small;
 
       if (coverUrl) {
-        try {
-          await env.COVER_QUEUE.send({
-            isbn: row.isbn,
-            work_key: edition.work_key,
-            provider_url: coverUrl,
-            priority: 'normal',
-            source: `enrichment-${edition.primary_provider}`,
-            queued_at: new Date().toISOString(),
-          });
-          logger.info('Queued cover download', {
+        const message: CoverQueueMessage = {
+          isbn: row.isbn,
+          work_key: edition.work_key,
+          provider_url: coverUrl,
+          priority: 'normal',
+          source: `enrichment-${edition.primary_provider}`,
+          queued_at: new Date().toISOString(),
+        };
+
+        if (coverMessageCollector) {
+          coverMessageCollector.push(message);
+          logger.debug('Collected cover download for batch', {
             isbn: row.isbn,
             provider: edition.primary_provider,
           });
-        } catch (queueError) {
-          // Log but don't fail enrichment
-          logger.error('Cover queue failed', {
-            isbn: row.isbn,
-            error: queueError instanceof Error ? queueError.message : String(queueError),
-          });
+        } else {
+          try {
+            await env.COVER_QUEUE.send(message);
+            logger.info('Queued cover download', {
+              isbn: row.isbn,
+              provider: edition.primary_provider,
+            });
+          } catch (queueError) {
+            // Log but don't fail enrichment
+            logger.error('Cover queue failed', {
+              isbn: row.isbn,
+              error: queueError instanceof Error ? queueError.message : String(queueError),
+            });
+          }
         }
       }
     }

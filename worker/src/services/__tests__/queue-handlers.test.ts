@@ -24,6 +24,10 @@ import type {
 // Mock Setup
 // =================================================================================
 
+const { sharedCachedProvider } = vi.hoisted(() => ({
+  sharedCachedProvider: { current: null as any },
+}));
+
 // Mock external dependencies
 vi.mock('../../../services/jsquash-processor', () => ({
   processAndStoreCover: vi.fn(),
@@ -75,17 +79,11 @@ vi.mock('../../../lib/isbn-utils', () => ({
 vi.mock('../../../lib/external-services/provider-registry', () => {
   return {
     getGlobalRegistry: vi.fn(() => {
-      // Lazy-load the ISBNdb provider instance
-      let cachedProvider: any = null;
-
       return {
-        registerAll: vi.fn((providers: any[]) => {
-          // When providers are registered, capture the ISBNdb instance
-          cachedProvider = providers.find(p => p?.name === 'isbndb');
-        }),
+        registerAll: vi.fn(),
         get: vi.fn((name: string) => {
           if (name === 'isbndb') {
-            return cachedProvider;
+            return sharedCachedProvider.current;
           }
           return null;
         }),
@@ -110,6 +108,7 @@ import { enrichEdition, enrichWork } from '../enrichment-service';
 // Get the mock provider instance (created when the module is imported)
 // The instance is created during queue-handlers.ts initialization
 const globalMockProvider = new ISBNdbProvider();
+sharedCachedProvider.current = globalMockProvider;
 
 // =================================================================================
 // Test Helpers
@@ -177,6 +176,10 @@ function createMockEnv(overrides?: Partial<Env>): Env {
     } as any,
     ANALYTICS: {
       writeDataPoint: vi.fn(),
+    } as any,
+    COVER_QUEUE: {
+      send: vi.fn(),
+      sendBatch: vi.fn(),
     } as any,
     ISBNDB_API_KEY: 'mock-api-key',
     GOOGLE_BOOKS_API_KEY: 'mock-google-key',
@@ -557,6 +560,40 @@ describe('processEnrichmentQueue', () => {
   });
 
   describe('Batch Processing', () => {
+    it('should batch send cover messages', async () => {
+      const env = createMockEnv();
+      const messages = [
+        createMockMessage<EnrichmentQueueMessage>({ isbn: '9780000000001' }),
+        createMockMessage<EnrichmentQueueMessage>({ isbn: '9780000000002' }),
+      ];
+      const batch = createMockBatch('alexandria-enrichment-queue', messages);
+
+      const mockEnrichmentData = new Map([
+        ['9780000000001', { isbn: '9780000000001', title: 'Book 1' }],
+        ['9780000000002', { isbn: '9780000000002', title: 'Book 2' }],
+      ]);
+
+      globalMockProvider.batchFetchMetadata.mockResolvedValue(mockEnrichmentData);
+      (enrichWork as Mock).mockResolvedValue(undefined);
+
+      // Mock enrichEdition to simulate collecting cover messages
+      (enrichEdition as Mock).mockImplementation((_sql, data, _logger, _env, _archive, collector) => {
+        if (collector) {
+          collector.push({ isbn: data.isbn, provider_url: 'http://example.com/cover.jpg' });
+        }
+        return Promise.resolve();
+      });
+
+      const results = await processEnrichmentQueue(batch, env);
+
+      expect(results.enriched).toBe(2);
+      expect(env.COVER_QUEUE.sendBatch).toHaveBeenCalledTimes(1);
+      const batchCall = (env.COVER_QUEUE.sendBatch as Mock).mock.calls[0][0];
+      expect(batchCall).toHaveLength(2);
+      expect(batchCall[0].isbn).toBe('9780000000001');
+      expect(batchCall[1].isbn).toBe('9780000000002');
+    });
+
     it('should process batch of 100 ISBNs (max_batch_size)', async () => {
       const env = createMockEnv();
       const messages = Array.from({ length: 100 }, (_, i) =>
