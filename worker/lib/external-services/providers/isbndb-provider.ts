@@ -34,6 +34,7 @@ import type {
 } from '../capabilities.js';
 import type { ServiceContext } from '../service-context.js';
 import type { Env } from '../../../src/env.js';
+import type { QuotaManager } from '../../../src/services/quota-manager.js';
 import { ServiceHttpClient } from '../http-client.js';
 import { ServiceCapability } from '../capabilities.js';
 import { normalizeISBN } from '../../isbn-utils.js';
@@ -107,15 +108,23 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
     purpose: 'Book metadata enrichment',
   });
 
-  async isAvailable(env: Env): Promise<boolean> {
-    // Check if API key exists and quota is available
+  async isAvailable(env: Env, quotaManager?: QuotaManager): Promise<boolean> {
+    // Check if API key exists
     const apiKey = await env.ISBNDB_API_KEY?.get();
     if (!apiKey) {
       return false;
     }
 
-    // Check quota if quotaManager provided in context
-    // Note: This is a simplified check - full implementation would check quota
+    // Circuit Breaker: Check quota availability before operations
+    // Prevents orchestrator from attempting ISBNdb calls when quota exhausted
+    if (quotaManager) {
+      const quotaCheck = await quotaManager.checkQuota(1, false);
+      if (!quotaCheck.allowed) {
+        // Quota exhausted - return false to skip this provider
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -124,9 +133,23 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
     author: string,
     context: ServiceContext
   ): Promise<ISBNResolutionResult> {
-    const { logger, env } = context;
+    const { logger, env, quotaManager } = context;
 
     try {
+      // Check quota before making API call (blocking logic)
+      if (quotaManager) {
+        const quotaCheck = await quotaManager.checkQuota(1, false);
+        if (!quotaCheck.allowed) {
+          logger.warn('ISBNdb quota exhausted, skipping ISBN resolution', {
+            title,
+            author,
+            reason: quotaCheck.reason,
+            quota_status: quotaCheck.status,
+          });
+          return { isbn: null, confidence: 0, source: 'isbndb' };
+        }
+      }
+
       const apiKey = await env.ISBNDB_API_KEY.get();
       if (!apiKey) {
         logger.error('ISBNdb API key not configured');
@@ -146,6 +169,13 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
         },
         context
       );
+
+      // Record API call after HTTP request completes (metering logic)
+      // IMPORTANT: ISBNdb counts ALL requests (including 403/500 errors) against quota
+      if (quotaManager) {
+        await quotaManager.recordApiCall(1);
+        logger.debug('ISBNdb quota recorded', { calls: 1, success: !!response });
+      }
 
       if (!response?.books?.[0]) {
         return { isbn: null, confidence: 0, source: 'isbndb' };
@@ -180,7 +210,7 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
   }
 
   async fetchMetadata(isbn: string, context: ServiceContext): Promise<BookMetadata | null> {
-    const { logger, env } = context;
+    const { logger, env, quotaManager } = context;
 
     // Validate ISBN format before making API call
     const normalizedISBN = normalizeISBN(isbn);
@@ -190,6 +220,18 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
     }
 
     try {
+      // Check quota before making API call (blocking logic)
+      if (quotaManager) {
+        const quotaCheck = await quotaManager.checkQuota(1, false);
+        if (!quotaCheck.allowed) {
+          logger.warn('ISBNdb quota exhausted, skipping metadata fetch', {
+            isbn,
+            reason: quotaCheck.reason,
+          });
+          return null;
+        }
+      }
+
       const apiKey = await env.ISBNDB_API_KEY.get();
       if (!apiKey) {
         logger.error('ISBNdb API key not configured');
@@ -207,6 +249,13 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
         },
         context
       );
+
+      // Record API call after HTTP request completes (metering logic)
+      // IMPORTANT: ISBNdb counts ALL requests (including 403/500 errors) against quota
+      if (quotaManager) {
+        await quotaManager.recordApiCall(1);
+        logger.debug('ISBNdb quota recorded', { calls: 1, success: !!response });
+      }
 
       if (!response?.book) {
         return null;
@@ -243,7 +292,7 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
     isbns: string[],
     context: ServiceContext
   ): Promise<Map<string, BookMetadata>> {
-    const { logger, env } = context;
+    const { logger, env, quotaManager } = context;
     const results = new Map<string, BookMetadata>();
 
     if (isbns.length === 0) {
@@ -270,6 +319,19 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
     }
 
     try {
+      // Check quota before making batch API call (blocking logic)
+      // Note: Batch API call counts as 1 API call regardless of ISBN count
+      if (quotaManager) {
+        const quotaCheck = await quotaManager.checkQuota(1, false);
+        if (!quotaCheck.allowed) {
+          logger.warn('ISBNdb quota exhausted, skipping batch metadata fetch', {
+            isbn_count: isbns.length,
+            reason: quotaCheck.reason,
+          });
+          return results;
+        }
+      }
+
       const apiKey = await env.ISBNDB_API_KEY.get();
       if (!apiKey) {
         logger.error('ISBNdb API key not configured');
@@ -290,6 +352,14 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
         },
         context
       );
+
+      // Record API call after HTTP request completes (metering logic)
+      // IMPORTANT: ISBNdb counts ALL requests (including 403/500 errors) against quota
+      // Batch call counts as 1 API call (ISBNdb Premium feature)
+      if (quotaManager) {
+        await quotaManager.recordApiCall(1);
+        logger.debug('ISBNdb quota recorded for batch call', { calls: 1, isbn_count: truncatedIsbns.length, success: !!response });
+      }
 
       if (!response?.data) {
         return results;
@@ -354,7 +424,7 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
    * IMPORTANT: Reuses the same API call as fetchMetadata to avoid wasting quota
    */
   async fetchRatings(isbn: string, context: ServiceContext): Promise<RatingsResult | null> {
-    const { logger } = context;
+    const { logger, quotaManager } = context;
 
     try {
       // Validate ISBN format before making API call
@@ -362,6 +432,18 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
       if (!normalizedISBN) {
         logger.debug('Invalid ISBN format, skipping ISBNdb API call', { isbn });
         return null;
+      }
+
+      // Check quota before making API call (blocking logic)
+      if (quotaManager) {
+        const quotaCheck = await quotaManager.checkQuota(1, false);
+        if (!quotaCheck.allowed) {
+          logger.warn('ISBNdb quota exhausted, skipping ratings fetch', {
+            isbn,
+            reason: quotaCheck.reason,
+          });
+          return null;
+        }
       }
 
       const apiKey = await context.env.ISBNDB_API_KEY.get();
@@ -381,6 +463,13 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
         },
         context
       );
+
+      // Record API call after HTTP request completes (metering logic)
+      // IMPORTANT: ISBNdb counts ALL requests (including 403/500 errors) against quota
+      if (quotaManager) {
+        await quotaManager.recordApiCall(1);
+        logger.debug('ISBNdb quota recorded', { calls: 1, success: !!response });
+      }
 
       if (!response?.book) {
         return null;
@@ -418,7 +507,7 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
     isbns: string[],
     context: ServiceContext
   ): Promise<Map<string, RatingsResult>> {
-    const { logger, env } = context;
+    const { logger, env, quotaManager } = context;
     const results = new Map<string, RatingsResult>();
 
     if (isbns.length === 0) {
@@ -445,6 +534,18 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
     }
 
     try {
+      // Check quota before making batch API call (blocking logic)
+      if (quotaManager) {
+        const quotaCheck = await quotaManager.checkQuota(1, false);
+        if (!quotaCheck.allowed) {
+          logger.warn('ISBNdb quota exhausted, skipping batch ratings fetch', {
+            isbn_count: isbns.length,
+            reason: quotaCheck.reason,
+          });
+          return results;
+        }
+      }
+
       const apiKey = await env.ISBNDB_API_KEY.get();
       if (!apiKey) {
         logger.error('ISBNdb API key not configured');
@@ -465,6 +566,13 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
         },
         context
       );
+
+      // Record API call after HTTP request completes (metering logic)
+      // IMPORTANT: ISBNdb counts ALL requests (including 403/500 errors) against quota
+      if (quotaManager) {
+        await quotaManager.recordApiCall(1);
+        logger.debug('ISBNdb quota recorded for batch ratings', { calls: 1, isbn_count: truncatedIsbns.length, success: !!response });
+      }
 
       if (!response?.data) {
         return results;
@@ -505,7 +613,7 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
    * Extracts from ISBNdb's 'related' field which contains format variants
    */
   async fetchEditionVariants(isbn: string, context: ServiceContext): Promise<EditionVariant[]> {
-    const { logger } = context;
+    const { logger, quotaManager } = context;
 
     try {
       // Reuse metadata fetch to get related ISBNs
@@ -513,6 +621,18 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
       if (!normalizedISBN) {
         logger.debug('Invalid ISBN format for edition variants fetch', { isbn });
         return [];
+      }
+
+      // Check quota before making API call (blocking logic)
+      if (quotaManager) {
+        const quotaCheck = await quotaManager.checkQuota(1, false);
+        if (!quotaCheck.allowed) {
+          logger.warn('ISBNdb quota exhausted, skipping edition variants fetch', {
+            isbn,
+            reason: quotaCheck.reason,
+          });
+          return [];
+        }
       }
 
       const apiKey = await context.env.ISBNDB_API_KEY.get();
@@ -532,6 +652,13 @@ export class ISBNdbProvider implements IISBNResolver, IMetadataProvider, ICoverP
         },
         context
       );
+
+      // Record API call after HTTP request completes (metering logic)
+      // IMPORTANT: ISBNdb counts ALL requests (including 403/500 errors) against quota
+      if (quotaManager) {
+        await quotaManager.recordApiCall(1);
+        logger.debug('ISBNdb quota recorded', { calls: 1, success: !!response });
+      }
 
       if (!response?.book) {
         return [];

@@ -106,7 +106,7 @@ export class GoogleBooksProvider implements IMetadataProvider, ICoverProvider, I
     purpose: 'Book metadata enrichment',
   });
 
-  async isAvailable(_env: Env): Promise<boolean> {
+  async isAvailable(_env: Env, _quotaManager?: import("../../../src/services/quota-manager.js").QuotaManager): Promise<boolean> {
     // Optional API key improves quota, but not required
     return true;
   }

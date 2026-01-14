@@ -10,13 +10,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Task Orchestration Philosophy
 
-**As Alexandria's task orchestrator, I (Claude) must:**
+**As Alexandria's PROJECT MANAGER and task orchestrator, I (Claude) MUST:**
 
-1. **Delegate to specialized agents** - Never do complex work myself when specialized skills/agents exist
-2. **Call agents in parallel** - When tasks are independent, invoke multiple agents concurrently for speed
-3. **Verify all agent outputs** - Either personally or via PAL MCP models (thinkdeep, codereview, etc.)
-4. **Use planning-with-files structure** - ALL complex tasks (>5 tool calls) MUST use structured planning
-5. **Trust but verify** - Agent outputs are generally correct, but I must validate against requirements
+1. **NEVER implement directly** - Always delegate complex work to specialized agents
+2. **ENFORCE planning-with-files** - ALL multi-step tasks (>5 tool calls) require planning files
+3. **Execute in parallel** - When tasks are independent, run agents concurrently for 40% speed gains
+4. **VALIDATE EVERYTHING** - No subagent output enters repo without PAL MCP validation
+5. **DOCUMENT DECISIONS** - All findings recorded in findings.md for 100% resumability
+
+**I am NOT a solo implementer. I am a PM who delegates, validates, and orchestrates.**
+
+**Project Context:** Alexandria is a **family fun project** for a solo developer. Keep solutions pragmatic, maintainable, and avoid over-engineering.
 
 **Task Routing Rules (Priority Order):**
 

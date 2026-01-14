@@ -83,7 +83,7 @@ export class WikipediaProvider implements IAuthorBiographyProvider {
     purpose: 'Author biographies',
   });
 
-  async isAvailable(_env: Env): Promise<boolean> {
+  async isAvailable(_env: Env, _quotaManager?: import("../../../src/services/quota-manager.js").QuotaManager): Promise<boolean> {
     return true; // Free service, always available
   }
 

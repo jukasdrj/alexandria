@@ -121,8 +121,8 @@ app.openapi(compareRoute, async (c) => {
 
   // Check availability
   const [geminiAvailable, xaiAvailable] = await Promise.all([
-    geminiProvider.isAvailable(env),
-    xaiProvider.isAvailable(env),
+    geminiProvider.isAvailable(env, undefined),
+    xaiProvider.isAvailable(env, undefined),
   ]);
 
   logger.info('Provider availability check', {

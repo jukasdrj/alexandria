@@ -58,6 +58,25 @@ export interface HttpClientConfig {
 
   /** HTTP status codes that should be retried (default: [408, 429, 500, 502, 503, 504]) */
   retryableStatuses?: number[];
+
+  /**
+   * Callback invoked after each successful API call for quota tracking
+   * Used by ISBNdb provider to record API usage via QuotaManager
+   *
+   * @param provider - Provider name (e.g., 'isbndb')
+   * @param url - Request URL
+   * @returns Promise that resolves when tracking complete
+   *
+   * @example
+   * ```typescript
+   * onCall: async (provider, url) => {
+   *   if (quotaManager && provider === 'isbndb') {
+   *     await quotaManager.recordApiCall(1);
+   *   }
+   * }
+   * ```
+   */
+  onCall?: (provider: string, url: string) => Promise<void>;
 }
 
 /**
@@ -109,6 +128,7 @@ export class ServiceHttpClient {
       maxRetries: config.maxRetries ?? 3,
       defaultTimeout: config.defaultTimeout ?? 10000,
       retryableStatuses: config.retryableStatuses ?? [408, 429, 500, 502, 503, 504],
+      onCall: config.onCall ?? (async () => {}), // Default no-op for optional quota tracking
     };
   }
 
@@ -250,6 +270,20 @@ export class ServiceHttpClient {
 
       const latencyMs = Date.now() - startTime;
 
+      // 5. Invoke quota tracking callback (if provided)
+      if (this.config.onCall) {
+        try {
+          await this.config.onCall(this.config.providerName, url);
+        } catch (callbackError) {
+          // Graceful degradation: don't fail requests if quota tracking fails
+          logger.warn('Quota tracking callback failed', {
+            provider: this.config.providerName,
+            url,
+            error: callbackError instanceof Error ? callbackError.message : String(callbackError),
+          });
+        }
+      }
+
       // Track successful request metrics
       await this.trackMetrics(context, {
         provider: this.config.providerName,
@@ -356,7 +390,7 @@ export class ServiceHttpClient {
    * @param context - Service context
    */
   async invalidateCache(url: string, context: ServiceContext): Promise<void> {
-    const cacheKey = this.buildCacheKey(url);
+    const cacheKey = await this.buildCacheKey(url);
     try {
       await context.env.CACHE.delete(cacheKey);
       context.logger.debug('Cache invalidated', {
@@ -390,7 +424,7 @@ export class ServiceHttpClient {
     url: string,
     context: ServiceContext
   ): Promise<T | null> {
-    const cacheKey = this.buildCacheKey(url);
+    const cacheKey = await this.buildCacheKey(url);
     return getCachedResponse<T>(context.env.CACHE, cacheKey, context.logger);
   }
 
@@ -399,7 +433,7 @@ export class ServiceHttpClient {
     data: T,
     context: ServiceContext
   ): Promise<void> {
-    const cacheKey = this.buildCacheKey(url);
+    const cacheKey = await this.buildCacheKey(url);
     await setCachedResponse(
       context.env.CACHE,
       cacheKey,
@@ -409,9 +443,53 @@ export class ServiceHttpClient {
     );
   }
 
-  private buildCacheKey(url: string): string {
-    // Use URL as identifier (unique per endpoint)
-    return buildCacheKey(this.config.providerName as Provider, 'http', url);
+  /**
+   * Build cache key with automatic SHA-256 hashing for long URLs
+   *
+   * Cloudflare KV has a 512-byte key length limit. URLs exceeding this limit
+   * (e.g., Wikidata SPARQL queries with 1000+ characters) must be hashed.
+   *
+   * Strategy:
+   * - URLs <512 bytes: Use URL directly (human-readable)
+   * - URLs >=512 bytes: Use SHA-256 hash (prevents KV errors)
+   *
+   * Hash Format: `${provider}:http:sha256:${hexHash}`
+   *
+   * @param url - Request URL
+   * @returns Cache key (plain or hashed) under 512 bytes
+   *
+   * @example
+   * ```typescript
+   * // Short URL (no hashing)
+   * buildCacheKey('https://openlibrary.org/isbn/9780553293357')
+   * // Returns: "open-library:http:https://openlibrary.org/isbn/9780553293357"
+   *
+   * // Long URL (with hashing)
+   * buildCacheKey('https://query.wikidata.org/sparql?query=SELECT...[1500 chars]')
+   * // Returns: "wikidata:http:sha256:a1b2c3d4..."
+   * ```
+   */
+  private async buildCacheKey(url: string): Promise<string> {
+    const plainKey = buildCacheKey(this.config.providerName as Provider, 'http', url);
+
+    // If key fits within KV limit, use it directly
+    if (plainKey.length < 512) {
+      return plainKey;
+    }
+
+    // Hash long URLs using native Web Crypto API (SHA-256)
+    try {
+      const msgBuffer = new TextEncoder().encode(url);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      return buildCacheKey(this.config.providerName as Provider, 'http', `sha256:${hashHex}`);
+    } catch (hashError) {
+      // Fallback: truncate URL if hashing fails (shouldn't happen in Workers)
+      const truncated = url.substring(0, 400);
+      return buildCacheKey(this.config.providerName as Provider, 'http', truncated);
+    }
   }
 
   private shouldReadCache(context: ServiceContext): boolean {

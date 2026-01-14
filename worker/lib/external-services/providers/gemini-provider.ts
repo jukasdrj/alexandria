@@ -75,7 +75,7 @@ export class GeminiProvider implements IBookGenerator {
     defaultTimeout: 45000, // 45s timeout for AI generation (can take 20-40s for 10+ books)
   });
 
-  async isAvailable(env: Env): Promise<boolean> {
+  async isAvailable(env: Env, _quotaManager?: import("../../../src/services/quota-manager.js").QuotaManager): Promise<boolean> {
     const apiKey = await env.GEMINI_API_KEY?.get();
     return !!apiKey;
   }

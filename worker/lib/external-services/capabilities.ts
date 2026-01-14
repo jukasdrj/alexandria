@@ -14,6 +14,7 @@
 import type { Env } from '../../src/env.js';
 import type { Logger } from '../logger.js';
 import type { ServiceContext } from './service-context.js';
+import type { QuotaManager } from '../../src/services/quota-manager.js';
 
 /**
  * Service capabilities enum
@@ -53,8 +54,14 @@ export interface IServiceProvider {
 
   /**
    * Check if service is available (API key exists, quota available, etc.)
+   *
+   * Circuit Breaker Pattern: For paid services (ISBNdb), check quota before
+   * returning availability to prevent wasted operations when quota exhausted.
+   *
+   * @param env - Cloudflare Worker environment (bindings, secrets)
+   * @param quotaManager - Optional quota manager for paid services
    */
-  isAvailable(env: Env): Promise<boolean>;
+  isAvailable(env: Env, quotaManager?: QuotaManager): Promise<boolean>;
 }
 
 /**

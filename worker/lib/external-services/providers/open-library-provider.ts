@@ -109,7 +109,7 @@ export class OpenLibraryProvider implements IISBNResolver, IMetadataProvider, IE
    * Check if OpenLibrary is available
    * Always true - free service with no API key required
    */
-  async isAvailable(_env: Env): Promise<boolean> {
+  async isAvailable(_env: Env, _quotaManager?: import("../../../src/services/quota-manager.js").QuotaManager): Promise<boolean> {
     return true; // Free service, always available
   }
 

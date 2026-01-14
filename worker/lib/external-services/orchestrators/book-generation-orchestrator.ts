@@ -196,7 +196,7 @@ export class BookGenerationOrchestrator {
     const availableProviders: IBookGenerator[] = [];
     for (const provider of providers) {
       try {
-        const available = await provider.isAvailable(context.env);
+        const available = await provider.isAvailable(context.env, context.quotaManager);
         if (available) {
           availableProviders.push(provider);
         } else {

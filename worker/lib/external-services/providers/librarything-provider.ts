@@ -89,7 +89,7 @@ export class LibraryThingProvider implements IEditionVariantProvider {
    * Check if LibraryThing is available
    * Requires API key in environment
    */
-  async isAvailable(env: Env): Promise<boolean> {
+  async isAvailable(env: Env, _quotaManager?: import("../../../src/services/quota-manager.js").QuotaManager): Promise<boolean> {
     const apiKey = await env.LIBRARYTHING_API_KEY?.get();
     return !!apiKey;
   }

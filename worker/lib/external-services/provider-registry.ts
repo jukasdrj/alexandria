@@ -137,7 +137,7 @@ export class ServiceProviderRegistry {
         });
 
         const isAvailable = await Promise.race([
-          provider.isAvailable(context.env),
+          provider.isAvailable(context.env, context.quotaManager),
           timeoutPromise,
         ]);
 
