@@ -542,6 +542,7 @@ export async function processEnrichmentQueue(
     // Create request-scoped caches for work/author deduplication
     const localAuthorKeyCache = new Map<string, string>();
     const localWorkKeyCache = new Map<string, string>();
+    const coverMessages: CoverQueueMessage[] = [];
 
     // 3. Process each ISBN result
     for (const [isbn, externalData] of enrichmentData) {
@@ -597,7 +598,9 @@ export async function processEnrichmentQueue(
             related_isbns: externalData.relatedISBNs,
           },
           logger,
-          env
+          env,
+          undefined, // archiveOrgData
+          coverMessages // collector
         );
 
         // Merge Wikidata genres if available
@@ -786,7 +789,22 @@ export async function processEnrichmentQueue(
       }
     }
 
-    // 4. Handle ISBNs that weren't found in ISBNdb
+    // 4. Send batched cover messages
+    if (coverMessages.length > 0) {
+      try {
+        await env.COVER_QUEUE.sendBatch(coverMessages);
+        logger.info('Sent batched cover queue messages', { count: coverMessages.length });
+      } catch (error) {
+        logger.error('Failed to send batched cover messages', {
+          error: error instanceof Error ? error.message : String(error),
+          count: coverMessages.length,
+        });
+        // We don't fail the whole batch here as enrichment succeeded,
+        // but covers might be missing. We log it clearly.
+      }
+    }
+
+    // 5. Handle ISBNs that weren't found in ISBNdb
     for (const isbn of isbnsToFetch) {
       if (!enrichmentData.has(isbn)) {
         const message = isbnMessages.get(isbn);
