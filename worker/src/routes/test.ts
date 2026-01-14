@@ -532,4 +532,72 @@ app.openapi(wikidataTestRoute, async (c) => {
   }
 });
 
+// =================================================================================
+// Debug: Queue Consumer Test (Issue #185)
+// =================================================================================
+
+/**
+ * Debug endpoint to test ENRICHMENT_QUEUE consumer
+ *
+ * This endpoint sends a test message to ENRICHMENT_QUEUE to verify the consumer
+ * is properly registered and processing messages. Created to debug Issue #185
+ * where messages were stuck with "received: 0" for 7+ hours.
+ *
+ * Expected behavior:
+ * 1. POST to this endpoint sends message to queue
+ * 2. Queue consumer should trigger within 30 seconds
+ * 3. Check logs with `npx wrangler tail` for processing confirmation
+ * 4. Look for "Queue batch received" log with queue="alexandria-enrichment-queue"
+ *
+ * @see https://github.com/jukasdrj/alexandria/issues/185
+ */
+app.post('/api/debug/enrichment-queue', async (c) => {
+  const logger = c.get('logger');
+
+  try {
+    const testMessage = {
+      isbns: ['9780439064873'], // Harry Potter test ISBN
+      source: 'debug-endpoint',
+      priority: 'high' as const,
+    };
+
+    logger.info('[DEBUG] Sending test message to ENRICHMENT_QUEUE', { message: testMessage });
+
+    await c.env.ENRICHMENT_QUEUE.send(testMessage);
+
+    logger.info('[DEBUG] Test message sent successfully', {
+      queue: 'alexandria-enrichment-queue',
+      expectedLog: 'Queue batch received',
+      instructions: 'Monitor logs with: npx wrangler tail',
+    });
+
+    return c.json({
+      status: 'success',
+      message: 'Test message sent to ENRICHMENT_QUEUE',
+      testMessage,
+      instructions: [
+        '1. Monitor logs: npx wrangler tail',
+        '2. Expect "Queue batch received" log within 30 seconds',
+        '3. Check queue metrics for "received" count increase',
+        '4. If no log appears, consumer is not registered or triggering',
+      ],
+      nextSteps: [
+        'If consumer triggers: Check why stuck messages not processing',
+        'If consumer does NOT trigger: Force redeploy with wrangler deploy --force',
+      ],
+    });
+  } catch (error) {
+    logger.error('[DEBUG] Failed to send test message to ENRICHMENT_QUEUE', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    return c.json({
+      status: 'error',
+      message: 'Failed to send test message',
+      error: error instanceof Error ? error.message : String(error),
+    }, 500);
+  }
+});
+
 export default app;
