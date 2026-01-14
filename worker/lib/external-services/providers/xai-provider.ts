@@ -182,6 +182,15 @@ export class XaiProvider implements IBookGenerator {
       let books: XaiGeneratedBook[];
       const parsed = JSON.parse(sanitized);
 
+      // Check if Grok refused to generate (deliberate error response)
+      if (parsed.error) {
+        logger.warn('x.ai declined to generate books', {
+          reason: parsed.error,
+          prompt_summary: prompt.substring(0, 100) + '...',
+        });
+        return [];
+      }
+
       if (Array.isArray(parsed)) {
         books = parsed;
       } else if (parsed.books && Array.isArray(parsed.books)) {
