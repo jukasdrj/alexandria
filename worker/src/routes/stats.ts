@@ -82,8 +82,8 @@ app.openapi(statsRoute, async (c) => {
   try {
     const sql = c.get('sql');
 
-    // OpenLibrary core tables + enriched tables in parallel
-    const [editions, isbns, works, authors, enrichedStats] = await Promise.all([
+    // OpenLibrary core tables + enriched tables + covers in parallel
+    const [editions, isbns, works, authors, enrichedStats, coverCount] = await Promise.all([
       sql`SELECT count(*) FROM editions`.then(r => r[0].count),
       sql`SELECT count(*) FROM edition_isbns`.then(r => r[0].count),
       sql`SELECT count(*) FROM works`.then(r => r[0].count),
@@ -101,22 +101,9 @@ app.openapi(statsRoute, async (c) => {
           (SELECT COUNT(*) FROM enriched_authors WHERE created_at > NOW() - INTERVAL '1 hour') as enriched_authors_1h,
           (SELECT COUNT(*) FROM enriched_authors WHERE created_at > NOW() - INTERVAL '24 hours') as enriched_authors_24h
       `.then(r => r[0]),
+      // Cover count from database (faster than R2 pagination)
+      sql`SELECT COUNT(*) FROM enriched_editions WHERE cover_url_large IS NOT NULL`.then(r => r[0].count),
     ]);
-
-    // Count covers in R2 bucket
-    let coverCount = 0;
-    try {
-      const bucket = c.env.COVER_IMAGES;
-      let cursor: string | undefined;
-      do {
-        const list = await bucket.list({ cursor, limit: 1000 });
-        coverCount += list.objects.length;
-        cursor = list.truncated ? list.cursor : undefined;
-      } while (cursor);
-    } catch (e) {
-      const logger = c.get('logger');
-      logger.error('Error counting R2 covers', { error: e instanceof Error ? e.message : 'Unknown' });
-    }
 
     const statsData = {
       // OpenLibrary core tables
@@ -124,7 +111,7 @@ app.openapi(statsRoute, async (c) => {
       isbns: parseInt(isbns, 10),
       works: parseInt(works, 10),
       authors: parseInt(authors, 10),
-      covers: coverCount,
+      covers: parseInt(coverCount, 10),
       // Enriched tables with recent activity
       enriched: {
         editions: {
