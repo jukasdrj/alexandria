@@ -1,6 +1,6 @@
 # Alexandria Search API Endpoints Documentation
 
-Last Updated: 2026-01-04
+Last Updated: 2026-01-14
 
 ## Overview
 
@@ -1355,14 +1355,6 @@ curl 'https://alexandria.ooheynerds.com/api/covers/OL82537W/large' -o cover.jpg
 curl -X POST 'https://alexandria.ooheynerds.com/api/covers/queue' \
   -H 'Content-Type: application/json' \
   -d '{"books": [{"isbn": "9780439064873", "priority": "high"}]}' | jq .
-```
-
-### ISBN Validation
-```bash
-# Check which ISBNs exist
-curl -X POST 'https://alexandria.ooheynerds.com/api/isbns/check' \
-  -H 'Content-Type: application/json' \
-  -d '{"isbns": ["9780439064873", "9781492666868"]}' | jq .
 ```
 
 ### Author Endpoints
