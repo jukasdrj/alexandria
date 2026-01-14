@@ -32,10 +32,40 @@ import externalIdRoutes from './routes/external-ids.js';
 import recommendationsRoutes from './routes/recommendations.js';
 import enhancementCronRoutes, { handleScheduledSyntheticEnhancement } from './routes/enhancement-cron.js';
 import backfillSchedulerRoutes from './routes/backfill-scheduler.js';
+import backfillAuthorWorksRoutes from './routes/backfill-author-works.js';
+import testAuthorBackfillRoutes from './routes/test-author-backfill.js';
 
 // Queue handlers (migrated to TypeScript)
 import { processCoverQueue, processEnrichmentQueue, processAuthorQueue } from './services/queue-handlers.js';
 import { processBackfillJob } from './services/async-backfill.js';
+
+// Service Provider Framework - Register all external service providers
+import { getGlobalRegistry } from '../lib/external-services/provider-registry.js';
+import {
+  GoogleBooksProvider,
+  OpenLibraryProvider,
+  ArchiveOrgProvider,
+  WikidataProvider,
+  ISBNdbProvider,
+  LibraryThingProvider,
+  GeminiProvider,
+  XaiProvider,
+} from '../lib/external-services/providers/index.js';
+
+// Initialize global provider registry on Worker startup
+// This ensures providers are available for both HTTP routes and queue handlers
+const providerRegistry = getGlobalRegistry();
+providerRegistry.registerAll([
+  new GoogleBooksProvider(),
+  new OpenLibraryProvider(),
+  new ArchiveOrgProvider(),
+  new WikidataProvider(),
+  new ISBNdbProvider(),
+  new LibraryThingProvider(),
+  // AI providers for book generation (backfill)
+  new GeminiProvider(),
+  new XaiProvider(),
+]);
 
 // =================================================================================
 // Application Setup
@@ -152,6 +182,8 @@ const subRouters = [
   recommendationsRoutes,
   enhancementCronRoutes,
   backfillSchedulerRoutes,
+  backfillAuthorWorksRoutes,
+  testAuthorBackfillRoutes,
   testRoutes,
   migrateRoutes,
   aiComparisonRoutes,

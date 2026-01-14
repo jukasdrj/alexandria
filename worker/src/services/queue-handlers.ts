@@ -30,15 +30,6 @@ import type {
 import { CoverFetchOrchestrator } from '../../lib/external-services/orchestrators/cover-fetch-orchestrator.js';
 import { EditionVariantOrchestrator } from '../../lib/external-services/orchestrators/edition-variant-orchestrator.js';
 import { getGlobalRegistry } from '../../lib/external-services/provider-registry.js';
-import {
-  GoogleBooksProvider,
-  OpenLibraryProvider,
-  ArchiveOrgProvider,
-  WikidataProvider,
-  LibraryThingProvider,
-  GeminiProvider,
-  XaiProvider,
-} from '../../lib/external-services/providers/index.js';
 import { COVER_PROVIDER_TIMEOUT_MS } from '../lib/constants.js';
 
 // Cloudflare Queue types
@@ -60,25 +51,15 @@ interface MessageBatch<T = unknown> {
 // =================================================================================
 
 /**
- * Global provider registry initialized once and reused across batches.
- * This reduces per-batch overhead by ~5-10ms (no repeated allocations).
+ * Global provider registry reference.
  *
- * QuotaManager is still created per-batch (needs fresh env bindings).
+ * NOTE: Providers are registered in src/index.ts at Worker startup to ensure
+ * they're available for both HTTP routes and queue handlers.
+ *
+ * This avoids duplicate registration errors and ensures consistent provider
+ * availability across all execution contexts.
  */
 const providerRegistry = getGlobalRegistry();
-
-// Register all providers once at module initialization
-providerRegistry.registerAll([
-  new GoogleBooksProvider(),
-  new OpenLibraryProvider(),
-  new ArchiveOrgProvider(),
-  new WikidataProvider(),
-  new ISBNdbProvider(),
-  new LibraryThingProvider(),
-  // AI providers for book generation (backfill)
-  new GeminiProvider(),
-  new XaiProvider(),
-]);
 
 /**
  * Process cover messages from queue
