@@ -29,7 +29,7 @@ async function searchByISBN(
 	isbn: string,
 	limit: number,
 	offset: number
-): Promise<{ data: any[]; total: number }> {
+): Promise<{ data: any[]; total: number; totalEstimated?: boolean }> {
 	const results: any[] = await sql`
 		SELECT
 			e.isbn AS isbn,
@@ -83,17 +83,9 @@ async function searchByAuthor(
 	name: string,
 	limit: number,
 	offset: number
-): Promise<{ data: any[]; total: number }> {
-	const [countResult, dataResult] = await Promise.all([
-		sql`
-			SELECT COUNT(DISTINCT e.isbn)::int AS total
-			FROM enriched_authors a
-			JOIN author_works aw ON a.author_key = aw.author_key
-			JOIN enriched_works w ON aw.work_key = w.work_key
-			JOIN enriched_editions e ON e.work_key = w.work_key
-			WHERE a.normalized_name = normalize_author_name(${name})
-		`,
-		sql`
+): Promise<{ data: any[]; total: number; totalEstimated?: boolean }> {
+	// OPTIMIZATION: Use LIMIT limit + 1 strategy instead of separate COUNT(*) query
+	const dataResult: any[] = await sql`
 			SELECT
 				e.isbn AS isbn,
 				e.title,
@@ -132,13 +124,18 @@ async function searchByAuthor(
 			WHERE a.normalized_name = normalize_author_name(${name})
 			GROUP BY e.isbn, e.title, e.publication_date, e.publisher, e.page_count, e.format, e.cover_url_large, e.cover_source, e.openlibrary_edition_id, e.work_key, w.title
 			ORDER BY e.publication_date DESC NULLS LAST
-			LIMIT ${limit} OFFSET ${offset}
-		`,
-	]);
+			LIMIT ${limit + 1} OFFSET ${offset}
+		`;
+
+	const hasMore = dataResult.length > limit;
+	const data = hasMore ? dataResult.slice(0, limit) : dataResult;
+	// Estimate total: if hasMore, we know there's at least one more page
+	const total = hasMore ? offset + limit + 1 : offset + data.length;
 
 	return {
-		data: dataResult,
-		total: parseInt(countResult[0]?.total || '0'),
+		data,
+		total,
+		totalEstimated: true,
 	};
 }
 
@@ -151,7 +148,7 @@ async function searchByTitle(
 	title: string,
 	limit: number,
 	offset: number
-): Promise<{ data: any[]; total: number }> {
+): Promise<{ data: any[]; total: number; totalEstimated?: boolean }> {
 	// Dynamic threshold based on query length
 	// Shorter queries = higher threshold (more precise)
 	// Longer queries = lower threshold (more recall)
@@ -163,14 +160,9 @@ async function searchByTitle(
 	// Set similarity threshold for trigram matching
 	await sql`SET LOCAL pg_trgm.similarity_threshold = ${threshold}`;
 
-	const [countResult, dataResult] = await Promise.all([
-		sql`
-			SELECT COUNT(DISTINCT e.isbn)::int AS total
-			FROM enriched_works w
-			JOIN enriched_editions e ON e.work_key = w.work_key
-			WHERE w.title % ${title}
-		`,
-		sql`
+	// OPTIMIZATION: Use LIMIT limit + 1 strategy instead of separate COUNT(*) query
+	// The separate COUNT query on fuzzy search is extremely expensive
+	const dataResult: any[] = await sql`
 			SELECT
 				e.isbn AS isbn,
 				e.title,
@@ -208,13 +200,18 @@ async function searchByTitle(
 			WHERE w.title % ${title}
 			GROUP BY e.isbn, e.title, e.publication_date, e.publisher, e.page_count, e.format, e.cover_url_large, e.cover_source, e.openlibrary_edition_id, e.work_key, w.title
 			ORDER BY title_score DESC, e.publication_date DESC NULLS LAST
-			LIMIT ${limit} OFFSET ${offset}
-		`,
-	]);
+			LIMIT ${limit + 1} OFFSET ${offset}
+		`;
+
+	const hasMore = dataResult.length > limit;
+	const data = hasMore ? dataResult.slice(0, limit) : dataResult;
+	// Estimate total: if hasMore, we know there's at least one more page
+	const total = hasMore ? offset + limit + 1 : offset + data.length;
 
 	return {
-		data: dataResult,
-		total: parseInt(countResult[0]?.total || '0'),
+		data,
+		total,
+		totalEstimated: true,
 	};
 }
 
@@ -367,6 +364,7 @@ app.openapi(combinedSearchRoute, async (c) => {
 				total: results.total,
 				hasMore: offset + limit < results.total,
 				returnedCount: formattedResults.length,
+				totalEstimated: results.totalEstimated,
 			},
 			metadata: {
 				cache_hit: false,
