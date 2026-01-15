@@ -164,7 +164,7 @@
       {
         "queue": "alexandria-enrichment-queue",
         "max_batch_size": 10,
-        "max_batch_timeout": 5,
+        "max_batch_timeout": 15,  // Increased from 5s → 15s (ISBNdb API + enrichment + DB writes needs 10-15s)
         "max_retries": 5,  // Increased from 3 → 5 per Grok analysis (transient platform issue safety net)
         "dead_letter_queue": "alexandria-enrichment-dlq",
         "max_concurrency": 10
@@ -180,7 +180,7 @@
       {
         "queue": "alexandria-backfill-queue",
         "max_batch_size": 1,
-        "max_batch_timeout": 5,
+        "max_batch_timeout": 30,  // Increased from 5s → 30s (Gemini API + ISBN resolution + dedup takes 5-15s)
         "max_retries": 2,
         "dead_letter_queue": "alexandria-backfill-dlq",
         "max_concurrency": 1
@@ -206,7 +206,7 @@
 
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1.0
+    "head_sampling_rate": 0.1  // Reduced from 1.0 → 0.1 (10% sampling sufficient for ~100-500 req/day)
   },
 
   "logpush": true,
