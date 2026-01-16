@@ -16,7 +16,7 @@ import {
   ErrorCode,
 } from '../schemas/response.js';
 import { enrichWork, enrichEdition } from '../services/enrichment-service.js';
-import { findOrCreateWork, linkWorkToAuthors } from '../services/work-utils.js';
+import { findOrCreateWork, findOrCreateAuthor, linkWorkToAuthors } from '../services/work-utils.js';
 import { getQuotaManager } from '../services/quota-manager.js';
 
 // =================================================================================
@@ -511,22 +511,96 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
           });
         }
 
+        // Deduplicate booksToEnrich by ISBN to prevent redundant processing within the batch
+        const uniqueBooksMap = new Map<string, ISBNdbBook>();
+        for (const book of booksToEnrich) {
+          const isbn = book.isbn13 || book.isbn;
+          if (isbn && !uniqueBooksMap.has(isbn)) {
+            uniqueBooksMap.set(isbn, book);
+          }
+        }
+        booksToEnrich = Array.from(uniqueBooksMap.values());
+
         // Create request-scoped caches for work/author deduplication
         const localAuthorKeyCache = new Map<string, string>();
         const localWorkKeyCache = new Map<string, string>();
 
+        // Promise-based locks for concurrency safety
+        const authorPromiseCache = new Map<string, Promise<string>>();
+        const workPromiseCache = new Map<string, Promise<{ workKey: string; isNew: boolean }>>();
+
+        // Helper: Safe author creation (locks on name)
+        const safeFindOrCreateAuthor = (name: string): Promise<string> => {
+          const key = name.toLowerCase();
+          let promise = authorPromiseCache.get(key);
+          if (!promise) {
+            promise = findOrCreateAuthor(sql, name, localAuthorKeyCache)
+              .catch(err => {
+                authorPromiseCache.delete(key);
+                throw err;
+              });
+            authorPromiseCache.set(key, promise);
+          }
+          return promise;
+        };
+
+        // Helper: Safe work creation (locks on title)
+        const safeFindOrCreateWork = (isbn: string, title: string, authors: string[]) => {
+          // Lock by title to prevent duplicate work creation (fuzzy/exact match race)
+          const dedupKey = title.toLowerCase();
+          let promise = workPromiseCache.get(dedupKey);
+
+          if (!promise) {
+            promise = (async () => {
+              // Pre-warm authors safely to populate localAuthorKeyCache
+              // This ensures findOrCreateWork hits the cache instead of racing
+              if (authors.length > 0) {
+                await Promise.all(authors.map(safeFindOrCreateAuthor));
+              }
+              return findOrCreateWork(sql, isbn, title, authors, localWorkKeyCache, localAuthorKeyCache);
+            })().catch(err => {
+              workPromiseCache.delete(dedupKey);
+              throw err;
+            });
+            workPromiseCache.set(dedupKey, promise);
+          }
+          return promise;
+        };
+
         // Cover queue batching
-        const coverBatch: any[] = [];
+        const coverBatch: Array<{
+          isbn: string;
+          work_key: string;
+          provider_url: string;
+          priority: string;
+          source: string;
+        }> = [];
         const BATCH_SIZE = 50; // Cloudflare Queue batch size
 
-        // Enrich new books
-        for (const book of booksToEnrich) {
+        // Concurrency helper
+        const runWithConcurrency = async <T>(
+          items: T[],
+          concurrency: number,
+          fn: (item: T) => Promise<void>
+        ) => {
+          const queue = [...items];
+          const workers = Array(Math.min(items.length, concurrency)).fill(null).map(async () => {
+            while (queue.length > 0) {
+              const item = queue.shift();
+              if (item) await fn(item);
+            }
+          });
+          await Promise.all(workers);
+        };
+
+        // Enrich new books concurrently
+        await runWithConcurrency(booksToEnrich, 5, async (book) => {
           const isbn = book.isbn13 || book.isbn;
-          if (!isbn) continue;
+          if (!isbn) return;
 
           try {
-            const { workKey, isNew: isNewWork } = await findOrCreateWork(
-              sql, isbn, book.title || 'Unknown', book.authors || [], localWorkKeyCache, localAuthorKeyCache
+            const { workKey, isNew: isNewWork } = await safeFindOrCreateWork(
+              isbn, book.title || 'Unknown', book.authors || []
             );
 
             if (isNewWork) {
@@ -540,6 +614,7 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
             }
 
             if (book.authors && book.authors.length > 0) {
+              // safeFindOrCreateWork already pre-warmed author cache, so this is safe and fast
               await linkWorkToAuthors(sql, workKey, book.authors, localAuthorKeyCache);
             }
 
@@ -579,9 +654,11 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
 
               // Flush batch if full
               if (coverBatch.length >= BATCH_SIZE) {
+                // Atomic splice to prevent race conditions in concurrent environment
+                const batch = coverBatch.splice(0, coverBatch.length);
                 try {
-                  await c.env.COVER_QUEUE.sendBatch(coverBatch.splice(0, coverBatch.length));
-                  results.covers_queued += BATCH_SIZE;
+                  await c.env.COVER_QUEUE.sendBatch(batch);
+                  results.covers_queued += batch.length;
                 } catch (err) {
                   logger.error('[EnrichNewReleases] Failed to send cover batch', { error: err });
                 }
@@ -590,7 +667,7 @@ app.openapi(enrichNewReleasesRoute, async (c) => {
           } catch {
             results.failed++;
           }
-        }
+        });
 
         // Flush remaining covers
         if (coverBatch.length > 0) {
