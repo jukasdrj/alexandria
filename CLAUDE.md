@@ -608,6 +608,8 @@ npx wrangler queues list | grep alexandria
 npx wrangler tail alexandria --format pretty | grep Queue
 ```
 
+**Queue Issues:** If queues are not processing (stale >24h), see `docs/operations/QUEUE_TROUBLESHOOTING.md` for diagnosis and manual consumer reset procedure.
+
 ## Additional Resources
 
 - **Documentation Index**: `docs/INDEX.md`

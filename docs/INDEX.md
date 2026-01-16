@@ -1,6 +1,6 @@
 # Alexandria Documentation Index
 
-**Last Updated:** January 14, 2026
+**Last Updated:** January 16, 2026
 
 > **Quick Start:** New to Alexandria? Start with [README.md](../README.md) → [CURRENT-STATUS.md](./CURRENT-STATUS.md) → [CLAUDE.md](../CLAUDE.md)
 
@@ -63,7 +63,8 @@
 - **[operations/LOGPUSH-QUICKSTART.md](./operations/LOGPUSH-QUICKSTART.md)** - Quick reference
 - **[operations/ISSUE-73-LOGPUSH-SUMMARY.md](./operations/ISSUE-73-LOGPUSH-SUMMARY.md)** - Logpush implementation details
 
-### Incident Response
+### Troubleshooting & Incident Response
+- **[operations/QUEUE_TROUBLESHOOTING.md](./operations/QUEUE_TROUBLESHOOTING.md)** - **⭐ NEW** Queue consumer failure diagnosis and fix (Jan 16, 2026 - 44-day incident resolution)
 - **[operations/ISBNDB-403-BLOCKER-JAN2.md](./operations/ISBNDB-403-BLOCKER-JAN2.md)** - ISBNdb quota exhaustion (Jan 2, 2026)
 - **[operations/SSH_MIGRATION_2025-12-27.md](./operations/SSH_MIGRATION_2025-12-27.md)** - SSH key migration
 
@@ -177,8 +178,11 @@ curl https://alexandria.ooheynerds.com/api/quota/status | jq
 # Database stats
 curl https://alexandria.ooheynerds.com/api/stats | jq
 
-# Queue status
+# Queue status (check for stale consumers)
 npx wrangler queues list | grep alexandria
+
+# Comprehensive enrichment status
+# Use /enrich-status skill in Claude Code
 ```
 
 ---
