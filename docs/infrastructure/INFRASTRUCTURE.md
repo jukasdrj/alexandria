@@ -1,6 +1,6 @@
 # 🏠 BooksTrack Infrastructure Reference
 
-**Last Updated:** January 10, 2026  
+**Last Updated:** January 16, 2026  
 **Owner:** Justin Gardner (@jukasdrj)
 
 ---
@@ -612,24 +612,31 @@ cd ~/dev_repos/bendv3 && npm run tail
 
 ### Docker Containers Won't Start After Reboot
 
-**Status:** ✅ RESOLVED (2026-01-10)
+**Status:** ✅ RESOLVED (2026-01-16)
 
-**Root Cause:**
-- Docker XFS image (`/mnt/user/domains/docker_img/docker-xfs.img`) wasn't mounting as loop device on boot
-- Unraid Docker Manager had dependency issues causing containers to fail startup
+**Root Cause (Updated 2026-01-16):**
+- **Unraid Community Apps Docker Auto Update plugin** was running daily at 4:00 AM
+- It stopped ALL containers and tried to restart them via Unraid Docker Manager
+- Since we migrated to Docker Compose, Unraid couldn't restart the containers properly
+- Previous issues also included XFS image mounting problems (resolved 2026-01-10)
 
 **Solution Applied:**
-- Migrated from Unraid Docker Manager to native Docker Compose v5.0.1
-- Added auto-start to `/boot/config/go`:
-  ```bash
-  sleep 10 && cd /mnt/user/domains/docker-compose && docker compose up -d &
-  ```
-- All 13 containers now start reliably on every boot
+1. **DISABLED Unraid Docker Auto Update plugin** (set `dockerCronFrequency: disabled`)
+2. Removed `/boot/config/plugins/ca.update.applications/docker_update.cron`
+3. **Watchtower is our ONLY auto-update system** (runs daily at 4:00 AM in Docker Compose)
+4. Updated boot script with better logging:
+   ```bash
+   ln -sf /mnt/cache/system/docker-bin/docker /usr/local/bin/docker
+   sleep 45
+   cd /mnt/user/domains/docker-compose && docker compose up -d >> /var/log/docker-compose-startup.log 2>&1
+   ```
 
 **Prevention:**
+- **NEVER use Unraid Docker Manager GUI** for these containers
+- **NEVER re-enable Unraid Community Apps Docker Auto Update**
 - Use standard Docker Compose for all container management
-- Avoid Unraid Docker Manager GUI for critical services
-- Configuration is portable and can be moved to any Docker host
+- Watchtower handles all container image updates
+- Check `/var/log/docker-compose-startup.log` if containers don't start after boot
 
 ### SMB Share Access Issues
 

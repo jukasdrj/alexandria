@@ -49,3 +49,10 @@ progress.md
 .claude/plans/*
 !.claude/plans/README.md
 !.claude/plans/SETUP.md
+
+# Wrangler backups
+worker/wrangler.jsonc.backup-*
+
+# Infrastructure configs with credentials
+configs/docker-compose*.yml
+scripts/migrate-to-compose.sh
