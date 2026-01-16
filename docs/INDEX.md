@@ -55,9 +55,19 @@
 - **[infrastructure/INFRASTRUCTURE.md](./infrastructure/INFRASTRUCTURE.md)** - System architecture overview
 - **[infrastructure/CLOUDFLARE-API-VS-WRANGLER.md](./infrastructure/CLOUDFLARE-API-VS-WRANGLER.md)** - API vs CLI management guide
 
+#### Docker & Unraid Infrastructure (Jan 2026)
+- **[infrastructure/DOCKER-INCIDENT-INDEX.md](./infrastructure/DOCKER-INCIDENT-INDEX.md)** - 🆕 **Complete incident documentation hub** (navigation + 6 analysis docs)
+- **[infrastructure/DOCKER-INCIDENT-2026-01-16.md](./infrastructure/DOCKER-INCIDENT-2026-01-16.md)** - 🆕 Docker auto-restart incident root cause and resolution
+- **[infrastructure/TOWER_MIGRATION_COMPLETE.md](./infrastructure/TOWER_MIGRATION_COMPLETE.md)** - 🆕 Migration from Unraid Docker Manager to Docker Compose + Watchtower
+- **[infrastructure/DOCKER_ENGINE_COUPLING_ANALYSIS.md](./infrastructure/DOCKER_ENGINE_COUPLING_ANALYSIS.md)** - 🆕 Why Docker Engine remains coupled to Unraid OS
+- **[infrastructure/DOCKER_TERMINOLOGY_AND_UPDATES.md](./infrastructure/DOCKER_TERMINOLOGY_AND_UPDATES.md)** - 🆕 Docker terminology clarification and update strategies
+- **[infrastructure/UNRAID_DOCKER_INDEPENDENCE_ANALYSIS.md](./infrastructure/UNRAID_DOCKER_INDEPENDENCE_ANALYSIS.md)** - 🆕 Remaining Unraid dependencies after Docker Compose migration
+- **[infrastructure/UNRAID_SHARE_OPTIMIZATION.md](./infrastructure/UNRAID_SHARE_OPTIMIZATION.md)** - 🆕 Unraid share configuration and performance optimization
+
 ### Monitoring & Performance
 - **[operations/PROVIDER-ANALYTICS.md](./operations/PROVIDER-ANALYTICS.md)** - **⭐ Provider analytics dashboard** (health checks, troubleshooting, alerts)
 - **[operations/PERFORMANCE_OPTIMIZATIONS.md](./operations/PERFORMANCE_OPTIMIZATIONS.md)** - **⭐ NEW** Performance improvements (ISBN resolution, deduplication, AI robustness)
+- **[operations/CLOUDFLARE_WORKERS_AUDIT.md](./operations/CLOUDFLARE_WORKERS_AUDIT.md)** - 🆕 Workers configuration optimization audit (queue timeouts, observability sampling)
 - **[operations/RATE-LIMITS.md](./operations/RATE-LIMITS.md)** - Central reference for all API rate limits
 - **[operations/LOGPUSH-SETUP.md](./operations/LOGPUSH-SETUP.md)** - R2 log storage configuration
 - **[operations/LOGPUSH-QUICKSTART.md](./operations/LOGPUSH-QUICKSTART.md)** - Quick reference
