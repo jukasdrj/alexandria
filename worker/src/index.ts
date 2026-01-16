@@ -17,7 +17,6 @@ import searchRoutes from './routes/search.js';
 import searchCombinedRoutes from './routes/search-combined.js';
 import { enrichRoutes } from './routes/enrich.js';
 import coversRoutes from './routes/covers.js';
-import coversLegacyRoutes from './routes/covers-legacy.js';
 import authorsRoutes from './routes/authors.js';
 import booksRoutes from './routes/books.js';
 import quotaRoutes from './routes/quota.js';
@@ -172,7 +171,6 @@ const subRouters = [
   searchCombinedRoutes,
   enrichRoutes,
   coversRoutes,
-  coversLegacyRoutes,
   authorsRoutes,
   booksRoutes,
   quotaRoutes,

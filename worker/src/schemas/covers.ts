@@ -195,6 +195,66 @@ export const QueueCoverResultSchema = z
   .openapi('QueueCoverResult');
 
 /**
+ * Cover Status Path Parameters
+ */
+export const CoverStatusParamsSchema = z.object({
+  isbn: z.string().openapi({
+    description: 'ISBN-10 or ISBN-13',
+    example: '9780439064873',
+  }),
+});
+
+/**
+ * Cover Status Response Schema
+ */
+export const CoverStatusResponseSchema = z
+  .object({
+    exists: z.boolean().openapi({
+      description: 'Whether cover exists in R2 storage',
+      example: true,
+    }),
+    isbn: z.string().openapi({
+      description: 'Normalized ISBN',
+      example: '9780439064873',
+    }),
+    format: z.enum(['webp', 'legacy']).optional().openapi({
+      description: 'Storage format (webp = jSquash processed, legacy = original)',
+      example: 'webp',
+    }),
+    sizes: z
+      .object({
+        large: z.number().optional(),
+        medium: z.number().optional(),
+        small: z.number().optional(),
+      })
+      .optional()
+      .openapi({
+        description: 'File sizes in bytes for each available size',
+        example: { large: 45678, medium: 23456, small: 12345 },
+      }),
+    uploaded: z.string().optional().openapi({
+      description: 'ISO timestamp when cover was uploaded',
+      example: '2026-01-15T12:00:00.000Z',
+    }),
+    urls: z
+      .object({
+        large: z.string(),
+        medium: z.string(),
+        small: z.string(),
+      })
+      .optional()
+      .openapi({
+        description: 'URLs to serve each cover size',
+        example: {
+          large: '/covers/9780439064873/large',
+          medium: '/covers/9780439064873/medium',
+          small: '/covers/9780439064873/small',
+        },
+      }),
+  })
+  .openapi('CoverStatusResponse');
+
+/**
  * Generic Error Response
  */
 export const ErrorResponseSchema = z

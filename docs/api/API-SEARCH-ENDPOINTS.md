@@ -482,49 +482,87 @@ curl -X POST 'https://alexandria.ooheynerds.com/covers/9780439064873/process'
 
 ### 7. Cover Status Check
 
-**Endpoint**: `GET /covers/:isbn/status`
+**Endpoint**: `GET /api/covers/status/{isbn}`
 
-**Description**: Check if a cover exists in R2 cache.
+**Description**: Check if a cover exists in R2 storage and get metadata.
 
-**Response**:
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `isbn` | string | yes | ISBN-10 or ISBN-13 |
+
+**Response** (Cover Exists):
 ```json
 {
   "exists": true,
   "isbn": "9780439064873",
-  "sizes": ["large", "medium", "small"]
+  "format": "webp",
+  "sizes": {
+    "large": 45678,
+    "medium": 23456,
+    "small": 12345
+  },
+  "uploaded": "2026-01-15T12:00:00.000Z",
+  "urls": {
+    "large": "/covers/9780439064873/large",
+    "medium": "/covers/9780439064873/medium",
+    "small": "/covers/9780439064873/small"
+  }
+}
+```
+
+**Response** (Cover Not Found):
+```json
+{
+  "exists": false,
+  "isbn": "9780439064873"
 }
 ```
 
 **Example**:
 ```bash
-curl 'https://alexandria.ooheynerds.com/covers/9780439064873/status'
+curl 'https://alexandria.ooheynerds.com/api/covers/status/9780439064873'
 ```
+
+**Performance**: ~50-100ms
 
 ---
 
-### 8. Batch Cover Processing
+### 8. Queue Cover Processing
 
-**Endpoint**: `POST /covers/batch`
+**Endpoint**: `POST /api/covers/queue`
 
-**Description**: Process multiple ISBNs in a single request (max 10).
+**Description**: Queue multiple covers for background processing (max 100). Replaces legacy batch endpoint.
 
 **Request Body**:
 ```json
 {
-  "isbns": ["9780439064873", "9781492666868", "9780545010221"]
+  "books": [
+    {
+      "isbn": "9780439064873",
+      "work_key": "/works/OL45804W",
+      "priority": "normal",
+      "title": "Harry Potter",
+      "author": "J.K. Rowling"
+    }
+  ]
 }
 ```
 
 **Response**:
 ```json
 {
-  "processed": 3,
-  "results": [
-    { "isbn": "9780439064873", "success": true },
-    { "isbn": "9781492666868", "success": true },
-    { "isbn": "9780545010221", "success": false, "error": "not found" }
-  ]
+  "queued": 1,
+  "failed": 0,
+  "errors": []
 }
+```
+
+**Example**:
+```bash
+curl -X POST 'https://alexandria.ooheynerds.com/api/covers/queue' \
+  -H 'Content-Type: application/json' \
+  -d '{"books": [{"isbn": "9780439064873"}]}'
 ```
 
 **Example**:

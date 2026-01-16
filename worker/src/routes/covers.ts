@@ -12,6 +12,8 @@ import {
   ProcessCoverSchema,
   QueueCoverSchema,
   ServeCoverParamsSchema,
+  CoverStatusParamsSchema,
+  CoverStatusResponseSchema,
   ProcessCoverSuccessSchema,
   ProcessCoverErrorSchema,
   QueueCoverResultSchema,
@@ -22,6 +24,127 @@ import { normalizeISBN } from '../../lib/isbn-utils.js';
 
 // Create covers router
 const app = new OpenAPIHono<AppBindings>();
+
+// =================================================================================
+// GET /api/covers/status/:isbn - Check cover availability
+// =================================================================================
+
+const coverStatusRoute = createRoute({
+  method: 'get',
+  path: '/api/covers/status/{isbn}',
+  tags: ['Covers'],
+  summary: 'Check Cover Status',
+  description: 'Check if a cover exists for the given ISBN and get metadata about available sizes.',
+  request: {
+    params: CoverStatusParamsSchema,
+  },
+  responses: {
+    200: {
+      description: 'Cover status information',
+      content: {
+        'application/json': {
+          schema: CoverStatusResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Invalid ISBN format',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+    500: {
+      description: 'Failed to check cover status',
+      content: {
+        'application/json': {
+          schema: ErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+app.openapi(coverStatusRoute, async (c) => {
+  const { isbn } = c.req.valid('param');
+  const logger = c.get('logger');
+  const normalizedISBN = normalizeISBN(isbn);
+
+  if (!normalizedISBN) {
+    return c.json({ error: 'Invalid ISBN format' }, 400);
+  }
+
+  logger.debug('Cover status check', { isbn: normalizedISBN });
+
+  try {
+    // Check for jSquash WebP files (preferred format)
+    const webpKey = `isbn/${normalizedISBN}/large.webp`;
+    const webpHead = await c.env.COVER_IMAGES.head(webpKey);
+
+    if (webpHead) {
+      // Get metadata from WebP files
+      const sizes: Record<string, number> = {};
+      for (const size of ['large', 'medium', 'small']) {
+        const sizeHead = await c.env.COVER_IMAGES.head(`isbn/${normalizedISBN}/${size}.webp`);
+        if (sizeHead) {
+          sizes[size] = sizeHead.size;
+        }
+      }
+
+      logger.info('Cover status - WebP format found', { isbn: normalizedISBN });
+
+      return c.json({
+        exists: true,
+        isbn: normalizedISBN,
+        format: 'webp' as const,
+        sizes,
+        uploaded: webpHead.uploaded.toISOString(),
+        urls: {
+          large: `/covers/${normalizedISBN}/large`,
+          medium: `/covers/${normalizedISBN}/medium`,
+          small: `/covers/${normalizedISBN}/small`,
+        },
+      });
+    }
+
+    // Fallback: Check for legacy ISBN-based storage
+    const extensions = ['jpg', 'png', 'webp'];
+    for (const ext of extensions) {
+      const key = `isbn/${normalizedISBN}/original.${ext}`;
+      const head = await c.env.COVER_IMAGES.head(key);
+      if (head) {
+        logger.info('Cover status - legacy format found', { isbn: normalizedISBN });
+
+        return c.json({
+          exists: true,
+          isbn: normalizedISBN,
+          format: 'legacy' as const,
+          sizes: { large: head.size },
+          uploaded: head.uploaded.toISOString(),
+          urls: {
+            large: `/covers/${normalizedISBN}/large`,
+            medium: `/covers/${normalizedISBN}/medium`,
+            small: `/covers/${normalizedISBN}/small`,
+          },
+        });
+      }
+    }
+
+    // Cover not found
+    logger.debug('Cover not found', { isbn: normalizedISBN });
+    return c.json({
+      exists: false,
+      isbn: normalizedISBN,
+    });
+  } catch (error) {
+    logger.error('Cover status check failed', {
+      isbn: normalizedISBN,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return c.json({ error: 'Failed to check cover status' }, 500);
+  }
+});
 
 // =================================================================================
 // POST /api/covers/process - Process cover from provider URL
