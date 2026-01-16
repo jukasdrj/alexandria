@@ -44,3 +44,8 @@ task_plan.md
 findings.md
 progress.md
 .planning/
+
+# Claude Code plans directory (session-specific, except README)
+.claude/plans/*
+!.claude/plans/README.md
+!.claude/plans/SETUP.md
