@@ -44,7 +44,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "echo 'Publishing alexandria-worker v2.8.0 - Added Provider Analytics & Monitoring (Issue #177)'"
+    "prepublishOnly": "echo 'Publishing alexandria-worker v2.9.0 - Removed legacy cover API routes (Issue #178)'"
   },
   "keywords": [
     "cloudflare",
