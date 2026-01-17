@@ -12,7 +12,7 @@ import { processAndStoreCover, coversExist } from '../../services/jsquash-proces
 import { ISBNdbProvider } from '../../lib/external-services/providers/isbndb-provider.js';
 import { createServiceContext } from '../../lib/external-services/service-context.js';
 import { enrichEdition, enrichWork } from './enrichment-service.js';
-import { findOrCreateWork, linkWorkToAuthors } from './work-utils.js';
+import { WorkDeduplicator } from './work-utils.js';
 import { normalizeISBN } from '../../lib/isbn-utils.js';
 import { Logger } from '../../lib/logger.js';
 import { getQuotaManager } from './quota-manager.js';
@@ -539,251 +539,258 @@ export async function processEnrichmentQueue(
       durationMs: wikidataDuration,
     });
 
-    // Create request-scoped caches for work/author deduplication
-    const localAuthorKeyCache = new Map<string, string>();
-    const localWorkKeyCache = new Map<string, string>();
+    // 3. Process each ISBN result using request-scoped deduplication
+    // This allows safe parallel processing of mixed editions/works
+    const deduplicator = new WorkDeduplicator(sql);
 
-    // 3. Process each ISBN result
-    for (const [isbn, externalData] of enrichmentData) {
-      const message = isbnMessages.get(isbn);
-      if (!message) continue;
+    // Convert map to array for chunking
+    const enrichmentItems = Array.from(enrichmentData.entries());
+    const concurrencyLimit = parseInt(env.PARALLEL_CONCURRENCY_LIMIT || '10', 10);
 
-      try {
-        // Use findOrCreateWork for proper deduplication
-        const { workKey, isNew: isNewWork } = await findOrCreateWork(
-          sql,
-          isbn,
-          externalData.title,
-          externalData.authors || [],
-          localWorkKeyCache,
-          localAuthorKeyCache
-        );
+    // Process in chunks to respect rate limits and memory
+    for (let i = 0; i < enrichmentItems.length; i += concurrencyLimit) {
+      const chunk = enrichmentItems.slice(i, i + concurrencyLimit);
 
-        // Only create enriched_work if it's genuinely new
-        if (isNewWork) {
-          await enrichWork(sql, {
-            work_key: workKey,
-            title: externalData.title,
-            description: externalData.description,
-            subject_tags: externalData.subjects,
-            primary_provider: 'isbndb',
-          }, logger);
-        }
+      // Parallelize processing within chunk
+      await Promise.all(chunk.map(async ([isbn, externalData]) => {
+        const message = isbnMessages.get(isbn);
+        if (!message) return;
 
-        // Link work to authors (fixes orphaned works)
-        if (externalData.authors && externalData.authors.length > 0) {
-          await linkWorkToAuthors(sql, workKey, externalData.authors, localAuthorKeyCache);
-        }
-
-        // Then enrich the edition (stores metadata + cover URLs)
-        await enrichEdition(
-          sql,
-          {
+        try {
+          // Use deduplicator for proper concurrency-safe deduplication
+          const { workKey, isNew: isNewWork } = await deduplicator.findOrCreateWork(
             isbn,
-            title: externalData.title,
-            subtitle: externalData.subtitle,
-            publisher: externalData.publisher,
-            publication_date: externalData.publicationDate,
-            page_count: externalData.pageCount,
-            format: externalData.binding,
-            language: externalData.language,
-            primary_provider: 'isbndb',
-            cover_urls: externalData.coverUrls,
-            cover_source: 'isbndb',
-            work_key: workKey,
-            subjects: externalData.subjects,
-            dewey_decimal: externalData.deweyDecimal,
-            binding: externalData.binding,
-            related_isbns: externalData.relatedISBNs,
-          },
-          logger,
-          env
-        );
-
-        // Merge Wikidata genres if available
-        const wikidataMetadata = wikidataData.get(isbn);
-        if (wikidataMetadata?.genre_names || wikidataMetadata?.subject_names) {
-          const mergeResult = mergeGenres(
-            externalData.subjects,
-            wikidataMetadata.genre_names,
-            wikidataMetadata.subject_names
+            externalData.title,
+            externalData.authors || []
           );
 
-          // Update work with merged subjects
-          if (mergeResult.wikidata_added > 0) {
-            const wikidataGenres = mergeResult.merged.slice(mergeResult.isbndb_count); // Extract only Wikidata additions
-            await updateWorkSubjects(sql, workKey, wikidataGenres, 'wikidata', logger);
-
-            logger.debug('Wikidata genre enrichment applied', {
-              isbn,
+          // Only create enriched_work if it's genuinely new
+          if (isNewWork) {
+            await enrichWork(sql, {
               work_key: workKey,
-              genres_added: mergeResult.wikidata_added,
-              total_subjects: mergeResult.merged.length,
-            });
-
-            // Track analytics
-            if (env.ANALYTICS) {
-              await env.ANALYTICS.writeDataPoint({
-                indexes: ['wikidata_genre_enrichment'],
-                blobs: [
-                  `isbn_${isbn}`,
-                  `work_${workKey}`,
-                  `genres_${mergeResult.wikidata_added}`
-                ],
-                doubles: [mergeResult.wikidata_added, wikidataDuration]
-              });
-            }
-
-            results.wikidata_hits = (results.wikidata_hits || 0) + 1;
-            results.wikidata_genres_added = (results.wikidata_genres_added || 0) + mergeResult.wikidata_added;
+              title: externalData.title,
+              description: externalData.description,
+              subject_tags: externalData.subjects,
+              primary_provider: 'isbndb',
+            }, logger);
           }
-        }
 
-        // Phase 2: Enrich subjects with Google Books categories (opportunistic, non-blocking)
-        // This adds complementary broad categories to ISBNdb's specific subjects
-        // Protected by feature flag + time budget circuit breaker to prevent Worker timeouts
-        if (env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true' && (Date.now() - startTime < TIME_BUDGET_MS)) {
-          try {
-            const googleStartTime = Date.now();
-            const googleCategories = await extractGoogleBooksCategories(isbn, env, logger);
-            const googleDuration = Date.now() - googleStartTime;
+          // Link work to authors (fixes orphaned works)
+          // Uses deduplicator internally to prevent duplicate author creation
+          if (externalData.authors && externalData.authors.length > 0) {
+            await deduplicator.linkWorkToAuthors(workKey, externalData.authors);
+          }
 
-            if (googleCategories.length > 0) {
-              await updateWorkSubjects(sql, workKey, googleCategories, 'google-books', logger);
+          // Then enrich the edition (stores metadata + cover URLs)
+          await enrichEdition(
+            sql,
+            {
+              isbn,
+              title: externalData.title,
+              subtitle: externalData.subtitle,
+              publisher: externalData.publisher,
+              publication_date: externalData.publicationDate,
+              page_count: externalData.pageCount,
+              format: externalData.binding,
+              language: externalData.language,
+              primary_provider: 'isbndb',
+              cover_urls: externalData.coverUrls,
+              cover_source: 'isbndb',
+              work_key: workKey,
+              subjects: externalData.subjects,
+              dewey_decimal: externalData.deweyDecimal,
+              binding: externalData.binding,
+              related_isbns: externalData.relatedISBNs,
+            },
+            logger,
+            env
+          );
 
-              logger.info('Google Books subject enrichment complete', {
+          // Merge Wikidata genres if available
+          const wikidataMetadata = wikidataData.get(isbn);
+          if (wikidataMetadata?.genre_names || wikidataMetadata?.subject_names) {
+            const mergeResult = mergeGenres(
+              externalData.subjects,
+              wikidataMetadata.genre_names,
+              wikidataMetadata.subject_names
+            );
+
+            // Update work with merged subjects
+            if (mergeResult.wikidata_added > 0) {
+              const wikidataGenres = mergeResult.merged.slice(mergeResult.isbndb_count); // Extract only Wikidata additions
+              await updateWorkSubjects(sql, workKey, wikidataGenres, 'wikidata', logger);
+
+              logger.debug('Wikidata genre enrichment applied', {
                 isbn,
                 work_key: workKey,
-                categories_count: googleCategories.length,
-                duration_ms: googleDuration,
-              });
-
-              // Track analytics for Open API usage
-              if (env.ANALYTICS) {
-                await env.ANALYTICS.writeDataPoint({
-                  indexes: ['google_books_subject_enrichment'],
-                  blobs: [
-                    `isbn_${isbn}`,
-                    `work_${workKey}`,
-                    `categories_${googleCategories.length}`
-                  ],
-                  doubles: [googleCategories.length, googleDuration]
-                });
-              }
-            } else {
-              logger.debug('No Google Books categories found', { isbn });
-            }
-          } catch (googleError) {
-            // Log but don't fail enrichment if Google Books fails
-            logger.warn('Google Books subject enrichment failed (non-blocking)', {
-              isbn,
-              error: googleError instanceof Error ? googleError.message : String(googleError),
-            });
-          }
-        } else if (env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true') {
-          // Time budget exceeded - skip remaining ISBNs
-          logger.debug('Skipping Google Books enrichment due to time budget', {
-            isbn,
-            elapsed_ms: Date.now() - startTime,
-            budget_ms: TIME_BUDGET_MS,
-          });
-        }
-
-        // Phase 3: Enrich edition variants (opportunistic, non-blocking)
-        // Aggregates related ISBNs from multiple providers (ISBNdb, LibraryThing, Wikidata)
-        // Protected by time budget to prevent Worker timeouts
-        if (Date.now() - startTime < TIME_BUDGET_MS) {
-          try {
-            const variantStartTime = Date.now();
-            const editionVariantOrchestrator = new EditionVariantOrchestrator(providerRegistry, {
-              enableLogging: true,
-              stopOnFirstSuccess: false, // Aggregate from all providers
-              providerTimeoutMs: 5000, // 5s per provider
-            });
-
-            const variants = await editionVariantOrchestrator.fetchEditionVariants(
-              isbn,
-              createServiceContext(env, logger, { quotaManager })
-            );
-            const variantDuration = Date.now() - variantStartTime;
-
-            if (variants.length > 0) {
-              // Merge variants from all providers into related_isbns JSONB
-              const mergedRelatedIsbns: Record<string, string> = {};
-
-              // Keep existing ISBNdb variants if any
-              if (externalData.relatedISBNs) {
-                Object.assign(mergedRelatedIsbns, externalData.relatedISBNs);
-              }
-
-              // Add variants from orchestrator (LibraryThing + Wikidata)
-              for (const variant of variants) {
-                const key = variant.formatDescription || variant.format;
-                if (!mergedRelatedIsbns[key]) {
-                  mergedRelatedIsbns[key] = variant.isbn;
-                }
-              }
-
-              // Update enriched_editions with merged variants
-              await sql`
-                UPDATE enriched_editions
-                SET related_isbns = ${JSON.stringify(mergedRelatedIsbns)},
-                    updated_at = NOW()
-                WHERE isbn = ${isbn}
-              `;
-
-              logger.info('Edition variant enrichment complete', {
-                isbn,
-                variants_count: variants.length,
-                sources: [...new Set(variants.map(v => v.source))],
-                duration_ms: variantDuration,
+                genres_added: mergeResult.wikidata_added,
+                total_subjects: mergeResult.merged.length,
               });
 
               // Track analytics
               if (env.ANALYTICS) {
                 await env.ANALYTICS.writeDataPoint({
-                  indexes: ['edition_variant_enrichment'],
+                  indexes: ['wikidata_genre_enrichment'],
                   blobs: [
                     `isbn_${isbn}`,
-                    `variants_${variants.length}`,
-                    `sources_${[...new Set(variants.map(v => v.source))].join(',')}`
+                    `work_${workKey}`,
+                    `genres_${mergeResult.wikidata_added}`
                   ],
-                  doubles: [variants.length, variantDuration]
+                  doubles: [mergeResult.wikidata_added, wikidataDuration]
                 });
               }
-            } else {
-              logger.debug('No edition variants found', { isbn });
+
+              results.wikidata_hits = (results.wikidata_hits || 0) + 1;
+              results.wikidata_genres_added = (results.wikidata_genres_added || 0) + mergeResult.wikidata_added;
             }
-          } catch (variantError) {
-            // Log but don't fail enrichment if edition variant fetch fails
-            logger.warn('Edition variant enrichment failed (non-blocking)', {
+          }
+
+          // Phase 2: Enrich subjects with Google Books categories (opportunistic, non-blocking)
+          // This adds complementary broad categories to ISBNdb's specific subjects
+          // Protected by feature flag + time budget circuit breaker to prevent Worker timeouts
+          if (env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true' && (Date.now() - startTime < TIME_BUDGET_MS)) {
+            try {
+              const googleStartTime = Date.now();
+              const googleCategories = await extractGoogleBooksCategories(isbn, env, logger);
+              const googleDuration = Date.now() - googleStartTime;
+
+              if (googleCategories.length > 0) {
+                await updateWorkSubjects(sql, workKey, googleCategories, 'google-books', logger);
+
+                logger.info('Google Books subject enrichment complete', {
+                  isbn,
+                  work_key: workKey,
+                  categories_count: googleCategories.length,
+                  duration_ms: googleDuration,
+                });
+
+                // Track analytics for Open API usage
+                if (env.ANALYTICS) {
+                  await env.ANALYTICS.writeDataPoint({
+                    indexes: ['google_books_subject_enrichment'],
+                    blobs: [
+                      `isbn_${isbn}`,
+                      `work_${workKey}`,
+                      `categories_${googleCategories.length}`
+                    ],
+                    doubles: [googleCategories.length, googleDuration]
+                  });
+                }
+              } else {
+                logger.debug('No Google Books categories found', { isbn });
+              }
+            } catch (googleError) {
+              // Log but don't fail enrichment if Google Books fails
+              logger.warn('Google Books subject enrichment failed (non-blocking)', {
+                isbn,
+                error: googleError instanceof Error ? googleError.message : String(googleError),
+              });
+            }
+          } else if (env.ENABLE_GOOGLE_BOOKS_ENRICHMENT === 'true') {
+            // Time budget exceeded - skip remaining ISBNs
+            logger.debug('Skipping Google Books enrichment due to time budget', {
               isbn,
-              error: variantError instanceof Error ? variantError.message : String(variantError),
+              elapsed_ms: Date.now() - startTime,
+              budget_ms: TIME_BUDGET_MS,
             });
           }
-        } else {
-          // Time budget exceeded - skip remaining ISBNs
-          logger.debug('Skipping edition variant enrichment due to time budget', {
+
+          // Phase 3: Enrich edition variants (opportunistic, non-blocking)
+          // Aggregates related ISBNs from multiple providers (ISBNdb, LibraryThing, Wikidata)
+          // Protected by time budget to prevent Worker timeouts
+          if (Date.now() - startTime < TIME_BUDGET_MS) {
+            try {
+              const variantStartTime = Date.now();
+              const editionVariantOrchestrator = new EditionVariantOrchestrator(providerRegistry, {
+                enableLogging: true,
+                stopOnFirstSuccess: false, // Aggregate from all providers
+                providerTimeoutMs: 5000, // 5s per provider
+              });
+
+              const variants = await editionVariantOrchestrator.fetchEditionVariants(
+                isbn,
+                createServiceContext(env, logger, { quotaManager })
+              );
+              const variantDuration = Date.now() - variantStartTime;
+
+              if (variants.length > 0) {
+                // Merge variants from all providers into related_isbns JSONB
+                const mergedRelatedIsbns: Record<string, string> = {};
+
+                // Keep existing ISBNdb variants if any
+                if (externalData.relatedISBNs) {
+                  Object.assign(mergedRelatedIsbns, externalData.relatedISBNs);
+                }
+
+                // Add variants from orchestrator (LibraryThing + Wikidata)
+                for (const variant of variants) {
+                  const key = variant.formatDescription || variant.format;
+                  if (!mergedRelatedIsbns[key]) {
+                    mergedRelatedIsbns[key] = variant.isbn;
+                  }
+                }
+
+                // Update enriched_editions with merged variants
+                await sql`
+                  UPDATE enriched_editions
+                  SET related_isbns = ${JSON.stringify(mergedRelatedIsbns)},
+                      updated_at = NOW()
+                  WHERE isbn = ${isbn}
+                `;
+
+                logger.info('Edition variant enrichment complete', {
+                  isbn,
+                  variants_count: variants.length,
+                  sources: [...new Set(variants.map(v => v.source))],
+                  duration_ms: variantDuration,
+                });
+
+                // Track analytics
+                if (env.ANALYTICS) {
+                  await env.ANALYTICS.writeDataPoint({
+                    indexes: ['edition_variant_enrichment'],
+                    blobs: [
+                      `isbn_${isbn}`,
+                      `variants_${variants.length}`,
+                      `sources_${[...new Set(variants.map(v => v.source))].join(',')}`
+                  ],
+                    doubles: [variants.length, variantDuration]
+                  });
+                }
+              } else {
+                logger.debug('No edition variants found', { isbn });
+              }
+            } catch (variantError) {
+              // Log but don't fail enrichment if edition variant fetch fails
+              logger.warn('Edition variant enrichment failed (non-blocking)', {
+                isbn,
+                error: variantError instanceof Error ? variantError.message : String(variantError),
+              });
+            }
+          } else {
+            // Time budget exceeded - skip remaining ISBNs
+            logger.debug('Skipping edition variant enrichment due to time budget', {
+              isbn,
+              elapsed_ms: Date.now() - startTime,
+              budget_ms: TIME_BUDGET_MS,
+            });
+          }
+
+          logger.debug('Enriched ISBN from batch', { isbn });
+
+          results.enriched++;
+          message.ack();
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logger.error('Storage error during enrichment', {
             isbn,
-            elapsed_ms: Date.now() - startTime,
-            budget_ms: TIME_BUDGET_MS,
+            error: errorMsg,
           });
+          results.failed++;
+          results.errors.push({ isbn, error: errorMsg });
+          message.retry();
         }
-
-        logger.debug('Enriched ISBN from batch', { isbn });
-
-        results.enriched++;
-        message.ack();
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        logger.error('Storage error during enrichment', {
-          isbn,
-          error: errorMsg,
-        });
-        results.failed++;
-        results.errors.push({ isbn, error: errorMsg });
-        message.retry();
-      }
+      }));
     }
 
     // 4. Handle ISBNs that weren't found in ISBNdb
