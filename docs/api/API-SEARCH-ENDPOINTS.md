@@ -1481,10 +1481,10 @@ Alexandria enforces the following limits on batch operations to ensure system st
 
 ## See Also
 
-- **ISBNdb Integration**: `docs/ISBNDB-ENDPOINTS.md`
-- **ISBNdb Enrichment**: `docs/ISBNDB-ENRICHMENT.md`
-- **Architecture**: `docs/ARCHITECTURE.md`
-- **Project Guidance**: `CLAUDE.md`
+- **ISBNdb Integration**: `ISBNDB-ENDPOINTS.md`
+- **ISBNdb Enrichment**: `ISBNDB-ENRICHMENT.md`
+- **Architecture**: `../infrastructure/INFRASTRUCTURE.md`
+- **Project Guidance**: `../../CLAUDE.md`
 
 ---
 
