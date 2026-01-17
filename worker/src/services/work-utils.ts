@@ -104,6 +104,7 @@ export async function linkWorkToAuthors(
  * @param authorNames - Array of author names
  * @param workKeyCache - Request-scoped cache for work lookups (ISBN → work_key)
  * @param authorKeyCache - Request-scoped cache for author lookups
+ * @param authorResolver - Optional resolver function to handle author lookups (allows deduplication injection)
  */
 export async function findOrCreateWork(
   sql: ReturnType<typeof postgres>,
@@ -111,7 +112,8 @@ export async function findOrCreateWork(
   title: string,
   authorNames: string[],
   workKeyCache: Map<string, string>,
-  authorKeyCache: Map<string, string>
+  authorKeyCache: Map<string, string>,
+  authorResolver?: (name: string) => Promise<string>
 ): Promise<{ workKey: string; isNew: boolean }> {
   // Check cache first (ISBN → work_key)
   const cached = workKeyCache.get(isbn);
@@ -135,7 +137,11 @@ export async function findOrCreateWork(
   if (authorNames && authorNames.length > 0) {
     // Get or create author keys first
     const authorKeys = await Promise.all(
-      authorNames.slice(0, 3).map(name => findOrCreateAuthor(sql, name, authorKeyCache)) // Limit to first 3 authors
+      authorNames.slice(0, 3).map(name =>
+        authorResolver
+          ? authorResolver(name)
+          : findOrCreateAuthor(sql, name, authorKeyCache)
+      ) // Limit to first 3 authors
     );
 
     // Format author keys as PostgreSQL array literal for ANY() clause
@@ -173,4 +179,106 @@ export async function findOrCreateWork(
   const newKey = `/works/isbndb-${crypto.randomUUID().slice(0, 8)}`;
   workKeyCache.set(isbn, newKey);
   return { workKey: newKey, isNew: true };
+}
+
+/**
+ * Request-scoped deduplicator to handle race conditions during concurrent processing.
+ *
+ * Ensures that concurrent calls for the same work (by title + author) or author (by name)
+ * reuse the same Promise, preventing duplicate creation.
+ */
+export class WorkDeduplicator {
+  private workPromises = new Map<string, Promise<{ workKey: string; isNew: boolean }>>();
+  private authorPromises = new Map<string, Promise<string>>();
+
+  // Internal caches to maintain compatibility with standalone functions
+  private workKeyCache = new Map<string, string>();
+  private authorKeyCache = new Map<string, string>();
+
+  constructor(private sql: ReturnType<typeof postgres>) {}
+
+  /**
+   * Deduplicated wrapper for findOrCreateWork
+   */
+  async findOrCreateWork(
+    isbn: string,
+    title: string,
+    authorNames: string[]
+  ): Promise<{ workKey: string; isNew: boolean }> {
+    // 1. Check internal ISBN cache first (fastest)
+    if (this.workKeyCache.has(isbn)) {
+      return { workKey: this.workKeyCache.get(isbn)!, isNew: false };
+    }
+
+    // 2. Determine lock key
+    // Logic matches fuzzy match strategy: title + first author is the primary identifier
+    const lockKey = authorNames.length > 0
+      ? `work:${title.toLowerCase()}:${authorNames[0].toLowerCase()}`
+      : `work:${title.toLowerCase()}`;
+
+    // 3. Get or create promise
+    if (!this.workPromises.has(lockKey)) {
+      this.workPromises.set(lockKey, (async () => {
+        // Delegate to original function
+        return await findOrCreateWork(
+          this.sql,
+          isbn,
+          title,
+          authorNames,
+          this.workKeyCache,
+          this.authorKeyCache, // Share author cache too
+          this.findOrCreateAuthor.bind(this) // Use deduplicated author resolution!
+        );
+      })());
+    }
+
+    // 4. Await result
+    const result = await this.workPromises.get(lockKey)!;
+
+    // 5. Update ISBN cache for THIS isbn (if result came from another ISBN's promise)
+    if (!this.workKeyCache.has(isbn)) {
+      this.workKeyCache.set(isbn, result.workKey);
+    }
+
+    return result;
+  }
+
+  /**
+   * Deduplicated wrapper for findOrCreateAuthor
+   */
+  async findOrCreateAuthor(authorName: string): Promise<string> {
+    const lockKey = `author:${authorName.toLowerCase()}`;
+
+    if (!this.authorPromises.has(lockKey)) {
+      this.authorPromises.set(lockKey, (async () => {
+        return await findOrCreateAuthor(
+          this.sql,
+          authorName,
+          this.authorKeyCache
+        );
+      })());
+    }
+
+    return await this.authorPromises.get(lockKey)!;
+  }
+
+  /**
+   * Deduplicated wrapper for linkWorkToAuthors
+   */
+  async linkWorkToAuthors(
+    workKey: string,
+    authorNames: string[]
+  ): Promise<void> {
+    // We can run these in parallel now because findOrCreateAuthor is deduplicated!
+    await Promise.all(
+      authorNames.map(async (name, index) => {
+        const authorKey = await this.findOrCreateAuthor(name);
+        await this.sql`
+          INSERT INTO work_authors_enriched (work_key, author_key, author_order)
+          VALUES (${workKey}, ${authorKey}, ${index + 1})
+          ON CONFLICT (work_key, author_key) DO NOTHING
+        `;
+      })
+    );
+  }
 }

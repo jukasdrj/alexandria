@@ -30,9 +30,15 @@ vi.mock('../../../services/jsquash-processor', () => ({
   coversExist: vi.fn(),
 }));
 
-vi.mock('../../../services/cover-fetcher', () => ({
-  fetchBestCover: vi.fn(),
-  // fetchISBNdbCover removed - now using ISBNdbProvider.fetchCover
+// Mock CoverFetchOrchestrator
+const { mockFetchCover } = vi.hoisted(() => ({
+  mockFetchCover: vi.fn(),
+}));
+
+vi.mock('../../../lib/external-services/orchestrators/cover-fetch-orchestrator', () => ({
+  CoverFetchOrchestrator: class {
+    fetchCover = mockFetchCover;
+  },
 }));
 
 vi.mock('../../../lib/external-services/providers/isbndb-provider', () => {
@@ -75,17 +81,12 @@ vi.mock('../../../lib/isbn-utils', () => ({
 vi.mock('../../../lib/external-services/provider-registry', () => {
   return {
     getGlobalRegistry: vi.fn(() => {
-      // Lazy-load the ISBNdb provider instance
-      let cachedProvider: any = null;
-
       return {
-        registerAll: vi.fn((providers: any[]) => {
-          // When providers are registered, capture the ISBNdb instance
-          cachedProvider = providers.find(p => p?.name === 'isbndb');
-        }),
+        registerAll: vi.fn(),
         get: vi.fn((name: string) => {
           if (name === 'isbndb') {
-            return cachedProvider;
+            // @ts-ignore
+            return ISBNdbProvider.getInstance;
           }
           return null;
         }),
@@ -103,7 +104,6 @@ vi.mock('postgres', () => ({
 
 // Import mocked modules
 import { processAndStoreCover, coversExist } from '../../../services/jsquash-processor';
-import { fetchBestCover } from '../../../services/cover-fetcher';
 import { ISBNdbProvider } from '../../../lib/external-services/providers/isbndb-provider';
 import { enrichEdition, enrichWork } from '../enrichment-service';
 
@@ -336,10 +336,7 @@ describe('processCoverQueue', () => {
       const batch = createMockBatch('alexandria-cover-queue', [message]);
 
       (coversExist as Mock).mockResolvedValue(false);
-      (fetchBestCover as Mock).mockResolvedValue({
-        source: 'placeholder',
-        url: 'https://placeholder.com/no-cover.png',
-      });
+      mockFetchCover.mockResolvedValue(null);
 
       const results = await processCoverQueue(batch, env);
 
