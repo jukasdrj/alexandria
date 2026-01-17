@@ -2777,18 +2777,18 @@ function generateActionItems(
 ## 🔗 Quick Reference Links
 
 ### Internal Documentation
-- [API Endpoints](/Users/juju/dev_repos/alex/docs/api/API-SEARCH-ENDPOINTS.md)
-- [Service Provider Guide](/Users/juju/dev_repos/alex/docs/development/SERVICE_PROVIDER_GUIDE.md)
-- [Rate Limits](/Users/juju/dev_repos/alex/docs/operations/RATE-LIMITS.md)
-- [Current Status](/Users/juju/dev_repos/alex/docs/CURRENT-STATUS.md)
+- [API Endpoints](../api/API-SEARCH-ENDPOINTS.md)
+- [Service Provider Guide](../development/SERVICE_PROVIDER_GUIDE.md)
+- [Rate Limits](./RATE-LIMITS.md)
+- [Current Status](../CURRENT-STATUS.md)
 
 ### Code Files
-- **Provider Registry**: `/Users/juju/dev_repos/alex/worker/lib/external-services/provider-registry.ts`
-- **HTTP Client**: `/Users/juju/dev_repos/alex/worker/lib/external-services/http-client.ts`
-- **Orchestrators**: `/Users/juju/dev_repos/alex/worker/lib/external-services/orchestrators/`
-- **Providers**: `/Users/juju/dev_repos/alex/worker/lib/external-services/providers/`
-- **Queue Handlers**: `/Users/juju/dev_repos/alex/worker/src/services/queue-handlers.ts`
-- **Analytics Tracking**: `/Users/juju/dev_repos/alex/worker/src/middleware/analytics.ts`
+- **Provider Registry**: `../../worker/lib/external-services/provider-registry.ts`
+- **HTTP Client**: `../../worker/lib/external-services/http-client.ts`
+- **Orchestrators**: `../../worker/lib/external-services/orchestrators/`
+- **Providers**: `../../worker/lib/external-services/providers/`
+- **Queue Handlers**: `../../worker/src/services/queue-handlers.ts`
+- **Analytics Tracking**: `../../worker/src/middleware/analytics.ts`
 
 ### External Status Pages
 - **ISBNdb**: No public status page (test manually: `curl -H "Authorization: <KEY>" https://api.premium.isbndb.com/books/9780140328721`)
@@ -2808,7 +2808,7 @@ function generateActionItems(
 ### Deployment
 ```bash
 # Deploy Worker
-cd /Users/juju/dev_repos/alex/worker
+cd worker
 npm run deploy
 
 # Tail logs
@@ -2846,6 +2846,6 @@ curl https://alexandria.ooheynerds.com/health
 ---
 
 **Questions or Issues?**
-- Check [CURRENT-STATUS.md](/Users/juju/dev_repos/alex/docs/CURRENT-STATUS.md) for active issues
-- Review [Service Provider Guide](/Users/juju/dev_repos/alex/docs/development/SERVICE_PROVIDER_GUIDE.md) for implementation details
+- Check [CURRENT-STATUS.md](../CURRENT-STATUS.md) for active issues
+- Review [Service Provider Guide](../development/SERVICE_PROVIDER_GUIDE.md) for implementation details
 - Open GitHub issue for bugs or feature requests
