@@ -20,6 +20,43 @@ export interface DetectionResult {
 	confidence: 'high' | 'medium' | 'low';
 }
 
+// =================================================================================
+// In-Memory Cache for Detection Results (Bolt Optimization)
+// =================================================================================
+
+// Simple LRU-like cache (just a Map with size limit)
+// Caches the result of DB-heavy author detection
+const detectionCache = new Map<string, { result: DetectionResult; timestamp: number }>();
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const MAX_CACHE_SIZE = 1000;
+
+function getCachedDetection(query: string): DetectionResult | null {
+	const cached = detectionCache.get(query);
+	if (!cached) return null;
+
+	// Check TTL
+	if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
+		detectionCache.delete(query);
+		return null;
+	}
+
+	return cached.result;
+}
+
+function setCachedDetection(query: string, result: DetectionResult): void {
+  // If updating existing key, delete first to move to end (LRU behavior)
+  if (detectionCache.has(query)) {
+    detectionCache.delete(query);
+  } else if (detectionCache.size >= MAX_CACHE_SIZE) {
+    // Evict oldest if full and inserting new
+		const firstKey = detectionCache.keys().next().value;
+    if (firstKey) {
+      detectionCache.delete(firstKey);
+    }
+	}
+	detectionCache.set(query, { result, timestamp: Date.now() });
+}
+
 /**
  * Detects if a query string matches ISBN-10 or ISBN-13 pattern
  * Handles common formats: 9780439064873, 978-0-439-06487-3, 043906487X
@@ -176,6 +213,12 @@ export async function detectQueryType(
 
 	// Stage 2: Author detection (with heuristic pre-filter)
 	if (matchesAuthorPattern(trimmed)) {
+		// OPTIMIZATION (Bolt): Check in-memory cache first to avoid DB round-trip
+		const cached = getCachedDetection(trimmed);
+		if (cached) {
+			return cached;
+		}
+
 		// Use raw trimmed string - let DB handle normalization
 		const normalized = trimmed;
 
@@ -188,11 +231,14 @@ export async function detectQueryType(
 			`;
 
 			if (result.length > 0) {
-				return {
+				const detection: DetectionResult = {
 					type: 'author',
 					normalized: normalized,
 					confidence: 'high',
 				};
+				// Cache positive result
+				setCachedDetection(trimmed, detection);
+				return detection;
 			}
 		} catch {
 			// DB error - silently fall through to title search
@@ -200,9 +246,17 @@ export async function detectQueryType(
 	}
 
 	// Stage 3: Title search (default fallback)
-	return {
+	const result: DetectionResult = {
 		type: 'title',
 		normalized: trimmed.toLowerCase(),
 		confidence: 'medium',
 	};
+
+	// Cache negative result (failed author check -> title) if it matched author pattern
+	// This prevents repeated DB lookups for title queries that look like authors
+	if (matchesAuthorPattern(trimmed)) {
+		setCachedDetection(trimmed, result);
+	}
+
+	return result;
 }
