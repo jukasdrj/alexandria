@@ -133,31 +133,131 @@ export async function handleProcessCover(c: Context<AppBindings>): Promise<Respo
 
 /**
  * GET /api/covers/:work_key/:size
+ * GET /covers/:isbn/:size (legacy compatibility)
  *
- * DEPRECATED: This endpoint is deprecated in favor of /covers/:isbn/:size
+ * Serve cover images from R2 storage. Accepts both work_key and ISBN parameters.
+ * The parameter is named work_key for OpenAPI spec but accepts ISBNs in practice.
  *
- * Cover storage has been consolidated to ISBN-based paths (Issue #95).
- * Use the ISBN-based endpoint: GET /covers/{isbn}/{size}
+ * Storage strategies (priority order):
+ * 1. jSquash WebP format: isbn/{isbn}/{size}.webp (pre-resized)
+ * 2. Legacy ISBN storage: isbn/{isbn}/original.{ext}
+ * 3. Work-based storage: covers/{work_key}/{hash}/original (oldest format)
  *
- * Example: GET /covers/9780439064873/medium
+ * Falls back to placeholder if cover not found.
  */
 export async function handleServeCover(c: Context<AppBindings>): Promise<Response> {
   const work_key = c.req.param('work_key');
   const size = c.req.param('size');
+  const logger = c.get('logger');
 
-  // Return deprecation notice with guidance
-  return c.json(
-    {
-      error: 'Endpoint deprecated',
-      message: `GET /api/covers/{work_key}/{size} is deprecated. Cover storage is now ISBN-based.`,
-      migration: {
-        deprecated: `/api/covers/${work_key}/${size}`,
-        use_instead: '/covers/{isbn}/{size}',
-        example: '/covers/9780439064873/large',
-        documentation: 'https://alexandria.ooheynerds.com/docs#covers',
-      },
-      issue: 'https://github.com/ooheynerds/alexandria/issues/95',
-    },
-    410 // HTTP 410 Gone - resource no longer available
-  );
+  // Normalize the identifier (could be ISBN or work_key)
+  const normalizedId = work_key.replace(/[-\s]/g, '');
+
+  logger.debug('Cover serve request', { identifier: normalizedId, size });
+
+  try {
+    let object = null;
+
+    // STRATEGY 1: Try jSquash WebP format (isbn/{isbn}/{size}.webp)
+    // This is the preferred format - pre-resized WebP files from jSquash processing
+    if (size !== 'original') {
+      const webpKey = `isbn/${normalizedId}/${size}.webp`;
+      object = await c.env.COVER_IMAGES.get(webpKey);
+      if (object) {
+        logger.info('Cover served - jSquash WebP', { identifier: normalizedId, size, key: webpKey });
+        // Return WebP with caching headers
+        const headers = new Headers();
+        headers.set('Content-Type', 'image/webp');
+        headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+        headers.set('CDN-Cache-Control', 'max-age=31536000');
+        return new Response(object.body, { headers });
+      }
+    }
+
+    // STRATEGY 2: Check KV cache for ISBN→R2 key mapping (legacy originals)
+    const cacheKey = `cover_key:${normalizedId}`;
+    let r2Key = await c.env.CACHE.get(cacheKey);
+
+    if (r2Key) {
+      logger.debug('Found cached R2 key', { identifier: normalizedId, r2Key });
+      object = await c.env.COVER_IMAGES.get(r2Key);
+
+      // If cached key is stale (object deleted), remove from cache
+      if (!object) {
+        logger.warn('Cached R2 key is stale', { identifier: normalizedId, r2Key });
+        await c.env.CACHE.delete(cacheKey);
+        r2Key = null;
+      }
+    }
+
+    // STRATEGY 3: Try legacy ISBN-based storage (isbn/{isbn}/original.{ext})
+    if (!object) {
+      const extensions = ['jpg', 'png', 'webp'];
+
+      for (const ext of extensions) {
+        const key = `isbn/${normalizedId}/original.${ext}`;
+        object = await c.env.COVER_IMAGES.get(key);
+        if (object) {
+          logger.info('Cover served - legacy ISBN-based', { identifier: normalizedId, key });
+          // Cache this key for future requests
+          await c.env.CACHE.put(cacheKey, key, { expirationTtl: 86400 * 30 }); // 30 days
+          break;
+        }
+      }
+    }
+
+    // STRATEGY 4: Search work-based storage (covers/{work_key}/{hash}/original)
+    // This is the oldest work-based format
+    if (!object) {
+      logger.debug('Searching work-based storage', { identifier: normalizedId });
+
+      let cursor: string | undefined;
+      let found = false;
+      const maxPages = 5;
+      let pageCount = 0;
+
+      while (!found && pageCount < maxPages) {
+        const list = await c.env.COVER_IMAGES.list({
+          prefix: 'covers/',
+          cursor,
+          limit: 1000,
+        });
+
+        for (const obj of list.objects) {
+          if (obj.customMetadata?.isbn === normalizedId) {
+            logger.info('Cover served - work-based', { identifier: normalizedId, key: obj.key });
+            object = await c.env.COVER_IMAGES.get(obj.key);
+            r2Key = obj.key;
+            await c.env.CACHE.put(cacheKey, r2Key, { expirationTtl: 86400 * 30 });
+            found = true;
+            break;
+          }
+        }
+
+        cursor = list.truncated ? list.cursor : undefined;
+        pageCount++;
+        if (!cursor) break;
+      }
+    }
+
+    if (!object) {
+      logger.debug('Cover not found, redirecting to placeholder', { identifier: normalizedId });
+      return c.redirect(getPlaceholderCover(c.env), 302);
+    }
+
+    // Return image with caching headers
+    const headers = new Headers();
+    headers.set('Content-Type', object.httpMetadata?.contentType || 'image/jpeg');
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set('CDN-Cache-Control', 'max-age=31536000');
+
+    return new Response(object.body, { headers });
+  } catch (error) {
+    logger.error('Cover serve failed', {
+      identifier: normalizedId,
+      size,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return c.redirect(getPlaceholderCover(c.env), 302);
+  }
 }

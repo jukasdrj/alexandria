@@ -101,9 +101,9 @@ app.openapi(coverStatusRoute, async (c) => {
         sizes,
         uploaded: webpHead.uploaded.toISOString(),
         urls: {
-          large: `/covers/${normalizedISBN}/large`,
-          medium: `/covers/${normalizedISBN}/medium`,
-          small: `/covers/${normalizedISBN}/small`,
+          large: `/api/covers/${normalizedISBN}/large`,
+          medium: `/api/covers/${normalizedISBN}/medium`,
+          small: `/api/covers/${normalizedISBN}/small`,
         },
       });
     }
@@ -123,9 +123,9 @@ app.openapi(coverStatusRoute, async (c) => {
           sizes: { large: head.size },
           uploaded: head.uploaded.toISOString(),
           urls: {
-            large: `/covers/${normalizedISBN}/large`,
-            medium: `/covers/${normalizedISBN}/medium`,
-            small: `/covers/${normalizedISBN}/small`,
+            large: `/api/covers/${normalizedISBN}/large`,
+            medium: `/api/covers/${normalizedISBN}/medium`,
+            small: `/api/covers/${normalizedISBN}/small`,
           },
         });
       }
@@ -407,5 +407,34 @@ export async function handleQueueCovers(c: Context<AppBindings>): Promise<Respon
 
 // @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
 app.openapi(queueCoverRoute, handleQueueCovers);
+
+// =================================================================================
+// GET /covers/:isbn/:size - Legacy ISBN-based route (compatibility)
+// =================================================================================
+
+// Simple non-OpenAPI route for legacy compatibility
+// This route predates the OpenAPI migration and doesn't need spec documentation
+app.get('/covers/:isbn/:size', async (c) => {
+  // Map isbn param to work_key for handler compatibility
+  const isbn = c.req.param('isbn');
+  const size = c.req.param('size');
+
+  // Create a modified context with work_key param mapping
+  const modifiedReq = {
+    ...c.req,
+    param: (key: string) => {
+      if (key === 'work_key') return isbn;
+      if (key === 'size') return size;
+      return c.req.param(key);
+    }
+  };
+
+  const modifiedContext = {
+    ...c,
+    req: modifiedReq
+  } as any;
+
+  return handleServeCover(modifiedContext);
+});
 
 export default app;
