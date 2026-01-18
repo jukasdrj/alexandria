@@ -8,10 +8,12 @@ This directory contains all documentation for the Alexandria project.
 docs/
 ├── README.md                    # This file
 ├── CREDENTIALS.md               # Credentials (gitignored)
-├── API-SEARCH-ENDPOINTS.md      # Search API documentation
-├── CLOUDFLARE-API-VS-WRANGLER.md # Cloudflare management reference
-├── ISBNDB-ENDPOINTS.md          # ISBNdb API documentation
-├── ISBNDB-ENRICHMENT.md         # ISBNdb enrichment opportunities
+├── api/                         # API documentation
+│   ├── API-SEARCH-ENDPOINTS.md  # Search API documentation
+│   ├── ISBNDB-ENDPOINTS.md      # ISBNdb API documentation
+│   └── ISBNDB-ENRICHMENT.md     # ISBNdb enrichment opportunities
+├── infrastructure/              # Infrastructure documentation
+│   └── CLOUDFLARE-API-VS-WRANGLER.md # Cloudflare management reference
 └── reference/                   # Reference documentation
     ├── TUNNEL.md               # Cloudflare Tunnel configuration
     ├── tunnel-config.example.yml  # Example config file
@@ -26,16 +28,16 @@ docs/
 - [TODO.md](../TODO.md) - Development roadmap
 
 ### API Documentation
-- [Search Endpoints](./API-SEARCH-ENDPOINTS.md) - Complete search API documentation
+- [Search Endpoints](api/API-SEARCH-ENDPOINTS.md) - Complete search API documentation
 - [Integration Guide](../worker/README-INTEGRATION.md) - TypeScript API integration
 - [OpenAPI Spec](https://alexandria.ooheynerds.com/openapi.json) - Live API specification
-- [ISBNdb Endpoints](./ISBNDB-ENDPOINTS.md) - ISBNdb API v2 reference
-- [ISBNdb Enrichment](./ISBNDB-ENRICHMENT.md) - ISBNdb data enrichment guide
-- [Cloudflare API vs Wrangler](./CLOUDFLARE-API-VS-WRANGLER.md) - Infrastructure management reference
+- [ISBNdb Endpoints](api/ISBNDB-ENDPOINTS.md) - ISBNdb API v2 reference
+- [ISBNdb Enrichment](api/ISBNDB-ENRICHMENT.md) - ISBNdb data enrichment guide
+- [Cloudflare API vs Wrangler](infrastructure/CLOUDFLARE-API-VS-WRANGLER.md) - Infrastructure management reference
 
 ### Reference
-- [Tunnel Configuration](./reference/TUNNEL.md) - How the Cloudflare Tunnel works
-- [Enrichment Architecture](./reference/ENRICHMENT_ARCHITECTURE.md) - Data enrichment design
+- [Tunnel Configuration](reference/TUNNEL.md) - How the Cloudflare Tunnel works
+- [Enrichment Architecture](reference/ENRICHMENT_ARCHITECTURE.md) - Data enrichment design
 
 ### Infrastructure
 - **Credentials**: See `CREDENTIALS.md` (gitignored, contains all passwords)
