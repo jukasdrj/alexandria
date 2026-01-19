@@ -194,12 +194,13 @@ ORDER BY source, title;
 
 **Purpose**: Automatically enhance synthetic works (created during ISBNdb quota exhaustion) with full metadata when quota refreshes.
 
-**Daily Cron**: Midnight UTC enhances up to 500 synthetic works per day:
-- Resolves ISBNs via ISBNdb title/author search
-- Queues for full enrichment (Wikidata, Archive.org, Google Books, covers)
-- Upgrades completeness_score from 30 → 80
+**Daily Cron**: ❌ **DISABLED 2026-01-19** to preserve ISBNdb quota
+- Previously ran at midnight UTC to enhance up to 500 synthetic works per day
+- Resolved ISBNs via ISBNdb title/author search
+- Queued for full enrichment (Wikidata, Archive.org, Google Books, covers)
+- Upgraded completeness_score from 30 → 80
 
-**Manual Trigger**:
+**Manual Trigger** (still available via webhook):
 ```bash
 curl -X POST https://alexandria.ooheynerds.com/api/internal/enhance-synthetic-works \
   -H "X-Cron-Secret: $ALEXANDRIA_WEBHOOK_SECRET" \

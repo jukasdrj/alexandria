@@ -213,8 +213,9 @@
 
   "triggers": {
     "crons": [
-      "0 0 * * *",
-      "0 2 * * *"
+      // DISABLED 2026-01-19: Stop automated ISBNdb calls to preserve quota
+      // "0 0 * * *",  // Synthetic enhancement (ISBNdb)
+      // "0 2 * * *"   // Cover harvest (ISBNdb) + Wikidata enrichment
     ]
   },
 

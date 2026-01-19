@@ -1,20 +1,29 @@
 # Cloudflare Workers Cron Configuration
 
-**Last Updated**: 2026-01-10 21:45 UTC
-**Status**: Deployed and Active ✅
+**Last Updated**: 2026-01-19
+**Status**: ❌ DISABLED - All automated ISBNdb cron jobs stopped to preserve quota
 
 ---
 
 ## Cron Schedules
 
-Alexandria Worker has **two** scheduled cron jobs running daily:
+**IMPORTANT**: All cron jobs that make ISBNdb API calls have been disabled as of 2026-01-19 to stop automated quota consumption.
 
-### 1. Synthetic Enhancement Cron
-**Schedule**: `0 0 * * *` (Daily at midnight UTC)
+**To Re-Enable**: Uncomment the cron schedules in `worker/wrangler.jsonc` and redeploy:
+```bash
+cd worker/
+npx wrangler deploy
+```
+
+Alexandria Worker previously had **two** scheduled cron jobs (now disabled):
+
+### 1. Synthetic Enhancement Cron (DISABLED)
+**Schedule**: ~~`0 0 * * *` (Daily at midnight UTC)~~ **DISABLED 2026-01-19**
 **Handler**: `handleScheduledSyntheticEnhancement(env)`
 **File**: `worker/src/routes/enhancement-cron.ts`
 
 **Purpose**: Enhance synthetic works created during ISBNdb quota exhaustion
+**ISBNdb Usage**: ~500 API calls/day
 
 **Process**:
 1. Query synthetic works ready for enhancement (up to 500 works)
@@ -33,15 +42,16 @@ Alexandria Worker has **two** scheduled cron jobs running daily:
 
 ---
 
-### 2. Cover Harvest + Wikidata Enrichment Cron
-**Schedule**: `0 2 * * *` (Daily at 2 AM UTC)
+### 2. Cover Harvest + Wikidata Enrichment Cron (DISABLED)
+**Schedule**: ~~`0 2 * * *` (Daily at 2 AM UTC)~~ **DISABLED 2026-01-19**
 **Handlers**:
-- `handleScheduledCoverHarvest(env)` - `worker/src/routes/harvest.ts`
-- `handleScheduledWikidataEnrichment(env)` - `worker/src/routes/authors.js`
+- `handleScheduledCoverHarvest(env)` - `worker/src/routes/harvest.ts` ❌ **Uses ISBNdb**
+- `handleScheduledWikidataEnrichment(env)` - `worker/src/routes/authors.js` ✅ Free (Wikidata only)
 
-**Purpose**: Existing scheduled tasks for cover harvesting and author enrichment
+**Purpose**: Cover harvesting and author enrichment
+**ISBNdb Usage**: Cover harvest makes ISBNdb API calls
 
-**Timing Rationale**: Runs at 2 AM UTC, 2 hours after synthetic enhancement, to avoid quota contention.
+**Timing Rationale**: Ran at 2 AM UTC, 2 hours after synthetic enhancement, to avoid quota contention.
 
 ---
 
@@ -52,12 +62,15 @@ Alexandria Worker has **two** scheduled cron jobs running daily:
 {
   "triggers": {
     "crons": [
-      "0 0 * * *",  // Midnight UTC - Synthetic enhancement
-      "0 2 * * *"   // 2 AM UTC - Cover harvest + Wikidata
+      // DISABLED 2026-01-19: Stop automated ISBNdb calls to preserve quota
+      // "0 0 * * *",  // Synthetic enhancement (ISBNdb)
+      // "0 2 * * *"   // Cover harvest (ISBNdb) + Wikidata enrichment
     ]
   }
 }
 ```
+
+**Status**: Empty crons array = No automated scheduled tasks
 
 ### index.ts - Scheduled Handler
 ```typescript
