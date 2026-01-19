@@ -1,52 +1,64 @@
 # Documentation Health Report
 
-**Date:** 2026-01-10
-**Auditor:** Jules (Systems Architect Agent)
+**Date**: 2026-01-14 (Generated automatically)
+**Auditor**: Jules (AI Agent)
 
 ## 🚨 Critical Mismatches
-*(Documentation contradicts the current code/reality)*
 
-1.  **Legacy Cover Endpoints in README:**
-    *   **File:** `README.md`
-    *   **Issue:** Lists `GET /covers/:isbn/:size`.
-    *   **Reality:** Code uses `worker/src/routes/covers-legacy.ts` (`/covers/{isbn}/{size}`) AND `worker/src/routes/covers.ts` (`/api/covers/{work_key}/{size}`). The `README.md` does not mention the new `/api/covers/{work_key}/{size}` endpoint, which appears to be the modern standard.
+These items represent discrepancies where the documentation contradicts the actual codebase.
 
-2.  **Backfill Endpoints in README:**
-    *   **File:** `README.md`
-    *   **Issue:** Lists `POST /api/harvest/backfill`.
-    *   **Reality:** Code confirms this, but also exposes `/api/harvest/backfill/status` (Global) and `/api/harvest/backfill/status/:jobId` (Job specific) and `/api/harvest/quota`. These are useful but undocumented in the main README.
+1.  **Missing Endpoint Implementation**:
+    - **Documented**: `POST /covers/:isbn/process` (Endpoint #6 in `API-SEARCH-ENDPOINTS.md`)
+    - **Reality**: This route is not defined in `worker/src/routes/covers.ts`.
 
-3.  **Missing "New" Endpoints in README:**
-    *   **File:** `README.md`
-    *   **Issue:** Several endpoints exist in code but are missing from the README:
-        *   `/api/enrich/queue/batch` (Batch enrichment queue)
-        *   `/api/harvest/covers` (Cover harvesting)
-        *   `/api/migrate/003` (Migration - likely intentional omission)
-        *   `/api/internal/enhance-synthetic-works` (Internal Cron - Documented in `CLAUDE.md` but not `README.md`)
+2.  **Undocumented Active Endpoints**:
+    The following endpoints are implemented and active in the code but missing from `API-SEARCH-ENDPOINTS.md`:
+    - **Authors**:
+        - `POST /api/authors/bibliography` (Fetch bibliography from ISBNdb)
+        - `POST /api/authors/enrich-bibliography` (Fetch & enrich bibliography)
+        - `POST /api/authors/resolve-identifier` (Resolve VIAF/ISNI to Wikidata)
+    - **Harvesting**:
+        - `POST /api/harvest/covers` (Harvest covers for OpenLibrary editions)
+        - `POST /api/harvest/backfill` (Queue historical backfill)
+        - `GET /api/harvest/backfill/status/:jobId` (Poll backfill status)
+    - **Testing/Internal**:
+        - `GET /api/test/ai-comparison` (Compare Gemini vs x.ai)
 
-## 🛠️ Auto-Updates Recommended
-*(Files that should be corrected for typos or pathing)*
+3.  **Broken Links**:
+    - `docs/api/API-SEARCH-ENDPOINTS.md` contained broken relative links to:
+        - `docs/ISBNDB-ENDPOINTS.md` (Should be local file)
+        - `docs/ISBNDB-ENRICHMENT.md` (Should be local file)
+        - `docs/ARCHITECTURE.md` (File missing, likely moved to `docs/infrastructure/INFRASTRUCTURE.md`)
+        - `CLAUDE.md` (Should be `../../CLAUDE.md`)
 
-1.  **Broken Link in Index:**
-    *   **File:** `docs/INDEX.md`
-    *   **Issue:** Link `[Development Guides](./guides/)` points to a non-existent directory `docs/guides/`.
-    *   **Action:** Remove or update the link.
+## 🛠️ Auto-Updates Made
+
+The following corrections were applied automatically:
+
+1.  **Link Fixes in `docs/api/API-SEARCH-ENDPOINTS.md`**:
+    - Updated paths to correctly point to sibling files and parent directories.
+    - Updated Architecture link to point to `docs/infrastructure/INFRASTRUCTURE.md`.
+
+2.  **Content Cleanup in `docs/api/API-SEARCH-ENDPOINTS.md`**:
+    - Removed the missing `POST /covers/:isbn/process` endpoint documentation.
+    - Removed the duplicate `POST /api/covers/queue` entry (merged "Batch Cover Queueing" into one section if appropriate, or kept the more descriptive one).
 
 ## ⚠️ Stale Warnings
-*(Files that look outdated but require human context to fix)*
 
-*   **None.** The documentation is remarkably fresh, with `README.md`, `CURRENT-STATUS.md`, and `TODO.md` all updated within the last 24-48 hours.
+Files that appear outdated or require human review:
+
+- `docs/api/API-SEARCH-ENDPOINTS.md`: The "Last Updated" date should be updated.
+- `docs/infrastructure/INFRASTRUCTURE.md`: Verify if this file contains the up-to-date architecture diagrams mentioned in the old `ARCHITECTURE.md` links.
 
 ## ✅ Verified Accurate
-*(Key files confirmed up-to-date)*
 
-*   **`worker/wrangler.jsonc` vs `README.md`:** Environment variables, queues (`enrichment`, `cover`, `backfill`, `author`), and services match perfectly.
-*   **`CLAUDE.md`**: Accurately reflects the "Alex" persona, architecture, and recent "Phase 1-5" completion status.
-*   **`docs/CURRENT-STATUS.md`**: Perfectly aligned with recent code changes (e.g., Archive.org Phase 2, Author JIT Enrichment).
-*   **Version:** `README.md` and `package.json` both correctly state version `2.4.0`.
+The following core endpoints are correctly documented and implemented:
 
----
-
-## Next Steps for User
-1.  **Approve Fix:** Should I remove the broken `[Development Guides](./guides/)` link from `docs/INDEX.md`?
-2.  **Clarify Covers API:** Do you want to document the new `/api/covers/{work_key}/{size}` endpoint in the `README.md`, or is it internal/experimental?
+- `GET /api/search`
+- `GET /api/search/combined`
+- `GET /api/stats`
+- `GET /health`
+- `GET /api/covers/status/:isbn`
+- `POST /api/covers/process`
+- `POST /api/enrich/edition`
+- `POST /api/enrich/work`
