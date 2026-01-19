@@ -452,35 +452,8 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/covers/process' \
 
 ---
 
-### 6. ISBN-based Cover Processing
 
-**Endpoint**: `POST /covers/:isbn/process`
-
-**Description**: Trigger cover processing for an ISBN from multiple providers.
-
-**Path Parameters**:
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `isbn` | string | yes | ISBN-10 or ISBN-13 |
-
-**Response**:
-```json
-{
-  "success": true,
-  "isbn": "9780439064873",
-  "provider": "openlibrary",
-  "url": "https://alexandria.ooheynerds.com/covers/9780439064873/large"
-}
-```
-
-**Example**:
-```bash
-curl -X POST 'https://alexandria.ooheynerds.com/covers/9780439064873/process'
-```
-
----
-
-### 7. Cover Status Check
+### 6. Cover Status Check
 
 **Endpoint**: `GET /api/covers/status/{isbn}`
 
@@ -528,7 +501,7 @@ curl 'https://alexandria.ooheynerds.com/api/covers/status/9780439064873'
 
 ---
 
-### 8. Queue Cover Processing
+### 7. Queue Cover Processing
 
 **Endpoint**: `POST /api/covers/queue`
 
@@ -565,18 +538,11 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/covers/queue' \
   -d '{"books": [{"isbn": "9780439064873"}]}'
 ```
 
-**Example**:
-```bash
-curl -X POST 'https://alexandria.ooheynerds.com/covers/batch' \
-  -H 'Content-Type: application/json' \
-  -d '{"isbns": ["9780439064873", "9781492666868"]}'
-```
-
 ---
 
 ## Enrichment Endpoints
 
-### 9. Enrich Edition
+### 8. Enrich Edition
 
 **Endpoint**: `POST /api/enrich/edition`
 
@@ -611,7 +577,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ---
 
-### 10. Enrich Work
+### 9. Enrich Work
 
 **Endpoint**: `POST /api/enrich/work`
 
@@ -630,7 +596,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ---
 
-### 11. Enrich Author
+### 10. Enrich Author
 
 **Endpoint**: `POST /api/enrich/author`
 
@@ -649,7 +615,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ---
 
-### 12. Queue Enrichment Job
+### 11. Queue Enrichment Job
 
 **Endpoint**: `POST /api/enrich/queue`
 
@@ -665,7 +631,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ---
 
-### 13. Check Enrichment Status
+### 12. Check Enrichment Status
 
 **Endpoint**: `GET /api/enrich/status/:id`
 
@@ -684,7 +650,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ## Batch & Bulk Operations
 
-### 14. Direct Batch Enrichment
+### 13. Direct Batch Enrichment
 
 **Endpoint**: `POST /api/enrich/batch-direct`
 
@@ -713,7 +679,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 }
 ```
 
-### 15. Batch Enrichment Queuing
+### 14. Batch Enrichment Queuing
 
 **Endpoint**: `POST /api/enrich/queue/batch`
 
@@ -738,7 +704,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 }
 ```
 
-### 16. Top Authors
+### 15. Top Authors
 
 **Endpoint**: `GET /api/authors/top`
 
@@ -775,7 +741,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/enrich/edition' \
 
 ## Author Endpoints
 
-### 24. Author Details
+### 16. Author Details
 
 **Endpoint**: `GET /api/authors/:key`
 
@@ -844,7 +810,7 @@ curl 'https://alexandria.ooheynerds.com/api/authors/%2Fauthors%2FOL23919A' | jq 
 
 ---
 
-### 25. Enrich Authors with Wikidata
+### 17. Enrich Authors with Wikidata
 
 **Endpoint**: `POST /api/authors/enrich-wikidata`
 
@@ -910,7 +876,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/authors/enrich-wikidata' \
 
 ---
 
-### 26. Author Enrichment Status
+### 18. Author Enrichment Status
 
 **Endpoint**: `GET /api/authors/enrich-status`
 
@@ -956,7 +922,7 @@ curl 'https://alexandria.ooheynerds.com/api/authors/enrich-status' | jq .
 
 ## Advanced Cover Endpoints
 
-### 27. Work-based Cover Retrieval
+### 19. Work-based Cover Retrieval
 
 **Endpoint**: `GET /api/covers/:work_key/:size`
 
@@ -1002,7 +968,7 @@ curl 'https://alexandria.ooheynerds.com/api/covers/OL82537W/small' -o cover.jpg
 
 ---
 
-### 28. Batch Cover Queueing
+### 20. Batch Cover Queueing
 
 **Endpoint**: `POST /api/covers/queue`
 
@@ -1419,7 +1385,7 @@ curl 'https://alexandria.ooheynerds.com/api/authors/enrich-status' | jq .
 
 These endpoints provide administrative functionality and debugging capabilities for the Alexandria system.
 
-### 17. Interactive Dashboard
+### 21. Interactive Dashboard
 
 **Endpoint**: `GET /`
 
@@ -1481,10 +1447,10 @@ Alexandria enforces the following limits on batch operations to ensure system st
 
 ## See Also
 
-- **ISBNdb Integration**: `docs/ISBNDB-ENDPOINTS.md`
-- **ISBNdb Enrichment**: `docs/ISBNDB-ENRICHMENT.md`
-- **Architecture**: `docs/ARCHITECTURE.md`
-- **Project Guidance**: `CLAUDE.md`
+- **ISBNdb Integration**: `ISBNDB-ENDPOINTS.md`
+- **ISBNdb Enrichment**: `ISBNDB-ENRICHMENT.md`
+- **Architecture**: `../infrastructure/INFRASTRUCTURE.md`
+- **Project Guidance**: `../../CLAUDE.md`
 
 ---
 
