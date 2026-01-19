@@ -143,7 +143,7 @@ async function searchByAuthor(
  * Search by title using GIN trigram indexes (fuzzy search)
  * Uses dynamic threshold tuning for better precision/recall balance
  */
-async function searchByTitle(
+export async function searchByTitle(
 	sql: any,
 	title: string,
 	limit: number,
@@ -154,15 +154,19 @@ async function searchByTitle(
 	// Longer queries = lower threshold (more recall)
 	const threshold = title.length <= 5 ? 0.6 : title.length <= 10 ? 0.5 : 0.4;
 
-	// Set work_mem for this query (faster sorting of fuzzy results)
-	await sql`SET LOCAL work_mem = '256MB'`;
+	// Use a transaction to pipeline configuration commands and query
+	// This reduces network round trips from 3 to 1
+	const dataResult: any[] = await sql.begin(async (sql: any) => {
+		// Pipeline configuration commands (no await)
+		// Set work_mem for this query (faster sorting of fuzzy results)
+		void sql`SET LOCAL work_mem = '256MB'`;
 
-	// Set similarity threshold for trigram matching
-	await sql`SET LOCAL pg_trgm.similarity_threshold = ${threshold}`;
+		// Set similarity threshold for trigram matching
+		void sql`SET LOCAL pg_trgm.similarity_threshold = ${threshold}`;
 
-	// OPTIMIZATION: Use LIMIT limit + 1 strategy instead of separate COUNT(*) query
-	// The separate COUNT query on fuzzy search is extremely expensive
-	const dataResult: any[] = await sql`
+		// OPTIMIZATION: Use LIMIT limit + 1 strategy instead of separate COUNT(*) query
+		// The separate COUNT query on fuzzy search is extremely expensive
+		return await sql`
 			SELECT
 				e.isbn AS isbn,
 				e.title,
@@ -202,6 +206,7 @@ async function searchByTitle(
 			ORDER BY title_score DESC, e.publication_date DESC NULLS LAST
 			LIMIT ${limit + 1} OFFSET ${offset}
 		`;
+	});
 
 	const hasMore = dataResult.length > limit;
 	const data = hasMore ? dataResult.slice(0, limit) : dataResult;
