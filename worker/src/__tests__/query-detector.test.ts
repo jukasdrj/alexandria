@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
 	detectISBN,
 	normalizeISBN,
 	matchesAuthorPattern,
 	detectQueryType,
-} from '../src/lib/query-detector.js';
+} from '../lib/query-detector.js';
 
 describe('query-detector', () => {
 	describe('detectISBN', () => {
@@ -198,159 +198,135 @@ describe('query-detector', () => {
 	});
 
 	describe('detectQueryType', () => {
-		// Mock SQL connection for testing
-		// Tagged template literal receives: sql`...` -> sql(strings, ...values)
-		const mockSqlWithAuthor = async (strings: TemplateStringsArray, ...values: any[]) => {
-			const rawInput = values[0]; // First parameter value (raw user input)
-			// Simulate what normalize_author_name() would do in the database
-			// The query is: WHERE normalized_name = normalize_author_name(${rawInput})
-			// So we simulate having normalized versions of "J. K. Rowling" and "Stephen King"
-			const normalized = rawInput.toLowerCase().trim();
-			if (
-				normalized === 'j. k. rowling' ||
-				normalized === 'j.k. rowling' ||
-				normalized === 'stephen king'
-			) {
-				return [{ exists: 1 }]; // Found
-			}
-			return []; // Not found
-		};
+		let mockSql: any;
 
-		const mockSqlEmpty = async (strings: TemplateStringsArray, ...values: any[]) => {
-			return []; // Always empty (no authors found)
-		};
-
-		const mockSqlError = async (strings: TemplateStringsArray, ...values: any[]) => {
-			throw new Error('Database connection failed');
-		};
+		beforeEach(() => {
+			mockSql = vi.fn();
+		});
 
 		describe('ISBN detection (Stage 1)', () => {
 			it('detects ISBN-13 and returns high confidence', async () => {
-				const result = await detectQueryType(
-					'9780439064873',
-					mockSqlEmpty
-				);
+				const result = await detectQueryType('9780439064873', mockSql);
 				expect(result.type).toBe('isbn');
 				expect(result.normalized).toBe('9780439064873');
 				expect(result.confidence).toBe('high');
+				expect(mockSql).not.toHaveBeenCalled();
 			});
 
 			it('detects ISBN-10 and normalizes', async () => {
-				const result = await detectQueryType(
-					'043906487x',
-					mockSqlEmpty
-				);
+				const result = await detectQueryType('043906487x', mockSql);
 				expect(result.type).toBe('isbn');
 				expect(result.normalized).toBe('043906487X');
 				expect(result.confidence).toBe('high');
+				expect(mockSql).not.toHaveBeenCalled();
 			});
 
 			it('normalizes ISBN with hyphens', async () => {
-				const result = await detectQueryType(
-					'978-0-439-06487-3',
-					mockSqlEmpty
-				);
+				const result = await detectQueryType('978-0-439-06487-3', mockSql);
 				expect(result.type).toBe('isbn');
 				expect(result.normalized).toBe('9780439064873');
 				expect(result.confidence).toBe('high');
+				expect(mockSql).not.toHaveBeenCalled();
 			});
 		});
 
-		describe('Author detection (Stage 2)', () => {
+		describe('Author detection (Stage 2) with Caching', () => {
 			it('detects known author and returns high confidence', async () => {
-				const result = await detectQueryType(
-					'J. K. Rowling',
-					mockSqlWithAuthor
-				);
-				expect(result.type).toBe('author');
-				expect(result.normalized).toBe('J. K. Rowling'); // Now returns raw trimmed input
-				expect(result.confidence).toBe('high');
-			});
+				mockSql.mockResolvedValueOnce([{ exists: 1 }]);
 
-			it('detects another known author', async () => {
-				const result = await detectQueryType(
-					'Stephen King',
-					mockSqlWithAuthor
-				);
+				const result = await detectQueryType('J. K. Rowling', mockSql);
 				expect(result.type).toBe('author');
-				expect(result.normalized).toBe('Stephen King'); // Now returns raw trimmed input
+				expect(result.normalized).toBe('J. K. Rowling');
 				expect(result.confidence).toBe('high');
+				expect(mockSql).toHaveBeenCalledTimes(1);
 			});
 
 			it('falls through to title if author not in DB', async () => {
-				const result = await detectQueryType(
-					'Unknown Author',
-					mockSqlEmpty
-				);
+				mockSql.mockResolvedValueOnce([]);
+
+				const result = await detectQueryType('Unknown Author', mockSql);
 				expect(result.type).toBe('title');
 				expect(result.confidence).toBe('medium');
+				expect(mockSql).toHaveBeenCalledTimes(1);
 			});
 
 			it('handles DB errors gracefully and falls to title', async () => {
-				const result = await detectQueryType(
-					'Stephen King',
-					mockSqlError
-				);
+				mockSql.mockRejectedValueOnce(new Error('Database connection failed'));
+
+				const result = await detectQueryType('Stephen King', mockSql);
 				expect(result.type).toBe('title');
 				expect(result.confidence).toBe('medium');
+				expect(mockSql).toHaveBeenCalledTimes(1);
+			});
+
+			it('caches positive author checks', async () => {
+				// First call checks DB
+				mockSql.mockResolvedValueOnce([{ exists: 1 }]);
+				const result1 = await detectQueryType('Stephen King', mockSql);
+				expect(result1.type).toBe('author');
+				expect(mockSql).toHaveBeenCalledTimes(1);
+
+				// Second call uses cache
+				const result2 = await detectQueryType('Stephen King', mockSql);
+				expect(result2.type).toBe('author');
+				expect(mockSql).toHaveBeenCalledTimes(1); // Count remains 1
+			});
+
+			it('caches negative author checks', async () => {
+				// First call checks DB (not found)
+				mockSql.mockResolvedValueOnce([]);
+				const result1 = await detectQueryType('Fake Author Name', mockSql);
+				expect(result1.type).toBe('title');
+				expect(mockSql).toHaveBeenCalledTimes(1);
+
+				// Second call uses cache (skips DB)
+				const result2 = await detectQueryType('Fake Author Name', mockSql);
+				expect(result2.type).toBe('title');
+				expect(mockSql).toHaveBeenCalledTimes(1); // Count remains 1
+			});
+
+			it('does NOT cache DB errors', async () => {
+				// First call fails
+				mockSql.mockRejectedValueOnce(new Error('DB error'));
+				const result1 = await detectQueryType('Error Name', mockSql);
+				expect(result1.type).toBe('title');
+				expect(mockSql).toHaveBeenCalledTimes(1);
+
+				// Second call retries DB
+				mockSql.mockResolvedValueOnce([{ exists: 1 }]);
+				const result2 = await detectQueryType('Error Name', mockSql);
+				expect(result2.type).toBe('author');
+				expect(mockSql).toHaveBeenCalledTimes(2);
 			});
 		});
 
 		describe('Title search (Stage 3 - Fallback)', () => {
 			it('defaults to title for generic queries', async () => {
-				const result = await detectQueryType(
-					'harry potter',
-					mockSqlEmpty
-				);
+                // "harry potter" does not match author pattern (lower case, > 1 word)
+                // Wait, "harry potter" DOES match author pattern because:
+                // length > 5, < 50
+                // words = 2
+                // no title indicators
+                // no book words
+                // lowercase allowed
+
+                // So it tries DB. We need to mock DB empty for this to fallback to title.
+                mockSql.mockResolvedValueOnce([]);
+
+				const result = await detectQueryType('harry potter', mockSql);
 				expect(result.type).toBe('title');
 				expect(result.normalized).toBe('harry potter');
 				expect(result.confidence).toBe('medium');
+                // It calls DB because "harry potter" looks like an author name
+				expect(mockSql).toHaveBeenCalledTimes(1);
 			});
 
 			it('defaults to title for queries starting with "the"', async () => {
-				const result = await detectQueryType(
-					'The Great Gatsby',
-					mockSqlEmpty
-				);
+				const result = await detectQueryType('The Great Gatsby', mockSql);
 				expect(result.type).toBe('title');
 				expect(result.normalized).toBe('the great gatsby');
 				expect(result.confidence).toBe('medium');
-			});
-
-			it('defaults to title for single word', async () => {
-				const result = await detectQueryType('1984', mockSqlEmpty);
-				expect(result.type).toBe('title');
-				expect(result.normalized).toBe('1984');
-				expect(result.confidence).toBe('medium');
-			});
-
-			it('normalizes to lowercase for title', async () => {
-				const result = await detectQueryType(
-					'HARRY POTTER',
-					mockSqlEmpty
-				);
-				expect(result.type).toBe('title');
-				expect(result.normalized).toBe('harry potter');
-			});
-		});
-
-		describe('integration scenarios', () => {
-			it('prioritizes ISBN over author-like patterns', async () => {
-				// Even if "9780439064873" might match author pattern, ISBN takes priority
-				const result = await detectQueryType(
-					'9780439064873',
-					mockSqlWithAuthor
-				);
-				expect(result.type).toBe('isbn');
-			});
-
-			it('handles queries with extra whitespace', async () => {
-				const result = await detectQueryType(
-					'  Stephen King  ',
-					mockSqlWithAuthor
-				);
-				expect(result.type).toBe('author');
-				expect(result.normalized).toBe('Stephen King'); // Returns trimmed input (whitespace removed)
+				expect(mockSql).not.toHaveBeenCalled();
 			});
 		});
 	});

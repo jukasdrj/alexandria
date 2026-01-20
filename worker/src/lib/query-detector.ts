@@ -12,6 +12,33 @@ import {
   AUTHOR_NAME_MAX_BOOK_WORDS,
 } from './constants.js';
 
+// Simple in-memory LRU cache for author validation
+// Shared across requests in the same isolate
+const AUTHOR_CACHE_SIZE = 1000;
+const authorValidationCache = new Map<string, boolean>();
+
+function getCachedAuthorValidation(name: string): boolean | undefined {
+	if (authorValidationCache.has(name)) {
+		// Refresh LRU order: delete and re-add
+		const value = authorValidationCache.get(name)!;
+		authorValidationCache.delete(name);
+		authorValidationCache.set(name, value);
+		return value;
+	}
+	return undefined;
+}
+
+function setCachedAuthorValidation(name: string, exists: boolean): void {
+	if (authorValidationCache.size >= AUTHOR_CACHE_SIZE) {
+		// Delete oldest (first) item
+		const firstKey = authorValidationCache.keys().next().value;
+		if (firstKey) {
+			authorValidationCache.delete(firstKey);
+		}
+	}
+	authorValidationCache.set(name, exists);
+}
+
 export type QueryType = 'isbn' | 'author' | 'title';
 
 export interface DetectionResult {
@@ -176,26 +203,46 @@ export async function detectQueryType(
 
 	// Stage 2: Author detection (with heuristic pre-filter)
 	if (matchesAuthorPattern(trimmed)) {
-		// Use raw trimmed string - let DB handle normalization
-		const normalized = trimmed;
+		// Check in-memory cache first to avoid DB lookup
+		const cached = getCachedAuthorValidation(trimmed);
 
-		// Quick DB lookup for exact match using DB normalization function
-		try {
-			const result = await sql`
-				SELECT 1 FROM enriched_authors
-				WHERE normalized_name = normalize_author_name(${normalized})
-				LIMIT 1
-			`;
+		if (cached === true) {
+			return {
+				type: 'author',
+				normalized: trimmed,
+				confidence: 'high',
+			};
+		}
 
-			if (result.length > 0) {
-				return {
-					type: 'author',
-					normalized: normalized,
-					confidence: 'high',
-				};
+		// If explicitly cached as false (known non-author), skip DB check
+		// Only proceed if not in cache (undefined)
+		if (cached === undefined) {
+			// Use raw trimmed string - let DB handle normalization
+			const normalized = trimmed;
+
+			// Quick DB lookup for exact match using DB normalization function
+			try {
+				const result = await sql`
+					SELECT 1 FROM enriched_authors
+					WHERE normalized_name = normalize_author_name(${normalized})
+					LIMIT 1
+				`;
+
+				if (result.length > 0) {
+					setCachedAuthorValidation(trimmed, true);
+					return {
+						type: 'author',
+						normalized: normalized,
+						confidence: 'high',
+					};
+				} else {
+					// Cache negative result (not an author)
+					setCachedAuthorValidation(trimmed, false);
+				}
+			} catch {
+				// DB error - silently fall through to title search
+				// Do not cache errors
 			}
-		} catch {
-			// DB error - silently fall through to title search
 		}
 	}
 
