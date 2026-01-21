@@ -166,8 +166,6 @@ ORDER BY source, title;
 - **`POST /api/covers/process`** - Process cover from provider URL
 - **`GET /covers/:isbn/:size`** - Serve cover (large/medium/small)
 - **`GET /covers/:isbn/status`** - Check cover availability
-- **`POST /covers/:isbn/process`** - Trigger cover processing
-- **`POST /covers/batch`** - Batch processing (max 10)
 - **`POST /api/covers/queue`** - Queue background processing (max 100)
 
 ### Enrichment
@@ -253,7 +251,7 @@ alexandria/
 │   ├── services/              # External API services
 │   ├── lib/                   # Utilities (logger, cache, ISBN)
 │   ├── wrangler.jsonc         # Cloudflare configuration
-│   └── package.json           # v2.8.0
+│   └── package.json           # v2.9.0
 ├── scripts/                   # Deployment & harvesting scripts
 │   ├── bulk-author-harvest.js
 │   ├── expand-author-bibliographies.js
@@ -431,6 +429,6 @@ MIT
 
 ---
 
-**Last Updated:** January 16, 2026
-**Version:** 2.8.0
+**Last Updated:** January 20, 2026
+**Version:** 2.9.0
 **Database:** 54.8M editions | 49.3M ISBNs | 40.1M works | 14.7M authors
