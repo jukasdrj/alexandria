@@ -1,7 +1,7 @@
 # Alexandria Search API Endpoints Documentation
 
-**Version**: v2.8.0
-**Last Updated**: 2026-01-14
+**Version**: v2.9.0
+**Last Updated**: 2026-01-21
 
 ## Overview
 
@@ -452,35 +452,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/covers/process' \
 
 ---
 
-### 6. ISBN-based Cover Processing
-
-**Endpoint**: `POST /covers/:isbn/process`
-
-**Description**: Trigger cover processing for an ISBN from multiple providers.
-
-**Path Parameters**:
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `isbn` | string | yes | ISBN-10 or ISBN-13 |
-
-**Response**:
-```json
-{
-  "success": true,
-  "isbn": "9780439064873",
-  "provider": "openlibrary",
-  "url": "https://alexandria.ooheynerds.com/covers/9780439064873/large"
-}
-```
-
-**Example**:
-```bash
-curl -X POST 'https://alexandria.ooheynerds.com/covers/9780439064873/process'
-```
-
----
-
-### 7. Cover Status Check
+### 6. Cover Status Check
 
 **Endpoint**: `GET /api/covers/status/{isbn}`
 
@@ -528,7 +500,7 @@ curl 'https://alexandria.ooheynerds.com/api/covers/status/9780439064873'
 
 ---
 
-### 8. Queue Cover Processing
+### 7. Queue Cover Processing
 
 **Endpoint**: `POST /api/covers/queue`
 
@@ -565,12 +537,7 @@ curl -X POST 'https://alexandria.ooheynerds.com/api/covers/queue' \
   -d '{"books": [{"isbn": "9780439064873"}]}'
 ```
 
-**Example**:
-```bash
-curl -X POST 'https://alexandria.ooheynerds.com/covers/batch' \
-  -H 'Content-Type: application/json' \
-  -d '{"isbns": ["9780439064873", "9781492666868"]}'
-```
+> **Note:** The legacy `POST /covers/batch` and `POST /covers/:isbn/process` endpoints were removed in v2.9.0. Please use `/api/covers/queue` for all batch processing.
 
 ---
 
@@ -1454,7 +1421,6 @@ Alexandria enforces the following limits on batch operations to ensure system st
 | Endpoint | Limit | Enforcement | Notes |
 |----------|-------|-------------|-------|
 | `POST /api/enrich/queue/batch` | 100 books max | Returns 400 if exceeded | Background queue processing |
-| `POST /covers/batch` | 10 ISBNs max | Zod schema validation | Synchronous cover processing |
 | `POST /api/covers/queue` | 100 books max | Returns 400 if exceeded | Background cover queue |
 | `POST /api/enrich/batch-direct` | 1000 ISBNs max | Returns 400 if exceeded | Direct ISBNdb Premium batch call |
 

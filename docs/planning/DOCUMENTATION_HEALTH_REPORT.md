@@ -1,52 +1,58 @@
 # Documentation Health Report
 
-**Date:** 2026-01-10
+**Date:** 2026-01-21
 **Auditor:** Jules (Systems Architect Agent)
+**Version:** 2.9.0
 
 ## 🚨 Critical Mismatches
 *(Documentation contradicts the current code/reality)*
 
-1.  **Legacy Cover Endpoints in README:**
-    *   **File:** `README.md`
-    *   **Issue:** Lists `GET /covers/:isbn/:size`.
-    *   **Reality:** Code uses `worker/src/routes/covers-legacy.ts` (`/covers/{isbn}/{size}`) AND `worker/src/routes/covers.ts` (`/api/covers/{work_key}/{size}`). The `README.md` does not mention the new `/api/covers/{work_key}/{size}` endpoint, which appears to be the modern standard.
+1.  **Deprecated Cover Endpoints Listed in API Docs:**
+    *   **File:** `docs/api/API-SEARCH-ENDPOINTS.md`
+    *   **Issue:** Lists `POST /covers/:isbn/process` and `POST /covers/batch` as active endpoints.
+    *   **Reality:** These were permanently removed in version 2.9.0 (Code ref: `worker/src/routes/covers.ts` does not contain them).
+    *   **Action:** Removed these endpoints from documentation and marked them as deprecated/removed.
 
-2.  **Backfill Endpoints in README:**
-    *   **File:** `README.md`
-    *   **Issue:** Lists `POST /api/harvest/backfill`.
-    *   **Reality:** Code confirms this, but also exposes `/api/harvest/backfill/status` (Global) and `/api/harvest/backfill/status/:jobId` (Job specific) and `/api/harvest/quota`. These are useful but undocumented in the main README.
+2.  **Version Mismatch:**
+    *   **File:** `docs/api/API-SEARCH-ENDPOINTS.md`
+    *   **Issue:** States `Version: v2.8.0`.
+    *   **Reality:** `worker/package.json` is `2.9.0`.
+    *   **Action:** Auto-updated to `v2.9.0`.
 
-3.  **Missing "New" Endpoints in README:**
-    *   **File:** `README.md`
-    *   **Issue:** Several endpoints exist in code but are missing from the README:
-        *   `/api/enrich/queue/batch` (Batch enrichment queue)
-        *   `/api/harvest/covers` (Cover harvesting)
-        *   `/api/migrate/003` (Migration - likely intentional omission)
-        *   `/api/internal/enhance-synthetic-works` (Internal Cron - Documented in `CLAUDE.md` but not `README.md`)
-
-## 🛠️ Auto-Updates Recommended
-*(Files that should be corrected for typos or pathing)*
+## 🛠️ Auto-Updates Made
+*(Files corrected automatically for typos or pathing)*
 
 1.  **Broken Link in Index:**
     *   **File:** `docs/INDEX.md`
-    *   **Issue:** Link `[Development Guides](./guides/)` points to a non-existent directory `docs/guides/`.
-    *   **Action:** Remove or update the link.
+    *   **Issue:** Link `[Development Guides](./guides/)` pointed to a non-existent directory.
+    *   **Action:** Removed the broken link.
+
+2.  **API Documentation Refreshed:**
+    *   **File:** `docs/api/API-SEARCH-ENDPOINTS.md`
+    *   **Action:**
+        *   Updated version to `v2.9.0`.
+        *   Removed legacy/deleted endpoints (`POST /covers/:isbn/process`, `POST /covers/batch`).
+        *   Verified `/api/covers/queue` is correctly documented as the batch replacement.
+        *   Verified `/api/search/combined` matches code implementation.
 
 ## ⚠️ Stale Warnings
 *(Files that look outdated but require human context to fix)*
 
-*   **None.** The documentation is remarkably fresh, with `README.md`, `CURRENT-STATUS.md`, and `TODO.md` all updated within the last 24-48 hours.
+*   **Undocumented Internal Endpoints:**
+    *   `POST /api/test/ai-comparison` (`worker/src/routes/ai-comparison.ts`): Used for testing AI providers. Currently undocumented.
+    *   `POST /api/harvest/backfill` (`worker/src/routes/backfill-async.ts`): Documented in `README.md` but not fully detailed in API docs.
+    *   `/api/authors/enrich-bibliography` and other author endpoints are present in `worker/src/routes/authors.ts` but might need more detailed coverage in `docs/api/API-IDENTIFIER-RESOLUTION.md` or a new Author API doc.
 
 ## ✅ Verified Accurate
 *(Key files confirmed up-to-date)*
 
-*   **`worker/wrangler.jsonc` vs `README.md`:** Environment variables, queues (`enrichment`, `cover`, `backfill`, `author`), and services match perfectly.
-*   **`CLAUDE.md`**: Accurately reflects the "Alex" persona, architecture, and recent "Phase 1-5" completion status.
-*   **`docs/CURRENT-STATUS.md`**: Perfectly aligned with recent code changes (e.g., Archive.org Phase 2, Author JIT Enrichment).
-*   **Version:** `README.md` and `package.json` both correctly state version `2.4.0`.
+*   **Infrastructure:** `docs/infrastructure/INFRASTRUCTURE.md` aligns with `worker/wrangler.jsonc` (Queues, Bindings, Services).
+*   **Search API:** `GET /api/search` and `GET /api/search/combined` implementations in `worker/src/routes/` match the documentation in `docs/api/API-SEARCH-ENDPOINTS.md` (after my updates).
+*   **Stats & Health:** `/api/stats` and `/health` endpoints are correctly implemented and documented.
+*   **Version:** `worker/package.json` correctly reflects `2.9.0`.
 
 ---
 
-## Next Steps for User
-1.  **Approve Fix:** Should I remove the broken `[Development Guides](./guides/)` link from `docs/INDEX.md`?
-2.  **Clarify Covers API:** Do you want to document the new `/api/covers/{work_key}/{size}` endpoint in the `README.md`, or is it internal/experimental?
+## Auditor Notes
+
+The project has successfully migrated away from legacy synchronous batch processing to asynchronous queue-based processing (`/api/covers/queue`, `/api/enrich/queue/batch`). The documentation now reflects this shift.
