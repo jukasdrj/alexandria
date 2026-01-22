@@ -5,3 +5,7 @@
 ## 2026-01-14 - Limit+1 Pagination Strategy
 **Learning:** For fuzzy search (ILIKE, pg_trgm) and complex joins, `COUNT(*)` queries to get the total number of results are extremely expensive as they scan the entire result set.
 **Action:** Use `LIMIT limit + 1` to fetch one extra record. If the extra record exists, set `hasMore = true` and estimate the total (e.g., `offset + limit + 1`). This avoids the separate count query entirely. Provide `totalEstimated: true` in the API response to inform clients.
+
+## 2026-01-22 - Optimize R2 Existence Checks
+**Learning:** Checking for file existence with multiple sequential `head` requests (e.g., for different formats/sizes) adds significant latency. R2 `list` with a prefix returns all matching keys in one request.
+**Action:** Replace multiple `head()` calls with a single `list({ prefix })` call when checking for related files (like `large.webp`, `medium.webp`, `original.jpg`), effectively reducing N+1 network calls to 1.
