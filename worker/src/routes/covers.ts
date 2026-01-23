@@ -66,7 +66,7 @@ const coverStatusRoute = createRoute({
   },
 });
 
-app.openapi(coverStatusRoute, async (c) => {
+export async function handleCoverStatus(c: Context<AppBindings>): Promise<Response> {
   const { isbn } = c.req.valid('param');
   const logger = c.get('logger');
   const normalizedISBN = normalizeISBN(isbn);
@@ -78,17 +78,30 @@ app.openapi(coverStatusRoute, async (c) => {
   logger.debug('Cover status check', { isbn: normalizedISBN });
 
   try {
-    // Check for jSquash WebP files (preferred format)
-    const webpKey = `isbn/${normalizedISBN}/large.webp`;
-    const webpHead = await c.env.COVER_IMAGES.head(webpKey);
+    const prefix = `isbn/${normalizedISBN}/`;
 
-    if (webpHead) {
-      // Get metadata from WebP files
+    // Optimized: List all files for this ISBN in one request (Class A op, single RTT)
+    // instead of sequential HEAD requests (Class B ops, multiple RTTs)
+    const list = await c.env.COVER_IMAGES.list({
+      prefix,
+      include: ['customMetadata'],
+    });
+
+    // Helper to find object by suffix
+    const findObject = (suffix: string) => list.objects.find((o) => o.key === `${prefix}${suffix}`);
+
+    // Check for jSquash WebP files (preferred format)
+    const webpLarge = findObject('large.webp');
+
+    if (webpLarge) {
+      // Get metadata from WebP files found in the list
       const sizes: Record<string, number> = {};
-      for (const size of ['large', 'medium', 'small']) {
-        const sizeHead = await c.env.COVER_IMAGES.head(`isbn/${normalizedISBN}/${size}.webp`);
-        if (sizeHead) {
-          sizes[size] = sizeHead.size;
+
+      const sizeMap = ['large', 'medium', 'small'];
+      for (const size of sizeMap) {
+        const obj = findObject(`${size}.webp`);
+        if (obj) {
+          sizes[size] = obj.size;
         }
       }
 
@@ -99,7 +112,7 @@ app.openapi(coverStatusRoute, async (c) => {
         isbn: normalizedISBN,
         format: 'webp' as const,
         sizes,
-        uploaded: webpHead.uploaded.toISOString(),
+        uploaded: webpLarge.uploaded.toISOString(),
         urls: {
           large: `/api/covers/${normalizedISBN}/large`,
           medium: `/api/covers/${normalizedISBN}/medium`,
@@ -111,17 +124,16 @@ app.openapi(coverStatusRoute, async (c) => {
     // Fallback: Check for legacy ISBN-based storage
     const extensions = ['jpg', 'png', 'webp'];
     for (const ext of extensions) {
-      const key = `isbn/${normalizedISBN}/original.${ext}`;
-      const head = await c.env.COVER_IMAGES.head(key);
-      if (head) {
+      const obj = findObject(`original.${ext}`);
+      if (obj) {
         logger.info('Cover status - legacy format found', { isbn: normalizedISBN });
 
         return c.json({
           exists: true,
           isbn: normalizedISBN,
           format: 'legacy' as const,
-          sizes: { large: head.size },
-          uploaded: head.uploaded.toISOString(),
+          sizes: { large: obj.size },
+          uploaded: obj.uploaded.toISOString(),
           urls: {
             large: `/api/covers/${normalizedISBN}/large`,
             medium: `/api/covers/${normalizedISBN}/medium`,
@@ -144,7 +156,10 @@ app.openapi(coverStatusRoute, async (c) => {
     });
     return c.json({ error: 'Failed to check cover status' }, 500);
   }
-});
+}
+
+// @ts-expect-error - Handler return type complexity exceeds OpenAPI inference
+app.openapi(coverStatusRoute, handleCoverStatus);
 
 // =================================================================================
 // POST /api/covers/process - Process cover from provider URL
