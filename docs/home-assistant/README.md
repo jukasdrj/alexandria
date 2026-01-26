@@ -206,10 +206,30 @@ Before we start building integrations, I'd love to know:
 
 ```
 /Users/juju/dev_repos/alex/docs/home-assistant/
-├── INVENTORY.md        # Complete device list with current states
-├── ARCHITECTURE.md     # System design, API docs, integration patterns
-└── README.md          # This file - summary and next steps
+├── INVENTORY.md                    # Complete device list with current states
+├── ARCHITECTURE.md                 # System design, API docs, integration patterns
+├── FAMILY-DASHBOARD-CHECKPOINT.md  # Dashboard implementation status
+└── README.md                       # This file - summary and next steps
 ```
+
+---
+
+## Family Dashboard (Deployed)
+
+**URL:** http://192.168.1.240:3001/
+
+A custom React dashboard for the family to control lights and garage doors.
+
+**Features:**
+- 4 kid room buttons with per-kid colors (Oliver=blue, Owen=green, Elliot=red, Olivia=purple)
+- Garage door controls with open/closed status
+- Quick actions (Kids Goodnight, All Lights Off)
+- PWA support for Add to Home Screen
+- Dark theme, touch-friendly
+
+**Tech Stack:** React 19, @hakit/core v6, Tailwind CSS, Vite, Docker on Tower
+
+**Source:** Tower `/mnt/user/domains/family-dashboard/`
 
 Updated:
 ```
