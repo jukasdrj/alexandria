@@ -10,6 +10,8 @@
 **Dashboard:** https://alexandria.ooheynerds.com/
 **OpenAPI Spec:** https://alexandria.ooheynerds.com/openapi.json
 
+**Related:** [OOOE Homelab](https://github.com/jukasdrj/oooe-homelab) - Infrastructure docs (Tower/Unraid, Home Assistant, Docker services)
+
 ---
 
 ## 🎯 Current Status
@@ -137,7 +139,9 @@ ORDER BY source, title;
 
 **Note**: Metadata is stored as stringified JSON inside JSONB. Use `(metadata#>>'{}')::jsonb` to parse.
 
-### Infrastructure Checks
+### Infrastructure
+
+Alexandria runs on Tower (Unraid server) with PostgreSQL + Cloudflare Tunnel. For homelab infrastructure documentation (Docker services, Home Assistant, VPN setup, etc.), see the [OOOE Homelab](https://github.com/jukasdrj/oooe-homelab) repository.
 
 ```bash
 # Verify tunnel (expect 4 connections)
