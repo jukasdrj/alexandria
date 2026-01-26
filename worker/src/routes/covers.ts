@@ -78,23 +78,17 @@ app.openapi(coverStatusRoute, async (c) => {
   logger.debug('Cover status check', { isbn: normalizedISBN });
 
   try {
-    // Optimization: List all files for this ISBN in one request
-    // This replaces up to 7 sequential HEAD requests with a single LIST request
-    const prefix = `isbn/${normalizedISBN}/`;
-    const list = await c.env.COVER_IMAGES.list({ prefix });
+    // Check for jSquash WebP files (preferred format)
+    const webpKey = `isbn/${normalizedISBN}/large.webp`;
+    const webpHead = await c.env.COVER_IMAGES.head(webpKey);
 
-    // Check for WebP files
-    const webpLarge = list.objects.find((o) => o.key === `${prefix}large.webp`);
-
-    if (webpLarge) {
+    if (webpHead) {
       // Get metadata from WebP files
       const sizes: Record<string, number> = {};
-
-      // Populate sizes from list results
       for (const size of ['large', 'medium', 'small']) {
-        const found = list.objects.find((o) => o.key === `${prefix}${size}.webp`);
-        if (found) {
-          sizes[size] = found.size;
+        const sizeHead = await c.env.COVER_IMAGES.head(`isbn/${normalizedISBN}/${size}.webp`);
+        if (sizeHead) {
+          sizes[size] = sizeHead.size;
         }
       }
 
@@ -105,7 +99,7 @@ app.openapi(coverStatusRoute, async (c) => {
         isbn: normalizedISBN,
         format: 'webp' as const,
         sizes,
-        uploaded: webpLarge.uploaded.toISOString(),
+        uploaded: webpHead.uploaded.toISOString(),
         urls: {
           large: `/api/covers/${normalizedISBN}/large`,
           medium: `/api/covers/${normalizedISBN}/medium`,
@@ -117,18 +111,17 @@ app.openapi(coverStatusRoute, async (c) => {
     // Fallback: Check for legacy ISBN-based storage
     const extensions = ['jpg', 'png', 'webp'];
     for (const ext of extensions) {
-      const legacyKey = `${prefix}original.${ext}`;
-      const legacyFile = list.objects.find((o) => o.key === legacyKey);
-
-      if (legacyFile) {
+      const key = `isbn/${normalizedISBN}/original.${ext}`;
+      const head = await c.env.COVER_IMAGES.head(key);
+      if (head) {
         logger.info('Cover status - legacy format found', { isbn: normalizedISBN });
 
         return c.json({
           exists: true,
           isbn: normalizedISBN,
           format: 'legacy' as const,
-          sizes: { large: legacyFile.size },
-          uploaded: legacyFile.uploaded.toISOString(),
+          sizes: { large: head.size },
+          uploaded: head.uploaded.toISOString(),
           urls: {
             large: `/api/covers/${normalizedISBN}/large`,
             medium: `/api/covers/${normalizedISBN}/medium`,
